@@ -1,0 +1,49 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool", "src\ScreenshotTool\ScreenshotTool.csproj", "{A7AA4E06-C8E1-4D29-A4D6-F2B2AA1137F0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.Contracts", "src\ScreenshotTool.Contracts\ScreenshotTool.Contracts.csproj", "{730FA376-5872-42C8-A15B-A964354A9419}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.LogicTests", "tests\ScreenshotTool.LogicTests\ScreenshotTool.LogicTests.csproj", "{6E88B8E1-3C90-47C9-B191-4111D13DF51F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.TestModule", "tests\ScreenshotTool.TestModule\ScreenshotTool.TestModule.csproj", "{BFA3360A-36DD-4CA5-A2E5-0D2E5A8B3F62}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.UiPreview", "tests\ScreenshotTool.UiPreview\ScreenshotTool.UiPreview.csproj", "{D9A9EDC7-0A9A-46C8-8670-B90790D2CD67}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.LongCapture", "src\ScreenshotTool.LongCapture\ScreenshotTool.LongCapture.csproj", "{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A7AA4E06-C8E1-4D29-A4D6-F2B2AA1137F0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7AA4E06-C8E1-4D29-A4D6-F2B2AA1137F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7AA4E06-C8E1-4D29-A4D6-F2B2AA1137F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7AA4E06-C8E1-4D29-A4D6-F2B2AA1137F0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{730FA376-5872-42C8-A15B-A964354A9419}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{730FA376-5872-42C8-A15B-A964354A9419}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{730FA376-5872-42C8-A15B-A964354A9419}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{730FA376-5872-42C8-A15B-A964354A9419}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6E88B8E1-3C90-47C9-B191-4111D13DF51F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E88B8E1-3C90-47C9-B191-4111D13DF51F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E88B8E1-3C90-47C9-B191-4111D13DF51F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E88B8E1-3C90-47C9-B191-4111D13DF51F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BFA3360A-36DD-4CA5-A2E5-0D2E5A8B3F62}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BFA3360A-36DD-4CA5-A2E5-0D2E5A8B3F62}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BFA3360A-36DD-4CA5-A2E5-0D2E5A8B3F62}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BFA3360A-36DD-4CA5-A2E5-0D2E5A8B3F62}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D9A9EDC7-0A9A-46C8-8670-B90790D2CD67}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D9A9EDC7-0A9A-46C8-8670-B90790D2CD67}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D9A9EDC7-0A9A-46C8-8670-B90790D2CD67}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D9A9EDC7-0A9A-46C8-8670-B90790D2CD67}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

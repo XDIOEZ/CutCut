@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ScreenshotTool</AssemblyName>
+    <RootNamespace>ScreenshotTool</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenshotTool.Contracts\ScreenshotTool.Contracts.csproj" />
+    <ProjectReference Include="..\ScreenshotTool.LongCapture\ScreenshotTool.LongCapture.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="FirstPartyModule" />
+    <Content Include="..\..\modules\README.md"
+             Link="Modules\README.md"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="CopyFirstPartyModulesToOutput"
+          AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'@(FirstPartyModule)' != ''">
+    <MakeDir Directories="$(OutDir)Modules" />
+    <Copy SourceFiles="@(FirstPartyModule)"
+          DestinationFolder="$(OutDir)Modules"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <FileWrites Include="@(FirstPartyModule->'$(OutDir)Modules\%(Filename)%(Extension)')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="IncludeFirstPartyModulesInPublish"
+          BeforeTargets="ComputeFilesToPublish"
+          DependsOnTargets="ResolveProjectReferences"
+          Condition="'@(FirstPartyModule)' != ''">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(FirstPartyModule)">
+        <RelativePath>Modules\%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+</Project>

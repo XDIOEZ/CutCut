@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ScreenshotTool\ScreenshotTool.csproj" />
+    <ProjectReference Include="..\ScreenshotTool.TestModule\ScreenshotTool.TestModule.csproj" />
+    <ProjectReference Include="..\..\src\ScreenshotTool.LongCapture\ScreenshotTool.LongCapture.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,35 @@
+# 轻截工程维护规则
+
+## 架构边界
+
+- 新功能优先作为独立模块或可组合服务实现，不把新状态和业务逻辑直接堆进 `MainForm`、`CaptureOverlayForm` 或 `CompositionRoot`。
+- `ScreenshotTool.Contracts` 是模块与宿主之间唯一稳定边界。外部模块不得引用 `ScreenshotTool` 主程序程序集，也不得访问 `Presentation`、`Infrastructure` 或内部标注类型。
+- 依赖方向固定为：`Contracts <- Module`，以及 `Contracts/Abstractions <- Application <- Presentation/Infrastructure`。禁止反向依赖和通过静态全局变量绕过组合根。
+- `CompositionRoot` 只负责创建、连接和释放对象，不承载业务规则。
+
+## 模块设计
+
+- 独立截图能力实现为 `IScreenshotToolModule`，每次截图所需状态放在该模块创建的 `ICaptureFeature` 实例中。模块对象只保存跨会话且线程安全的轻量状态。
+- 模块 ID 和功能 ID 必须稳定且全局唯一；更新已有模块时保持 ID 不变。
+- 功能通过 `ICaptureFeatureHost` 使用宿主能力。需要新的宿主能力时，先设计最小且通用的契约，不向模块泄漏具体窗体、服务实现或可变集合。
+- 输入处理返回 `true` 代表已消费事件。模块不得无条件拦截系统保留快捷键，也不得在绘制回调中执行阻塞 IO。
+- 预览与导出使用同一套虚拟桌面客户区坐标。仅交互提示应只在 `Preview` 阶段绘制，最终图片内容必须在 `Export` 阶段绘制。
+
+## 热加载生命周期
+
+- 模块 DLL 及其私有依赖放在程序旁的 `Modules` 目录。宿主使用可回收 `AssemblyLoadContext` 和流式加载，模块文件不能被长期锁定。
+- DLL 被替换或删除后，从模块目录立即移除；已有截图会话通过租约继续运行，等会话释放全部功能实例后再调用模块 `Dispose` 并卸载上下文。
+- 模块必须释放图片、字体、句柄、计时器、线程、事件订阅和其他非托管资源。后台线程或静态事件引用会阻止程序集真正卸载。
+- 模块异常必须隔离在当前功能或当前模块，不得导致截图主流程崩溃。
+
+## 验证要求
+
+- 新模块至少验证：发现与加载、功能实例创建、核心输入/渲染行为、删除后的目录卸载，以及活动会话的延迟释放。
+- 修改截图输出时必须验证最终导出位图，而不只验证屏幕预览。
+- 交付前运行 `dotnet format ScreenshotTool.sln --verify-no-changes`、逻辑测试和 Release 构建；不要通过关闭用户正在运行的程序来解除构建锁，应改用独立输出目录。
+- 日常修改无需打包发布；仅在重大功能、架构、依赖或发布相关修改时执行打包发布。发布默认使用 `LightweightWinX64` 配置；需要免安装运行时才额外提供 `PortableCompressedWinX64`。不得为压缩体积启用未经完整回归验证的 WinForms 程序集裁剪。
+- 需要发布时，优先通过 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Publish-Release.ps1` 运行发布脚本，保持轻量版低于 5 MiB、便携压缩版低于 90 MiB；超限必须先解释和处理新增依赖。
+
+## 其他要求
+
+ - 可以的话 减少子智能体的使用

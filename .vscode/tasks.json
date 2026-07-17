@@ -1,0 +1,311 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Validate long capture editor",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				".\\tests\\ScreenshotTool.LogicTests\\ScreenshotTool.LogicTests.csproj",
+				"--configuration",
+				"Release",
+				"-p:BaseOutputPath=.\\artifacts\\long-capture-editor-tests\\"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "test"
+		},
+		{
+			"label": "Build long capture editor",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				".\\ScreenshotTool.sln",
+				"--configuration",
+				"Release",
+				"-p:BaseOutputPath=.\\artifacts\\long-capture-editor-release\\"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Run long capture editor tests",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				".\\tests\\ScreenshotTool.LogicTests\\artifacts\\long-capture-editor-release\\Release\\net8.0-windows\\ScreenshotTool.LogicTests.dll"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Check solution format",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"format",
+				".\\ScreenshotTool.sln",
+				"--verify-no-changes"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish release packages",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish preview interaction fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\preview-interaction-fix-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish shared viewport release",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\shared-viewport-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish embedded long editor",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\embedded-long-editor-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish embedded text alignment fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\embedded-text-alignment-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish movable embedded editor",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\movable-embedded-editor-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish badge drag fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\badge-drag-fix-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish repaint restart fix",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\repaint-restart-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish text selection clipboard release",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\text-selection-clipboard-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish numeric tool shortcuts release",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\numeric-tool-shortcuts-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish text boundary wrap release",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\text-boundary-wrap-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish full text visibility release",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\full-text-visibility-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Publish exact text measurement release",
+			"type": "shell",
+			"command": "powershell.exe",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				".\\scripts\\Publish-Release.ps1",
+				"-OutputRoot",
+				".\\artifacts\\exact-text-measurement-release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		}
+	]
+}
