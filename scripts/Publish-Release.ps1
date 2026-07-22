@@ -2,6 +2,8 @@
 param(
     [string]$OutputRoot = "artifacts",
     [switch]$SkipLongCaptureAddon,
+    [switch]$SkipOcrAddon,
+    [switch]$SkipQrCodeAddon,
     [switch]$SkipScreenRecordingAddon
 )
 
@@ -22,6 +24,9 @@ $releaseVersion = $versionNode.Node.InnerText.Trim()
 $lightOutput = Join-Path $outputRootPath "lightweight-win-x64"
 $portableOutput = Join-Path $outputRootPath "portable-compressed-win-x64"
 $moduleRelativePath = "Modules\LongCapture\ScreenshotTool.LongCapture.dll"
+$ocrModuleRelativePath = "Modules\Ocr\ScreenshotTool.Ocr.dll"
+$qrCodeModuleRelativePath = "Modules\QrCode\ScreenshotTool.QrCode.dll"
+$qrCodeDecoderRelativePath = "Modules\QrCode\zxing.dll"
 
 function Get-FileSha256WithRetry {
     param(
@@ -68,11 +73,23 @@ $packages = @(
 $results = foreach ($package in $packages) {
     $entryPoint = Join-Path $package.Directory "ScreenshotTool.exe"
     $module = Join-Path $package.Directory $moduleRelativePath
+    $ocrModule = Join-Path $package.Directory $ocrModuleRelativePath
+    $qrCodeModule = Join-Path $package.Directory $qrCodeModuleRelativePath
+    $qrCodeDecoder = Join-Path $package.Directory $qrCodeDecoderRelativePath
     if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
         throw "$($package.Name) entry point was not published: $entryPoint"
     }
     if (-not (Test-Path -LiteralPath $module -PathType Leaf)) {
         throw "$($package.Name) long capture module was not published: $module"
+    }
+    if (-not (Test-Path -LiteralPath $ocrModule -PathType Leaf)) {
+        throw "$($package.Name) OCR module was not published: $ocrModule"
+    }
+    if (-not (Test-Path -LiteralPath $qrCodeModule -PathType Leaf)) {
+        throw "$($package.Name) QR code module was not published: $qrCodeModule"
+    }
+    if (-not (Test-Path -LiteralPath $qrCodeDecoder -PathType Leaf)) {
+        throw "$($package.Name) QR code decoder was not published: $qrCodeDecoder"
     }
 
     $files = @(Get-ChildItem -LiteralPath $package.Directory -File -Recurse)
@@ -91,6 +108,8 @@ $results = foreach ($package in $packages) {
         Path = (Get-Item -LiteralPath $package.Directory).FullName
         EntryPointSha256 = Get-FileSha256WithRetry -Path $entryPoint
         ModuleSha256 = Get-FileSha256WithRetry -Path $module
+        OcrModuleSha256 = Get-FileSha256WithRetry -Path $ocrModule
+        QrCodeModuleSha256 = Get-FileSha256WithRetry -Path $qrCodeModule
     }
 }
 
@@ -100,6 +119,20 @@ if (-not $SkipLongCaptureAddon) {
     & (Join-Path $PSScriptRoot "Publish-LongCaptureModule.ps1") -OutputRoot $outputRootPath
     if ($LASTEXITCODE -ne 0) {
         throw "Long capture add-on publish failed with exit code $LASTEXITCODE."
+    }
+}
+
+if (-not $SkipOcrAddon) {
+    & (Join-Path $PSScriptRoot "Publish-OcrModule.ps1") -OutputRoot $outputRootPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "OCR add-on publish failed with exit code $LASTEXITCODE."
+    }
+}
+
+if (-not $SkipQrCodeAddon) {
+    & (Join-Path $PSScriptRoot "Publish-QrCodeModule.ps1") -OutputRoot $outputRootPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "QR code add-on publish failed with exit code $LASTEXITCODE."
     }
 }
 
@@ -165,12 +198,18 @@ if (-not $SkipScreenRecordingAddon) {
 
         $entryPoint = Join-Path $packageDirectory "ScreenshotTool.exe"
         $longCaptureModule = Join-Path $packageDirectory $moduleRelativePath
+        $ocrModule = Join-Path $packageDirectory $ocrModuleRelativePath
+        $qrCodeModule = Join-Path $packageDirectory $qrCodeModuleRelativePath
+        $qrCodeDecoder = Join-Path $packageDirectory $qrCodeDecoderRelativePath
         $recordingModule = Join-Path $packageDirectory $recordingModuleRelativePath
         $recorder = Join-Path $packageDirectory $recorderRelativePath
         $recorderLibrary = Join-Path $packageDirectory $recorderLibraryRelativePath
         foreach ($requiredFile in @(
                 $entryPoint,
                 $longCaptureModule,
+                $ocrModule,
+                $qrCodeModule,
+                $qrCodeDecoder,
                 $recordingModule,
                 $recorder,
                 $recorderLibrary)) {
@@ -199,6 +238,9 @@ if (-not $SkipScreenRecordingAddon) {
             $requiredEntries = @(
                 "ScreenshotTool.exe",
                 $moduleRelativePath.Replace("\", "/"),
+                $ocrModuleRelativePath.Replace("\", "/"),
+                $qrCodeModuleRelativePath.Replace("\", "/"),
+                $qrCodeDecoderRelativePath.Replace("\", "/"),
                 $recordingModuleRelativePath.Replace("\", "/"),
                 $recorderRelativePath.Replace("\", "/"),
                 $recorderLibraryRelativePath.Replace("\", "/"))
@@ -218,6 +260,8 @@ if (-not $SkipScreenRecordingAddon) {
             ZipPath = $zipPath
             EntryPointSha256 = Get-FileSha256WithRetry -Path $entryPoint
             RecordingModuleSha256 = Get-FileSha256WithRetry -Path $recordingModule
+            OcrModuleSha256 = Get-FileSha256WithRetry -Path $ocrModule
+            QrCodeModuleSha256 = Get-FileSha256WithRetry -Path $qrCodeModule
         }
     }
 
@@ -251,7 +295,15 @@ if (-not $SkipScreenRecordingAddon) {
 
     $readyEntryPoint = Join-Path $readyToRunDirectory "ScreenshotTool.exe"
     $readyRecordingModule = Join-Path $readyToRunDirectory $recordingModuleRelativePath
-    foreach ($requiredFile in @($readyEntryPoint, $readyRecordingModule)) {
+    $readyOcrModule = Join-Path $readyToRunDirectory $ocrModuleRelativePath
+    $readyQrCodeModule = Join-Path $readyToRunDirectory $qrCodeModuleRelativePath
+    $readyQrCodeDecoder = Join-Path $readyToRunDirectory $qrCodeDecoderRelativePath
+    foreach ($requiredFile in @(
+            $readyEntryPoint,
+            $readyRecordingModule,
+            $readyOcrModule,
+            $readyQrCodeModule,
+            $readyQrCodeDecoder)) {
         if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
             throw "Ready-to-run package is missing a required file: $requiredFile"
         }

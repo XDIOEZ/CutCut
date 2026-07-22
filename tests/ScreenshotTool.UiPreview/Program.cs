@@ -47,6 +47,16 @@ internal static class Program
             RunSavedArtifactNotificationSmoke(notificationOutputPath);
             return 0;
         }
+        if (args is ["--ocr-text-result-smoke", var ocrResultOutputPath])
+        {
+            RunOcrTextResultSmoke(ocrResultOutputPath);
+            return 0;
+        }
+        if (args is ["--qr-code-result-smoke", var qrCodeResultOutputPath])
+        {
+            RunQrCodeResultSmoke(qrCodeResultOutputPath);
+            return 0;
+        }
         if (args is ["--select-all-displays-smoke"])
         {
             RunSelectAllDisplaysSmoke();
@@ -798,6 +808,67 @@ internal static class Program
             throw new InvalidOperationException(
                 $"点击保存成功提示没有传递对应视频路径。Expected={expectedPath}, Actual={openedPath}");
         }
+
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+        captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    private static void RunOcrTextResultSmoke(string outputPath)
+    {
+        RunTextResultSmoke(
+            outputPath,
+            "OCR 识别结果",
+            "轻截文字识别\r\n\r\nThe quick brown fox jumps over the lazy dog.\r\n2026-07-22",
+            "OCR");
+    }
+
+    private static void RunQrCodeResultSmoke(string outputPath)
+    {
+        RunTextResultSmoke(
+            outputPath,
+            "二维码扫描结果",
+            "https://example.com/cutcut?source=qr\r\n\r\nWIFI:T:WPA;S:LightShot;P:12345678;;",
+            "二维码");
+    }
+
+    private static void RunTextResultSmoke(
+        string outputPath,
+        string title,
+        string text,
+        string featureName)
+    {
+        var screen = Screen.PrimaryScreen ?? throw new InvalidOperationException("找不到主显示器。");
+        var anchor = new Rectangle(
+            screen.WorkingArea.Left + 40,
+            screen.WorkingArea.Top + 80,
+            Math.Min(720, screen.WorkingArea.Width / 2),
+            360);
+        using var resultWindow = new CaptureTextResultForm(
+            title,
+            text,
+            anchor,
+            new PreviewClipboardService());
+        resultWindow.Show();
+        System.Windows.Forms.Application.DoEvents();
+        Thread.Sleep(120);
+        System.Windows.Forms.Application.DoEvents();
+
+        if (!string.Equals(
+                resultWindow.ResultText,
+                text,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"{featureName} 结果窗口没有完整保留多行内容。");
+        }
+
+        using var captured = new Bitmap(resultWindow.Width, resultWindow.Height);
+        using (var graphics = Graphics.FromImage(captured))
+        {
+            graphics.CopyFromScreen(resultWindow.Location, Point.Empty, resultWindow.Size);
+        }
+        resultWindow.Close();
+        System.Windows.Forms.Application.DoEvents();
 
         var fullOutputPath = Path.GetFullPath(outputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);

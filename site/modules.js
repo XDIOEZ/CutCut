@@ -10,6 +10,18 @@ const modules = [
     button: document.querySelector("#long-capture-download"),
   },
   {
+    pattern: /ocr-addon-win-x64\.zip$/i,
+    status: document.querySelector("#ocr-status"),
+    meta: document.querySelector("#ocr-meta"),
+    button: document.querySelector("#ocr-download"),
+  },
+  {
+    pattern: /qr-code-addon-win-x64\.zip$/i,
+    status: document.querySelector("#qr-code-status"),
+    meta: document.querySelector("#qr-code-meta"),
+    button: document.querySelector("#qr-code-download"),
+  },
+  {
     pattern: /screen-recording-addon-win-x64\.zip$/i,
     status: document.querySelector("#screen-recording-status"),
     meta: document.querySelector("#screen-recording-meta"),

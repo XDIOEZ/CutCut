@@ -8,6 +8,8 @@
 `modules.html` 是独立模块分页，会自动识别：
 
 - `long-capture-addon-win-x64.zip`
+- `ocr-addon-win-x64.zip`
+- `qr-code-addon-win-x64.zip`
 - `screen-recording-addon-win-x64.zip`
 
 当前 Release 缺少某个独立模块包时，对应卡片会回退到 Releases 页面，并继续推荐

@@ -24,15 +24,16 @@ CaptureOverlayForm             提供受控宿主能力
 - `src/ScreenshotTool/Infrastructure/Modules`：DLL 发现、可卸载加载上下文、热更新和功能租约。
 - `src/ScreenshotTool/Presentation/CaptureFeatureSession.cs`：为一次截图创建模块功能快照，隔离单个模块异常。
 - `src/ScreenshotTool.LongCapture`：随程序发布的第一方长截图模块，仅引用 `ScreenshotTool.Contracts`。
+- `src/ScreenshotTool.Ocr`：可独立装卸的离线 OCR 模块，仅引用 `ScreenshotTool.Contracts`，使用 Windows 系统 OCR。
 - `src/ScreenshotTool.ScreenRecording`：可选录屏模块，仅引用 `ScreenshotTool.Contracts`，提供选区入口、录制控制和编码器编排；批注由宿主核心会话提供。
 - `src/ScreenshotTool.ScreenRecording.Recorder`：录屏模块私有的 x64 编码器进程，承载 Media Foundation 视频与音频依赖。
 - `Modules`：运行时扩展目录；每个一级子文件夹是一个独立模块包，复制、替换或删除整个文件夹即可触发刷新。
 
 ## 第一方模块的构建与发布
 
-宿主项目对第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将 DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。
+宿主项目对第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将长截图和 OCR DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。
 
-`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含 `Modules/LongCapture/ScreenshotTool.LongCapture.dll`，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`，脚本会在压缩前确认其同时包含主程序、长截图模块、录屏模块和编码器。脚本还会生成 `long-capture-addon-win-x64.zip`，供发布页按需下载。
+`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含长截图与 OCR 模块，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`，脚本会在压缩前确认其同时包含主程序、长截图模块、OCR 模块、录屏模块和编码器。脚本还会生成 `long-capture-addon-win-x64.zip` 与 `ocr-addon-win-x64.zip`，供发布页按需下载。
 
 录屏仍不进入宿主的编译依赖树。标准发布脚本会额外调用 `scripts/Publish-ScreenRecordingModule.ps1`，保留可单独下载的 `screen-recording-addon-win-x64.zip`，然后将其 `Modules` 内容复制到两种完整包中。这只是发布阶段的预安装；运行时仍通过稳定契约加载可替换、可删除的录屏模块。
 
@@ -119,6 +120,37 @@ CaptureOverlayForm             提供受控宿主能力
 选区边框、实时预览窗、输入监听、稳定帧采样和双向拼接会话全部封装在长截图模块内部。模块只通过
 `ILiveCaptureFeatureHost` 使用宿主提供的通用选区、显隐、实时采集和结果替换能力，不引用宿主窗体、
 标注文档或基础设施实现，也不为该交互向 `ScreenshotTool.Contracts` 泄漏具体 UI 或可变状态。
+
+## 可选 OCR 模块
+
+`ScreenshotTool.Ocr` 1.0.0 要求轻截 1.11.0 或更高版本，并作为截图会话功能提供“OCR”工具栏命令。用户框选区域后点击命令，模块通过
+`ICaptureFeatureHost.CopyDesktopSelection()` 取得由自己负责释放的选区位图，并调用 Windows 自带的
+离线 OCR。模块不上传图片、不保存识别历史，也不携带大型模型；可识别语言由系统已安装的语言组件决定。
+
+识别成功后，模块通过通用 `ICaptureTextResultHost` 把标题和纯文本交给宿主，并通过
+`ICaptureArtifactHost.CompleteCaptureSession()` 结束冻结的截图界面。宿主在原选区右侧优先放置独立的
+可编辑结果小窗；右侧空间不足时改放左侧，两侧都不足时限制在当前显示器工作区内。结果窗由宿主拥有，
+因此截图功能租约可以立即释放，OCR 模块随后仍可安全禁用、替换或删除；结果窗支持继续编辑和一键复制。
+
+Windows Runtime 的完整 .NET 投影会显著增加轻量包体，因此 OCR 模块通过隐藏的系统 Windows PowerShell
+进程调用同一套系统 OCR 接口。辅助脚本以内嵌资源随模块 DLL 加载，输入只使用会话级临时 PNG；会话取消
+时模块终止辅助进程，完成或失败后删除临时文件。模块包仍只有 `ScreenshotTool.Ocr.dll` 一个入口文件。
+
+## 可选二维码扫描模块
+
+`ScreenshotTool.QrCode` 1.0.0 要求轻截 1.11.0 或更高版本，并提供稳定命令
+`screenshot-tool.qr-code.scan`。用户完整框选二维码后点击“二维码”，模块通过
+`ICaptureFeatureHost.CopyDesktopSelection()` 取得选区位图，在后台使用 ZXing.Net 只尝试
+`QR_CODE` 格式的本机离线解码。图片不会上传，模块也不会自动打开网址或执行二维码内容。
+
+扫描成功后，模块通过现有 `ICaptureTextResultHost` 把原始内容交给宿主，并通过
+`ICaptureArtifactHost.CompleteCaptureSession()` 结束冻结的截图界面。宿主复用 OCR 的通用侧边结果窗，
+但标题、复制按钮和状态文案保持结果类型无关；同一选区识别到多个二维码时，各项内容以空行分隔。
+模块释放时会取消活动扫描，新扫描不可再进入；从 `Modules\QrCode` 删除入口 DLL、`zxing.dll` 和许可
+文本后，新截图会话立即失去入口，已经打开的会话则由模块租约安全延迟释放。
+
+二维码模块只引用稳定的 `ScreenshotTool.Contracts` 边界，ZXing.Net 是模块目录内的私有依赖，
+不进入宿主程序集或其他模块。独立安装包固定为 `qr-code-addon-win-x64.zip`。
 
 ## 可选录屏模块
 

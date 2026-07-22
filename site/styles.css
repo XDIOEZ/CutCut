@@ -1871,6 +1871,18 @@ footer > a:hover {
   box-shadow: inset 0 0 28px rgba(143, 118, 255, 0.08);
 }
 
+.module-mark--emerald {
+  color: #6ce8be;
+  background: rgba(68, 221, 176, 0.1);
+  box-shadow: inset 0 0 28px rgba(68, 221, 176, 0.08);
+}
+
+.module-mark--amber {
+  color: #ffd166;
+  background: rgba(255, 186, 73, 0.1);
+  box-shadow: inset 0 0 28px rgba(255, 186, 73, 0.08);
+}
+
 .module-title-row {
   display: flex;
   gap: 13px;
