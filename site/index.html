@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="轻截是一款轻量、快速、可扩展的 Windows 截图工具，支持长截图、标注、贴图与可选录屏。"
+    >
+    <meta name="theme-color" content="#06142e">
+    <meta property="og:title" content="轻截 · 轻量 Windows 截图工具">
+    <meta
+      property="og:description"
+      content="框选、标注、长截图与录屏，一次完成。下载 Windows x64 轻量版。"
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://xdioez.github.io/CutCut/">
+    <meta
+      property="og:image"
+      content="https://xdioez.github.io/CutCut/assets/lightshot-icon.png"
+    >
+    <link rel="icon" href="assets/lightshot-icon.png">
+    <link rel="apple-touch-icon" href="assets/lightshot-icon.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="release.js" defer></script>
+    <title>轻截 · 轻量 Windows 截图工具</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+
+    <div class="page-glow page-glow--one" aria-hidden="true"></div>
+    <div class="page-glow page-glow--two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="轻截首页">
+        <img src="assets/lightshot-icon.png" width="42" height="42" alt="">
+        <span>轻截</span>
+      </a>
+      <nav aria-label="主要导航">
+        <a href="#features">功能</a>
+        <a href="#download">下载</a>
+        <a
+          class="github-link"
+          href="https://github.com/XDIOEZ/CutCut"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M12 .8a11.4 11.4 0 0 0-3.6 22.2c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.6.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0C17 4.8 18 5.1 18 5.1c.6 1.5.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.8 5.4-5.5 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.4 11.4 0 0 0 12 .8Z"
+            />
+          </svg>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="eyebrow-dot" aria-hidden="true"></span>
+            为 Windows 10 / 11 打造
+          </div>
+          <h1>截图，<span>轻一点。</span></h1>
+          <p class="hero-lead">
+            框选、标注、长截图与录屏，一次完成。轻截常驻系统托盘，需要时一键唤醒，不打断你的工作节奏。
+          </p>
+          <div class="hero-actions">
+            <a class="button button--primary" href="#download">
+              下载轻量版
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14" />
+              </svg>
+            </a>
+            <a
+              class="button button--ghost"
+              href="https://github.com/XDIOEZ/CutCut"
+              target="_blank"
+              rel="noopener noreferrer"
+            >查看源代码</a>
+          </div>
+          <ul class="hero-notes" aria-label="软件特点">
+            <li>小于 5 MiB</li>
+            <li>无广告</li>
+            <li>中文界面</li>
+          </ul>
+        </div>
+
+        <div class="product-visual" role="img" aria-label="轻截界面示意图">
+          <div class="visual-orbit visual-orbit--one" aria-hidden="true"></div>
+          <div class="visual-orbit visual-orbit--two" aria-hidden="true"></div>
+          <div class="app-window">
+            <div class="app-titlebar">
+              <div class="app-brand">
+                <img src="assets/lightshot-icon.png" width="30" height="30" alt="">
+                <span>轻截</span>
+              </div>
+              <div class="window-controls" aria-hidden="true">
+                <span>—</span><span>□</span><span>×</span>
+              </div>
+            </div>
+            <div class="app-body">
+              <aside class="app-sidebar" aria-hidden="true">
+                <span class="side-pill side-pill--active"></span>
+                <span class="side-pill"></span>
+                <span class="side-pill"></span>
+                <span class="side-pill"></span>
+              </aside>
+              <div class="capture-stage">
+                <div class="stage-copy">
+                  <span class="stage-kicker">快速截图</span>
+                  <strong>捕捉刚刚好的画面</strong>
+                  <small>Ctrl + Shift + X</small>
+                </div>
+                <div class="selection-frame" aria-hidden="true">
+                  <i class="corner corner--tl"></i>
+                  <i class="corner corner--tr"></i>
+                  <i class="corner corner--bl"></i>
+                  <i class="corner corner--br"></i>
+                  <span class="selection-size">1280 × 720</span>
+                </div>
+                <div class="tool-dock" aria-hidden="true">
+                  <span class="tool tool--hot"></span>
+                  <span class="tool"></span>
+                  <span class="tool"></span>
+                  <span class="tool"></span>
+                  <span class="tool tool--blue"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="floating-card floating-card--hotkey">
+            <span>全局快捷键</span>
+            <kbd>Ctrl</kbd><b>+</b><kbd>Shift</kbd><b>+</b><kbd>X</kbd>
+          </div>
+          <div class="floating-card floating-card--saved">
+            <span class="saved-check">✓</span>
+            <div><strong>截图已保存</strong><small>点击打开文件位置</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-section" id="features">
+        <div class="section-heading">
+          <p>专注每一次捕捉</p>
+          <h2>轻巧，但不简单</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card feature-card--wide">
+            <div class="feature-icon feature-icon--cyan" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m13 5h3a2 2 0 0 0 2-2v-3" />
+              </svg>
+            </div>
+            <div>
+              <h3>想截哪里，就截哪里</h3>
+              <p>智能识别窗口，也支持自由框选、多显示器和快捷全屏。边缘与八个手柄让微调更准确。</p>
+            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon feature-icon--blue" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="m4 20 4.2-1 10-10a2 2 0 0 0-3-3l-10 10L4 20Zm9.5-12.5 3 3" />
+              </svg>
+            </div>
+            <h3>随手标注</h3>
+            <p>文字、箭头、画笔、形状与马赛克，支持多选、吸附、旋转和缩放。</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon feature-icon--violet" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M8 4h8M8 20h8M12 4v16m0-4-3-3m3 3 3-3M12 8 9 11m3-3 3 3" />
+              </svg>
+            </div>
+            <h3>长截图与录屏</h3>
+            <p>滚动采集长页面；可选录屏模块支持区域录制、系统声音与麦克风。</p>
+          </article>
+          <article class="feature-card feature-card--wide">
+            <div class="feature-icon feature-icon--green" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M8 3v4H4m12-4v4h4M8 21v-4H4m12 4v-4h4M9 12h6m-3-3v6" />
+              </svg>
+            </div>
+            <div>
+              <h3>模块化，保持清爽</h3>
+              <p>长截图与录屏按模块加载。模块可以热替换或移除，基础截图流程始终保持轻快。</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="download-section" id="download">
+        <div class="download-card">
+          <div class="download-copy">
+            <div class="platform-badge">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M3 5.2 10.4 4v7H3V5.2Zm8.4-1.4L21 2.4V11h-9.6V3.8ZM3 12h7.4v7L3 17.8V12Zm8.4 0H21v8.6l-9.6-1.4V12Z" />
+              </svg>
+              Windows x64
+            </div>
+            <h2>准备好，轻松截一下</h2>
+            <p>下载轻量完整包，解压后运行。包含长截图与录屏模块，需要预先安装 .NET 8 Desktop Runtime。</p>
+          </div>
+
+          <div class="release-panel" aria-live="polite">
+            <div class="release-row">
+              <div>
+                <span class="release-label">最新轻量版</span>
+                <strong id="release-version">正在获取版本…</strong>
+              </div>
+              <span class="release-size" id="release-size">&lt; 5 MiB</span>
+            </div>
+            <a
+              class="button button--download"
+              id="download-button"
+              href="https://github.com/XDIOEZ/CutCut/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span>
+                <small>适用于 Windows 10 / 11</small>
+                <strong id="download-label">查看发布版本</strong>
+              </span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14" />
+              </svg>
+            </a>
+            <p class="release-status" id="release-status">正在连接 GitHub Releases…</p>
+            <a
+              class="runtime-link"
+              href="https://dotnet.microsoft.com/download/dotnet/8.0"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              尚未安装 .NET 8 Desktop Runtime？前往微软官网下载
+              <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
+
+        <ol class="install-steps" aria-label="安装步骤">
+          <li><span>01</span><p><strong>下载</strong>轻量版 ZIP 压缩包</p></li>
+          <li><span>02</span><p><strong>解压</strong>到任意可写目录</p></li>
+          <li><span>03</span><p><strong>启动</strong>ScreenshotTool.exe</p></li>
+        </ol>
+      </section>
+    </main>
+
+    <footer>
+      <div class="footer-brand">
+        <img src="assets/lightshot-icon.png" width="30" height="30" alt="">
+        <span>轻截</span>
+      </div>
+      <p>为顺手的每一次截图而做。</p>
+      <a href="https://github.com/XDIOEZ/CutCut" target="_blank" rel="noopener noreferrer">
+        GitHub 仓库 <span aria-hidden="true">↗</span>
+      </a>
+    </footer>
+  </body>
+</html>
