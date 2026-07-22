@@ -7,4 +7,6 @@ internal interface IFileLocationService
     void ShowFileInFolder(string filePath);
 
     void OpenFile(string filePath);
+
+    void OpenWebPage(Uri uri);
 }

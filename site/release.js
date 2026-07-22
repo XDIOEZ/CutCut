@@ -2,16 +2,20 @@ const repository = "XDIOEZ/CutCut";
 const releasesUrl = `https://github.com/${repository}/releases`;
 const latestReleaseApi = `https://api.github.com/repos/${repository}/releases/latest`;
 const lightweightAssetPattern = /complete-lightweight-win-x64\.zip$/i;
+const portableAssetPattern = /complete-portable-win-x64\.zip$/i;
 
 const versionElement = document.querySelector("#release-version");
 const sizeElement = document.querySelector("#release-size");
 const statusElement = document.querySelector("#release-status");
 const downloadButton = document.querySelector("#download-button");
 const downloadLabel = document.querySelector("#download-label");
+const portableDownloadButton = document.querySelector("#portable-download-button");
+const portableDownloadLabel = document.querySelector("#portable-download-label");
+const portableDownloadSize = document.querySelector("#portable-download-size");
 
-function formatBytes(bytes) {
+function formatBytes(bytes, fallback = "< 5 MiB") {
   if (!Number.isFinite(bytes) || bytes <= 0) {
-    return "< 5 MiB";
+    return fallback;
   }
 
   return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
@@ -34,7 +38,12 @@ function showFallback(message) {
   versionElement.textContent = "暂未发布";
   sizeElement.textContent = "< 5 MiB";
   downloadButton.href = releasesUrl;
+  downloadButton.removeAttribute("download");
   downloadLabel.textContent = "查看发布版本";
+  portableDownloadButton.href = releasesUrl;
+  portableDownloadButton.removeAttribute("download");
+  portableDownloadLabel.textContent = "重量版";
+  portableDownloadSize.textContent = "80+ MiB";
   statusElement.textContent = message;
   statusElement.dataset.state = "fallback";
 }
@@ -50,23 +59,48 @@ async function loadLatestRelease() {
     }
 
     const release = await response.json();
-    const asset = release.assets?.find(({ name }) => lightweightAssetPattern.test(name));
+    const lightweightAsset = release.assets?.find(({ name }) =>
+      lightweightAssetPattern.test(name));
+    const portableAsset = release.assets?.find(({ name }) => portableAssetPattern.test(name));
 
-    if (!asset) {
-      showFallback("最新版尚未附带轻量版文件，可前往 Releases 查看详情。");
+    if (!lightweightAsset && !portableAsset) {
+      showFallback("最新版尚未附带可下载文件，可前往 Releases 查看详情。");
       return;
     }
 
     const publishedDate = formatDate(release.published_at);
     versionElement.textContent = release.tag_name || release.name || "最新版";
-    sizeElement.textContent = formatBytes(asset.size);
-    downloadButton.href = asset.browser_download_url;
-    downloadButton.setAttribute("download", "");
-    downloadLabel.textContent = "下载轻量版 ZIP";
+    if (lightweightAsset) {
+      sizeElement.textContent = formatBytes(lightweightAsset.size);
+      downloadButton.href = lightweightAsset.browser_download_url;
+      downloadButton.setAttribute("download", "");
+      downloadLabel.textContent = "下载轻量版 ZIP";
+    } else {
+      sizeElement.textContent = "< 5 MiB";
+      downloadButton.href = releasesUrl;
+      downloadButton.removeAttribute("download");
+      downloadLabel.textContent = "轻量版暂未附带";
+    }
+
+    if (portableAsset) {
+      portableDownloadButton.href = portableAsset.browser_download_url;
+      portableDownloadButton.setAttribute("download", "");
+      portableDownloadLabel.textContent = "重量版";
+      portableDownloadSize.textContent = formatBytes(portableAsset.size, "80+ MiB");
+    } else {
+      portableDownloadButton.href = releasesUrl;
+      portableDownloadButton.removeAttribute("download");
+      portableDownloadLabel.textContent = "重量版未附带";
+      portableDownloadSize.textContent = "查看 Releases";
+    }
+
+    const availableEditions = [lightweightAsset && "轻量版", portableAsset && "重量版"]
+      .filter(Boolean)
+      .join("与");
     statusElement.textContent = publishedDate
-      ? `${publishedDate} 发布 · 由 GitHub Releases 提供下载`
-      : "由 GitHub Releases 提供下载";
-    statusElement.dataset.state = "ready";
+      ? `${publishedDate} 发布 · ${availableEditions}由 GitHub Releases 提供下载`
+      : `${availableEditions}由 GitHub Releases 提供下载`;
+    statusElement.dataset.state = lightweightAsset || portableAsset ? "ready" : "fallback";
   } catch {
     showFallback("暂时无法读取版本信息，可前往 GitHub Releases 下载。");
   }

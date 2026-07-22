@@ -87,6 +87,11 @@ internal static class Program
             RunMainNavigationSmoke(navigationOutputPath);
             return 0;
         }
+        if (args is ["--module-management-page-smoke", var moduleManagementOutputPath])
+        {
+            RunModuleManagementPageSmoke(moduleManagementOutputPath);
+            return 0;
+        }
 
         var previewFolder = Path.Combine(Path.GetTempPath(), "LightShotUiPreview");
         var form = new MainForm(
@@ -98,6 +103,7 @@ internal static class Program
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
             new PreviewModuleManager(),
+            new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false)
         {
             Text = "轻截 - 界面预览"
@@ -933,6 +939,7 @@ internal static class Program
         using var page = new ScreenshotSettingsPage(
             new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q),
             startMinimized: true,
+            startWithWindows: true,
             dismissSaveNotificationBeforeCapture: false,
             hideMainWindowDuringCapture: true)
         {
@@ -950,6 +957,7 @@ internal static class Program
         if (page.Hotkey !=
                 new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q) ||
             !page.StartMinimized ||
+            !page.StartWithWindows ||
             page.DismissSaveNotificationBeforeCapture ||
             !page.HideMainWindowDuringCapture)
         {
@@ -963,11 +971,11 @@ internal static class Program
                 "SettingRow",
                 StringComparison.Ordinal))
             .ToArray();
-        if (settingRows.Length != 4 || settingRows.Any(row =>
+        if (settingRows.Length != 5 || settingRows.Any(row =>
                 row.Controls.Cast<Control>().Count(control =>
                     control is CheckBox or TextBox) != 1))
         {
-            throw new InvalidOperationException("截图设置页面没有使用四行单列设置项。");
+            throw new InvalidOperationException("截图设置页面没有使用五行单列设置项。");
         }
 
         using var captured = new Bitmap(form.Width, form.Height);
@@ -1003,6 +1011,7 @@ internal static class Program
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
             new PreviewModuleManager(),
+            new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false)
         {
             StartPosition = FormStartPosition.Manual,
@@ -1052,6 +1061,7 @@ internal static class Program
             throw new InvalidOperationException("未安装长截图模块时仍显示了长截图设置入口。");
         }
         if (!navigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
+            !navigationTexts.Contains("插件模块", StringComparer.Ordinal) ||
             navigationTexts.Contains("快捷键设置", StringComparer.Ordinal) ||
             navigationTexts.Contains("图片复制", StringComparer.Ordinal))
         {
@@ -1083,6 +1093,7 @@ internal static class Program
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
             new PreviewModuleManager(includeScreenRecording: false),
+            new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false);
         var emptyShell = (AppShellControl)typeof(MainForm).GetField(
                 "_shell",
@@ -1104,10 +1115,87 @@ internal static class Program
             throw new InvalidOperationException("未安装录屏和长截图模块时仍显示了模块设置入口。");
         }
         if (!emptyNavigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
+            !emptyNavigationTexts.Contains("插件模块", StringComparer.Ordinal) ||
             emptyNavigationTexts.Contains("快捷键设置", StringComparer.Ordinal) ||
             emptyNavigationTexts.Contains("图片复制", StringComparer.Ordinal))
         {
             throw new InvalidOperationException("无模块时截图设置分页或合并后的导航不正确。");
+        }
+    }
+
+    private static void RunModuleManagementPageSmoke(string outputPath)
+    {
+        using var settings = new PreviewSettingsStore(Path.GetTempPath());
+        using var form = new MainForm(
+            settings,
+            new PreviewHotkeyService(),
+            new PreviewCaptureService(),
+            new PreviewImageSaveService(),
+            new PreviewClipboardService(),
+            new PreviewWindowLocator(),
+            new PreviewFileLocationService(),
+            new PreviewModuleManager(),
+            new PreviewStartupRegistrationService(),
+            enableBackgroundIntegration: false)
+        {
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(80, 80)
+        };
+        var shell = (AppShellControl)typeof(MainForm).GetField(
+                "_shell",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(form)!;
+        shell.SelectPage("modules");
+        form.Show();
+        form.Activate();
+        System.Windows.Forms.Application.DoEvents();
+        Thread.Sleep(120);
+        System.Windows.Forms.Application.DoEvents();
+
+        var page = (ModuleManagementPage)typeof(MainForm).GetField(
+                "_moduleManagementPage",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(form)!;
+        var content = (FlowLayoutPanel)typeof(ModuleManagementPage).GetField(
+                "_content",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(page)!;
+        if (content.FlowDirection != FlowDirection.TopDown || content.WrapContents)
+        {
+            throw new InvalidOperationException("插件模块页面没有使用纵向单列布局。");
+        }
+        var pageText = string.Join(
+            '\n',
+            page.Controls.Cast<Control>().SelectMany(GetControlTree).Select(control => control.Text));
+        foreach (var expectedText in new[] { "录屏", "禁用模块", "永久删除", "前往下载" })
+        {
+            if (!pageText.Contains(expectedText, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"插件模块页面缺少操作：{expectedText}");
+            }
+        }
+
+        using var captured = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(captured, new Rectangle(Point.Empty, form.Size));
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+        captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+        form.Close();
+        System.Windows.Forms.Application.DoEvents();
+    }
+
+    private static IEnumerable<Control> GetControlTree(Control root)
+    {
+        yield return root;
+        foreach (Control child in root.Controls)
+        {
+            foreach (var descendant in GetControlTree(child))
+            {
+                yield return descendant;
+            }
         }
     }
 
@@ -1128,6 +1216,7 @@ internal static class Program
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
             new PreviewModuleManager(),
+            new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false)
         {
             StartPosition = FormStartPosition.Manual,
@@ -1298,6 +1387,7 @@ internal static class Program
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
             new PreviewModuleManager(),
+            new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false);
         var showNotification = typeof(MainForm).GetMethod(
             "ShowSavedArtifactNotification",
@@ -1473,11 +1563,25 @@ internal sealed class PreviewFileLocationService : IFileLocationService
     public void OpenFile(string filePath)
     {
     }
+
+    public void OpenWebPage(Uri uri)
+    {
+    }
+}
+
+internal sealed class PreviewStartupRegistrationService : IStartupRegistrationService
+{
+    public bool IsEnabled { get; private set; } = true;
+
+    public void SetEnabled(bool enabled) => IsEnabled = enabled;
 }
 
 internal sealed class PreviewModuleManager(bool includeScreenRecording = true) : IModuleManager
 {
+    private readonly bool _includeScreenRecording = includeScreenRecording;
     private bool _refreshed;
+    private bool _packageExists = includeScreenRecording;
+    private bool _packageEnabled = true;
 
     public string ModulesDirectory => Path.Combine(Path.GetTempPath(), "LightShotUiPreviewModules");
 
@@ -1490,10 +1594,35 @@ internal sealed class PreviewModuleManager(bool includeScreenRecording = true) :
 
     public IReadOnlyList<ModuleInfo> GetModules() => [];
 
+    public IReadOnlyList<ModulePackageInfo> GetInstalledPackages() => _packageExists
+        ?
+        [
+            new ModulePackageInfo(
+                "ScreenRecording",
+                "lightshot.screen-recording",
+                "录屏",
+                new Version(1, 0),
+                Path.Combine(ModulesDirectory, "ScreenRecording"),
+                _packageEnabled ? ModulePackageState.Enabled : ModulePackageState.Disabled)
+        ]
+        : [];
+
+    public ModuleOperationResult SetPackageEnabled(string packageName, bool enabled)
+    {
+        _packageEnabled = enabled;
+        return new(true, enabled ? "已启用录屏" : "已禁用录屏", new([], [], true));
+    }
+
+    public ModuleOperationResult DeletePackage(string packageName)
+    {
+        _packageExists = false;
+        return new(true, "已永久删除录屏", new([], [], true));
+    }
+
     public IReadOnlyList<ICaptureFeature> CreateCaptureFeatures() => [];
 
     public IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host) =>
-        includeScreenRecording
+        _includeScreenRecording
             ? [new ScreenRecordingSettingsPage(host)]
             : [];
 

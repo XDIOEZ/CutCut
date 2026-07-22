@@ -1,5 +1,6 @@
 using ScreenshotTool.Presentation;
 using ScreenshotTool.Presentation.Pages;
+using ScreenshotTool.Application;
 using ScreenshotTool.Infrastructure;
 using ScreenshotTool.Infrastructure.Modules;
 using ScreenshotTool.Editing;
@@ -20,6 +21,80 @@ AssertTrue(
 AssertTrue(
     SingleInstanceLaunchPolicy.RequiresRestartConfirmation(ownsMutex: false),
     "检测到旧实例时显示关闭旧实例并重新启动的特殊提示");
+AssertTrue(
+    ApplicationLaunchOptions.Parse(["--BACKGROUND"]).StartInBackground,
+    "开机启动参数不区分大小写并请求后台启动");
+AssertTrue(
+    !ApplicationLaunchOptions.Parse(["--unknown"]).StartInBackground,
+    "普通启动参数不会误判为后台启动");
+var runEntryStore = new TestStartupEntryStore();
+var startupRegistration = new StartupRegistrationService(
+    runEntryStore,
+    @"C:\Program Files\LightShotCN\ScreenshotTool.exe");
+AssertTrue(!startupRegistration.IsEnabled, "没有当前用户启动项时默认关闭开机启动");
+startupRegistration.SetEnabled(enabled: true);
+AssertEqual("LightShotCN", runEntryStore.Name ?? string.Empty, "开机启动项使用稳定名称");
+AssertEqual(
+    "\"C:\\Program Files\\LightShotCN\\ScreenshotTool.exe\" --background",
+    runEntryStore.Value ?? string.Empty,
+    "开机启动命令正确引用带空格路径并请求后台运行");
+AssertTrue(startupRegistration.IsEnabled, "写入匹配命令后识别为开机启动已开启");
+runEntryStore.Value = "\"C:\\OldLocation\\ScreenshotTool.exe\" --background";
+AssertTrue(!startupRegistration.IsEnabled, "程序移动后不会把旧路径误认为当前开机启动项");
+startupRegistration.SetEnabled(enabled: false);
+AssertTrue(runEntryStore.Value is null, "关闭开机启动会永久移除当前用户启动项");
+var currentProductVersion = new Version(1, 10, 0, 0);
+AssertEqual(
+    StartupWorkspaceReason.FirstRun,
+    StartupWorkspacePolicy.DetermineReason(lastLaunchedVersion: null, currentProductVersion),
+    "没有启动版本标记时识别为首次运行");
+AssertEqual(
+    StartupWorkspaceReason.None,
+    StartupWorkspacePolicy.DetermineReason("1.10.0", currentProductVersion),
+    "同一产品版本不重复打开设置工作台");
+AssertEqual(
+    StartupWorkspaceReason.VersionChanged,
+    StartupWorkspacePolicy.DetermineReason("1.9.3", currentProductVersion),
+    "应用更新后识别版本变化");
+AssertEqual(
+    StartupWorkspaceReason.VersionChanged,
+    StartupWorkspacePolicy.DetermineReason("invalid", currentProductVersion),
+    "无效版本标记按版本变化处理");
+AssertEqual(
+    "1.10.0",
+    StartupWorkspacePolicy.CreateVersionMarker(currentProductVersion),
+    "启动标记使用主次补丁三段版本号");
+AssertEqual(
+    StartupWorkspaceReason.None,
+    StartupWorkspacePolicy.DetermineReason("1.10.0.99", currentProductVersion),
+    "程序集修订号变化不误判为产品更新");
+AssertTrue(
+    !StartupWorkspacePolicy.ShouldStartMinimized(
+        startMinimized: true,
+        StartupWorkspaceReason.FirstRun),
+    "首次运行覆盖启动后最小化并显示设置工作台");
+AssertTrue(
+    !StartupWorkspacePolicy.ShouldStartMinimized(
+        startMinimized: true,
+        StartupWorkspaceReason.VersionChanged),
+    "版本更新覆盖启动后最小化并显示设置工作台");
+AssertTrue(
+    StartupWorkspacePolicy.ShouldStartMinimized(
+        startMinimized: true,
+        StartupWorkspaceReason.None),
+    "同版本后续启动恢复用户最小化偏好");
+AssertTrue(
+    StartupWorkspacePolicy.ShouldStartMinimized(
+        startMinimized: false,
+        StartupWorkspaceReason.None,
+        startInBackground: true),
+    "Windows 开机启动始终进入托盘而不打扰用户");
+AssertTrue(
+    !StartupWorkspacePolicy.ShouldStartMinimized(
+        startMinimized: false,
+        StartupWorkspaceReason.VersionChanged,
+        startInBackground: true),
+    "版本更新仍优先打开设置工作台");
 AssertEqual(
     TextEditorEnterAction.Commit,
     TextEditorEnterPolicy.Resolve(controlPressed: false),
@@ -840,15 +915,17 @@ AssertEqual(90, AnnotationRotationStep.Normalize(200), "旋转速度配置限制
 using (var screenshotSettingsPage = new ScreenshotSettingsPage(
            new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q),
            startMinimized: true,
+           startWithWindows: true,
            dismissSaveNotificationBeforeCapture: false,
            hideMainWindowDuringCapture: true))
 {
-    AssertSingleColumnSettings(screenshotSettingsPage, 4, "截图设置页");
+    AssertSingleColumnSettings(screenshotSettingsPage, 5, "截图设置页");
     AssertEqual(
         new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q),
         screenshotSettingsPage.Hotkey,
         "截图设置页显示全局快捷键");
     AssertTrue(screenshotSettingsPage.StartMinimized, "截图设置页显示启动后最小化选项");
+    AssertTrue(screenshotSettingsPage.StartWithWindows, "截图设置页显示开机自动启动选项");
     AssertTrue(
         !screenshotSettingsPage.DismissSaveNotificationBeforeCapture,
         "截图设置页显示保留保存提示的选择");
@@ -859,8 +936,10 @@ using (var screenshotSettingsPage = new ScreenshotSettingsPage(
     screenshotSettingsPage.HideMainWindowDuringCapture = false;
     screenshotSettingsPage.Hotkey = HotkeyDefinition.Default;
     screenshotSettingsPage.StartMinimized = false;
+    screenshotSettingsPage.StartWithWindows = false;
     AssertEqual(HotkeyDefinition.Default, screenshotSettingsPage.Hotkey, "截图设置页可修改快捷键");
     AssertTrue(!screenshotSettingsPage.StartMinimized, "截图设置页可关闭启动后最小化");
+    AssertTrue(!screenshotSettingsPage.StartWithWindows, "截图设置页可关闭开机自动启动");
     AssertTrue(
         screenshotSettingsPage.DismissSaveNotificationBeforeCapture,
         "截图设置页可开启截图前关闭提示");
@@ -1668,11 +1747,50 @@ var settingsTestDirectory = Path.Combine(
     Guid.NewGuid().ToString("N"));
 try
 {
+    var startupStore = new JsonSettingsStore(
+        Path.Combine(settingsTestDirectory, "startup"),
+        "local");
+    var firstLaunch = new StartupWorkspaceService(startupStore, currentProductVersion)
+        .PrepareLaunch();
+    AssertEqual(
+        StartupWorkspaceReason.FirstRun,
+        firstLaunch.Reason,
+        "首次启动服务要求显示设置工作台");
+    AssertEqual(
+        "1.10.0",
+        firstLaunch.Settings.LastLaunchedVersion ?? string.Empty,
+        "首次启动服务记录当前版本");
+    AssertEqual(
+        "1.10.0",
+        startupStore.Load().LastLaunchedVersion ?? string.Empty,
+        "首次启动版本标记持久化到用户配置");
+
+    var repeatedLaunch = new StartupWorkspaceService(startupStore, currentProductVersion)
+        .PrepareLaunch();
+    AssertEqual(
+        StartupWorkspaceReason.None,
+        repeatedLaunch.Reason,
+        "同版本再次启动不重复显示设置工作台");
+
+    var updatedLaunch = new StartupWorkspaceService(
+        startupStore,
+        new Version(1, 11, 0, 0))
+        .PrepareLaunch();
+    AssertEqual(
+        StartupWorkspaceReason.VersionChanged,
+        updatedLaunch.Reason,
+        "新版本首次启动要求显示设置工作台");
+    AssertEqual(
+        "1.11.0",
+        startupStore.Load().LastLaunchedVersion ?? string.Empty,
+        "更新启动后持久化新的产品版本");
+
     var profileStore = new JsonSettingsStore(settingsTestDirectory, "account-demo");
     var configuredSettings = new AppSettings
     {
         OutputFolder = Path.Combine(settingsTestDirectory, "captures"),
         StartMinimized = true,
+        LastLaunchedVersion = " 1.9.3 ",
         HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
         HotkeyVirtualKey = (int)Keys.Q,
         Preferences = new UserPreferences
@@ -1707,6 +1825,7 @@ try
     var savedJson = File.ReadAllText(profileStore.SettingsPath);
     AssertTrue(savedJson.Contains("\"schemaVersion\": 1", StringComparison.Ordinal), "JSON 保存配置版本");
     AssertTrue(savedJson.Contains("\"profileId\": \"account-demo\"", StringComparison.Ordinal), "JSON 保存配置身份");
+    AssertTrue(savedJson.Contains("\"lastLaunchedVersion\": \"1.9.3\"", StringComparison.Ordinal), "JSON 保存并规范化上次启动版本");
     AssertTrue(savedJson.Contains("\"preferences\"", StringComparison.Ordinal), "JSON 独立保存用户偏好");
     AssertTrue(savedJson.Contains("\"keepScreenPosition\"", StringComparison.Ordinal), "JSON 使用可读的贴纸模式");
     AssertTrue(savedJson.Contains("\"longCaptureSafetyChecksEnabled\": true", StringComparison.Ordinal), "JSON 保存长截图安全开关");
@@ -1789,6 +1908,10 @@ try
     AssertEqual(1.25M, loadedSettings.Preferences.DrawingToolCoefficients.ArrowBody, "JSON 恢复箭身基础系数");
     AssertEqual(4M, loadedSettings.Preferences.DrawingToolCoefficients.ArrowHeadWidth, "JSON 恢复箭头宽度基础系数");
     AssertTrue(loadedSettings.StartMinimized, "JSON 恢复启动喜好");
+    AssertEqual(
+        "1.9.3",
+        loadedSettings.LastLaunchedVersion ?? string.Empty,
+        "JSON 恢复上次启动版本");
     AssertEqual((int)Keys.Q, loadedSettings.HotkeyVirtualKey, "JSON 恢复快捷键");
 
     AssertEqual(12, loadedSettings.Preferences.AnnotationRotationStepDegrees, "JSON 恢复编辑元素旋转速度");
@@ -2102,6 +2225,9 @@ try
         modulePackageDirectory,
         Path.GetDirectoryName(loadedModules.Modules[0].AssemblyPath)!,
         "模块入口程序集位于独立一级子文件夹");
+    var installedPackage = moduleHost.GetInstalledPackages().Single();
+    AssertEqual(ModulePackageState.Enabled, installedPackage.State, "已安装模块默认启用");
+    AssertEqual("TestHotLoad", installedPackage.PackageName, "模块管理使用一级文件夹作为包名");
 
     var hotLoadSettingsHost = new TestModuleSettingsHost();
     hotLoadSettingsHost.SetBoolean("tests.hot-load.flag", true);
@@ -2128,9 +2254,36 @@ try
         AssertEqual(Color.Red.ToArgb(), rendered.GetPixel(2, 2).ToArgb(), "模块参与最终截图渲染");
     }
 
-    Directory.Delete(modulePackageDirectory, recursive: true);
-    var removedModules = moduleHost.Refresh();
-    AssertEqual(0, removedModules.Modules.Count, "删除模块文件夹后热拆卸模块");
+    var disabledModule = moduleHost.SetPackageEnabled("TestHotLoad", enabled: false);
+    AssertTrue(disabledModule.Succeeded, "设置工作台可以禁用模块");
+    AssertEqual(0, moduleHost.GetModules().Count, "禁用模块后不再用于新截图会话");
+    AssertEqual(
+        ModulePackageState.Disabled,
+        moduleHost.GetInstalledPackages().Single().State,
+        "禁用状态持久化在模块包中");
+    using (var restartedHost = new ModuleHost(moduleTestDirectory))
+    {
+        restartedHost.Refresh();
+        AssertEqual(0, restartedHost.GetModules().Count, "重启后保持模块禁用状态");
+        AssertEqual(
+            ModulePackageState.Disabled,
+            restartedHost.GetInstalledPackages().Single().State,
+            "重启后仍可在设置工作台查看禁用模块");
+    }
+    AssertTrue(feature.HandleKeyDown(new KeyEventArgs(Keys.Control | Keys.Alt | Keys.M)), "禁用不打断当前截图会话");
+
+    var enabledModule = moduleHost.SetPackageEnabled("TestHotLoad", enabled: true);
+    AssertTrue(enabledModule.Succeeded, "设置工作台可以重新启用模块");
+    AssertEqual(1, moduleHost.GetModules().Count, "重新启用后模块恢复到新截图会话");
+    AssertTrue(
+        !moduleHost.DeletePackage("..").Succeeded,
+        "模块删除拒绝越过 Modules 根目录");
+
+    var deletedModule = moduleHost.DeletePackage("TestHotLoad");
+    AssertTrue(deletedModule.Succeeded, "设置工作台可以永久删除模块");
+    AssertTrue(!Directory.Exists(modulePackageDirectory), "永久删除会移除整个模块文件夹");
+    AssertEqual(0, moduleHost.GetInstalledPackages().Count, "永久删除后模块不再出现在安装列表");
+    AssertEqual(0, moduleHost.GetModules().Count, "永久删除后热拆卸模块");
     AssertEqual(
         0,
         moduleHost.CreateSettingsPages(hotLoadSettingsHost).Count,
@@ -2597,7 +2750,7 @@ LongCapturePreparationTests.Run();
 BidirectionalLongCaptureTests.Run();
 LongCaptureWindowTests.Run();
 
-Console.WriteLine("可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、八手柄单边缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
+Console.WriteLine("首次与更新启动工作台、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、八手柄单边缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
 return;
 
 SelectionResizeEdges Hit(int x, int y) =>
@@ -2866,6 +3019,26 @@ internal sealed class TestModuleSettingsHost : IModuleSettingsHost
     public void SetString(string id, string value) => _strings[id] = value;
 
     public void Save() => SaveCount++;
+}
+
+internal sealed class TestStartupEntryStore : IStartupEntryStore
+{
+    public string? Name { get; private set; }
+    public string? Value { get; set; }
+
+    public string? GetValue(string name) => Value;
+
+    public void SetValue(string name, string value)
+    {
+        Name = name;
+        Value = value;
+    }
+
+    public void DeleteValue(string name)
+    {
+        Name = name;
+        Value = null;
+    }
 }
 
 internal sealed class TestCaptureFeatureCatalog(ICaptureFeature feature) : ICaptureFeatureCatalog

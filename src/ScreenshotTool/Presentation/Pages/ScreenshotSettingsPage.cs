@@ -6,6 +6,7 @@ namespace ScreenshotTool.Presentation.Pages;
 internal sealed class ScreenshotSettingsPage : UserControl
 {
     private readonly HotkeyInputBox _hotkeyInput;
+    private readonly CheckBox _startWithWindows;
     private readonly CheckBox _startMinimized;
     private readonly CheckBox _dismissNotificationBeforeCapture;
     private readonly CheckBox _hideMainWindowDuringCapture;
@@ -16,6 +17,7 @@ internal sealed class ScreenshotSettingsPage : UserControl
     public ScreenshotSettingsPage(
         HotkeyDefinition hotkey,
         bool startMinimized,
+        bool startWithWindows = false,
         bool dismissSaveNotificationBeforeCapture = true,
         bool hideMainWindowDuringCapture = false)
     {
@@ -25,7 +27,7 @@ internal sealed class ScreenshotSettingsPage : UserControl
         _settingsCard = new Panel
         {
             Location = Point.Empty,
-            Height = 474,
+            Height = 546,
             BackColor = AppTheme.Surface,
             BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(26, 22, 26, 22)
@@ -60,12 +62,19 @@ internal sealed class ScreenshotSettingsPage : UserControl
             _hotkeyInput,
             105);
 
+        _startWithWindows = CreateCheckBox(startWithWindows);
+        AddSettingRow(
+            "开机自动启动",
+            "登录 Windows 后自动启动轻截并进入系统托盘，无需管理员权限。",
+            _startWithWindows,
+            177);
+
         _startMinimized = CreateCheckBox(startMinimized);
         AddSettingRow(
-            "启动后最小化",
-            "启动轻截后直接进入系统托盘，不显示主窗口。",
+            "手动启动后最小化",
+            "平时双击轻截启动时也直接进入系统托盘，不显示主窗口。",
             _startMinimized,
-            177);
+            249);
 
         _dismissNotificationBeforeCapture = CreateCheckBox(
             dismissSaveNotificationBeforeCapture);
@@ -73,24 +82,24 @@ internal sealed class ScreenshotSettingsPage : UserControl
             "截图前关闭保存提示",
             "自动关闭右下角旧提示，避免它进入下一张截图。（推荐）",
             _dismissNotificationBeforeCapture,
-            249);
+            321);
 
         _hideMainWindowDuringCapture = CreateCheckBox(hideMainWindowDuringCapture);
         AddSettingRow(
             "截图时隐藏轻截主界面",
             "抓屏前立即隐藏工作台；关闭后会保留主界面，适合制作宣传截图。",
             _hideMainWindowDuringCapture,
-            321);
+            393);
 
         var saveButton = AppTheme.CreateButton("保存截图设置", primary: true);
-        saveButton.Location = new Point(28, 413);
+        saveButton.Location = new Point(28, 485);
         saveButton.Size = new Size(142, 38);
         saveButton.Click += (_, _) => SaveRequested?.Invoke(this, EventArgs.Empty);
         _settingsCard.Controls.AddRange([title, description, saveButton]);
 
         _note = new Panel
         {
-            Location = new Point(0, 494),
+            Location = new Point(0, 566),
             Height = 112,
             BackColor = Color.FromArgb(240, 253, 244),
             Padding = new Padding(20, 16, 20, 14)
@@ -126,6 +135,12 @@ internal sealed class ScreenshotSettingsPage : UserControl
     {
         get => _startMinimized.Checked;
         set => _startMinimized.Checked = value;
+    }
+
+    public bool StartWithWindows
+    {
+        get => _startWithWindows.Checked;
+        set => _startWithWindows.Checked = value;
     }
 
     public event EventHandler? HotkeyInputEntered

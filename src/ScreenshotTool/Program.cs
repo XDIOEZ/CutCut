@@ -1,4 +1,5 @@
 using ScreenshotTool.Application;
+using ScreenshotTool.Core;
 
 namespace ScreenshotTool;
 
@@ -9,14 +10,19 @@ internal static class Program
     private static readonly TimeSpan RestartTimeout = TimeSpan.FromSeconds(10);
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        var launchOptions = ApplicationLaunchOptions.Parse(args);
         using var mutex = new Mutex(initiallyOwned: false, MutexName);
         using var restartEvent = new EventWaitHandle(
             initialState: false,
             EventResetMode.AutoReset,
             RestartEventName);
         var ownsMutex = TryAcquireMutex(mutex, TimeSpan.Zero);
+        if (!ownsMutex && launchOptions.StartInBackground)
+        {
+            return;
+        }
         if (SingleInstanceLaunchPolicy.RequiresRestartConfirmation(ownsMutex))
         {
             var restartChoice = MessageBox.Show(
@@ -50,7 +56,7 @@ internal static class Program
             System.Windows.Forms.Application.EnableVisualStyles();
             System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
 
-            using var app = CompositionRoot.Create();
+            using var app = CompositionRoot.Create(launchOptions.StartInBackground);
             var restartRegistration = ThreadPool.RegisterWaitForSingleObject(
                 restartEvent,
                 (_, timedOut) =>

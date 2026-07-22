@@ -32,7 +32,7 @@ CaptureOverlayForm             提供受控宿主能力
 
 宿主项目对第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将 DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。
 
-`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含 `Modules/LongCapture/ScreenshotTool.LongCapture.dll`，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`，脚本会在压缩前确认其同时包含主程序、长截图模块、录屏模块和编码器。
+`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含 `Modules/LongCapture/ScreenshotTool.LongCapture.dll`，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`，脚本会在压缩前确认其同时包含主程序、长截图模块、录屏模块和编码器。脚本还会生成 `long-capture-addon-win-x64.zip`，供发布页按需下载。
 
 录屏仍不进入宿主的编译依赖树。标准发布脚本会额外调用 `scripts/Publish-ScreenRecordingModule.ps1`，保留可单独下载的 `screen-recording-addon-win-x64.zip`，然后将其 `Modules` 内容复制到两种完整包中。这只是发布阶段的预安装；运行时仍通过稳定契约加载可替换、可删除的录屏模块。
 
@@ -43,8 +43,9 @@ CaptureOverlayForm             提供受控宿主能力
 3. 每次开始截图时，已加载模块分别创建新的 `ICaptureFeature`，按 `Order` 和 `Id` 排序后组合。
 4. 模块可以处理键盘、鼠标，并分别参与预览和最终导出渲染。
 5. 实现 `IModuleSettingsPageProvider` 的模块可创建自己的设置页；宿主只按通用元数据把页面加入导航，不引用具体页面类型。
-6. 模块文件夹或其中任一文件更新、删除后，宿主立即移除并释放对应设置页，也不再给新截图创建旧功能；已经打开的截图继续使用原实例。
-7. 最后一个活动功能或设置页租约释放后，宿主释放模块对象并调用 `AssemblyLoadContext.Unload()`。
+6. 设置工作台通过模块文件夹内的 `.lightshot-module-disabled.json` 保存禁用状态；禁用会退役当前程序集但保留全部文件，重新启用时删除标记并重新加载。标记同时保留模块 ID、名称和版本，因此重启后无需加载 DLL 也能展示禁用项。
+7. 模块文件夹或其中任一文件更新、禁用、删除后，宿主立即移除并释放对应设置页，也不再给新截图创建旧功能；已经打开的截图继续使用原实例。永久删除会先写入禁用标记并退役程序集，再递归删除该模块自己的一级文件夹。
+8. 最后一个活动功能或设置页租约释放后，宿主释放模块对象并调用 `AssemblyLoadContext.Unload()`。
 
 ## 模块自带设置页
 

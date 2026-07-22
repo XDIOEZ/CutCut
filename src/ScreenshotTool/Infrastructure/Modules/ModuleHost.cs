@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Diagnostics;
+using System.Text.Json;
 using ScreenshotTool.Abstractions;
 using ScreenshotTool.Contracts;
 
@@ -7,12 +8,19 @@ namespace ScreenshotTool.Infrastructure.Modules;
 
 internal sealed class ModuleHost : IModuleManager
 {
+    private const string DisabledMarkerFileName = ".lightshot-module-disabled.json";
+    private static readonly JsonSerializerOptions MarkerJsonOptions = new()
+    {
+        WriteIndented = true
+    };
+
     private readonly Dictionary<string, LoadedModuleAssembly> _packages =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PackageStamp> _failedPackages =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PackageStamp> _nonModulePackages =
         new(StringComparer.OrdinalIgnoreCase);
+    private string? _packageDirectoryState;
     private bool _disposed;
 
     public ModuleHost(string modulesDirectory)
@@ -29,9 +37,25 @@ internal sealed class ModuleHost : IModuleManager
 
         var errors = new List<string>();
         var changed = false;
-        var packages = Directory
+        var packageDirectories = Directory
             .EnumerateDirectories(ModulesDirectory, "*", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFullPath)
+            .ToArray();
+        var packageDirectoryState = string.Join(
+            '\n',
+            packageDirectories
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .Select(path => $"{path}|{File.Exists(GetDisabledMarkerPath(path))}"));
+        if (!string.Equals(
+                _packageDirectoryState,
+                packageDirectoryState,
+                StringComparison.Ordinal))
+        {
+            _packageDirectoryState = packageDirectoryState;
+            changed = true;
+        }
+        var packages = packageDirectories
+            .Where(path => !File.Exists(GetDisabledMarkerPath(path)))
             .ToDictionary(
                 path => path,
                 PackageStamp.FromDirectory,
@@ -133,6 +157,123 @@ internal sealed class ModuleHost : IModuleManager
         .OrderBy(module => module.DisplayName, StringComparer.CurrentCultureIgnoreCase)
         .ToArray();
 
+    public IReadOnlyList<ModulePackageInfo> GetInstalledPackages()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Directory.CreateDirectory(ModulesDirectory);
+
+        return Directory
+            .EnumerateDirectories(ModulesDirectory, "*", SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFullPath)
+            .Select(GetInstalledPackage)
+            .Where(package => package is not null)
+            .Cast<ModulePackageInfo>()
+            .OrderBy(package => package.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(package => package.PackageName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public ModuleOperationResult SetPackageEnabled(string packageName, bool enabled)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!TryResolvePackageDirectory(packageName, out var packageDirectory, out var error))
+        {
+            return new ModuleOperationResult(false, error);
+        }
+        if (!Directory.Exists(packageDirectory))
+        {
+            return new ModuleOperationResult(false, $"模块包不存在：{packageName}");
+        }
+
+        try
+        {
+            var markerPath = GetDisabledMarkerPath(packageDirectory);
+            if (enabled)
+            {
+                if (File.Exists(markerPath))
+                {
+                    File.Delete(markerPath);
+                }
+                _failedPackages.Remove(packageDirectory);
+                _nonModulePackages.Remove(packageDirectory);
+            }
+            else
+            {
+                WriteDisabledMarker(packageDirectory);
+            }
+
+            var refresh = Refresh();
+            var current = GetInstalledPackages().FirstOrDefault(package =>
+                string.Equals(package.PackageName, packageName, StringComparison.OrdinalIgnoreCase));
+            var expectedState = enabled
+                ? ModulePackageState.Enabled
+                : ModulePackageState.Disabled;
+            if (current?.State != expectedState)
+            {
+                var failure = current?.ErrorMessage ?? refresh.Errors.FirstOrDefault();
+                return new ModuleOperationResult(
+                    false,
+                    enabled
+                        ? $"模块未能启用：{failure ?? "没有找到可加载的模块入口"}"
+                        : $"模块未能禁用：{failure ?? "状态更新失败"}",
+                    refresh);
+            }
+
+            return new ModuleOperationResult(
+                true,
+                enabled ? $"已启用“{current.DisplayName}”" : $"已禁用“{current.DisplayName}”",
+                refresh);
+        }
+        catch (Exception exception) when (IsPackageOperationException(exception))
+        {
+            return new ModuleOperationResult(
+                false,
+                $"{(enabled ? "启用" : "禁用")}模块失败：{exception.Message}");
+        }
+    }
+
+    public ModuleOperationResult DeletePackage(string packageName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!TryResolvePackageDirectory(packageName, out var packageDirectory, out var error))
+        {
+            return new ModuleOperationResult(false, error);
+        }
+        if (!Directory.Exists(packageDirectory))
+        {
+            return new ModuleOperationResult(false, $"模块包不存在：{packageName}");
+        }
+
+        try
+        {
+            var displayName = GetInstalledPackage(packageDirectory)?.DisplayName ?? packageName;
+            WriteDisabledMarker(packageDirectory);
+            Refresh();
+            Directory.Delete(packageDirectory, recursive: true);
+            var refresh = Refresh();
+            return new ModuleOperationResult(true, $"已永久删除“{displayName}”", refresh);
+        }
+        catch (Exception exception) when (IsPackageOperationException(exception))
+        {
+            ModuleRefreshResult? refresh = null;
+            try
+            {
+                refresh = Refresh();
+            }
+            catch (Exception refreshException) when (IsPackageOperationException(refreshException))
+            {
+                Debug.WriteLine($"模块删除失败后的刷新也失败：{refreshException}");
+            }
+
+            return new ModuleOperationResult(
+                false,
+                $"永久删除模块失败：{exception.Message}。模块已保持禁用，可关闭占用它的程序后重试。",
+                refresh);
+        }
+    }
+
     public IReadOnlyList<ICaptureFeature> CreateCaptureFeatures()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -167,7 +308,126 @@ internal sealed class ModuleHost : IModuleManager
         _packages.Clear();
         _failedPackages.Clear();
         _nonModulePackages.Clear();
+        _packageDirectoryState = null;
     }
+
+    private ModulePackageInfo? GetInstalledPackage(string packageDirectory)
+    {
+        var packageName = Path.GetFileName(packageDirectory);
+        if (_packages.TryGetValue(packageDirectory, out var loaded))
+        {
+            var module = loaded.Modules.Single();
+            return new ModulePackageInfo(
+                packageName,
+                module.Id,
+                module.DisplayName,
+                module.Version,
+                packageDirectory,
+                ModulePackageState.Enabled);
+        }
+
+        var markerPath = GetDisabledMarkerPath(packageDirectory);
+        if (File.Exists(markerPath))
+        {
+            var marker = TryReadDisabledMarker(markerPath);
+            return new ModulePackageInfo(
+                packageName,
+                marker?.ModuleId ?? packageName,
+                marker?.DisplayName ?? packageName,
+                Version.TryParse(marker?.Version, out var version) ? version : null,
+                packageDirectory,
+                ModulePackageState.Disabled);
+        }
+
+        if (_failedPackages.ContainsKey(packageDirectory))
+        {
+            return new ModulePackageInfo(
+                packageName,
+                packageName,
+                packageName,
+                null,
+                packageDirectory,
+                ModulePackageState.LoadFailed,
+                "模块入口加载失败，请重新加载或重新安装模块");
+        }
+
+        return null;
+    }
+
+    private void WriteDisabledMarker(string packageDirectory)
+    {
+        var current = GetInstalledPackage(packageDirectory);
+        var marker = new DisabledPackageMarker(
+            current?.ModuleId ?? Path.GetFileName(packageDirectory),
+            current?.DisplayName ?? Path.GetFileName(packageDirectory),
+            current?.Version?.ToString());
+        var markerPath = GetDisabledMarkerPath(packageDirectory);
+        var temporaryPath = Path.Combine(
+            packageDirectory,
+            $".{Guid.NewGuid():N}.module-state.tmp");
+        try
+        {
+            File.WriteAllText(
+                temporaryPath,
+                JsonSerializer.Serialize(marker, MarkerJsonOptions));
+            File.Move(temporaryPath, markerPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static DisabledPackageMarker? TryReadDisabledMarker(string markerPath)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<DisabledPackageMarker>(
+                File.ReadAllText(markerPath),
+                MarkerJsonOptions);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Debug.WriteLine($"读取模块禁用标记失败：{exception}");
+            return null;
+        }
+    }
+
+    private bool TryResolvePackageDirectory(
+        string packageName,
+        out string packageDirectory,
+        out string error)
+    {
+        packageDirectory = string.Empty;
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(packageName) ||
+            !string.Equals(packageName, Path.GetFileName(packageName), StringComparison.Ordinal) ||
+            packageName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            error = "模块包名称无效。";
+            return false;
+        }
+
+        packageDirectory = Path.GetFullPath(Path.Combine(ModulesDirectory, packageName));
+        var rootPrefix = Path.TrimEndingDirectorySeparator(ModulesDirectory) +
+                         Path.DirectorySeparatorChar;
+        if (!packageDirectory.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            packageDirectory = string.Empty;
+            error = "模块包路径超出模块目录。";
+            return false;
+        }
+        return true;
+    }
+
+    private static string GetDisabledMarkerPath(string packageDirectory) =>
+        Path.Combine(packageDirectory, DisabledMarkerFileName);
+
+    private static bool IsPackageOperationException(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or ArgumentException or JsonException;
 
     private static string GetLoadError(Exception exception)
     {
@@ -177,6 +437,11 @@ internal sealed class ModuleHost : IModuleManager
         }
         return exception.InnerException?.Message ?? exception.Message;
     }
+
+    private sealed record DisabledPackageMarker(
+        string ModuleId,
+        string DisplayName,
+        string? Version);
 
     private readonly record struct PackageStamp(string Fingerprint)
     {

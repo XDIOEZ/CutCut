@@ -13,6 +13,7 @@ namespace ScreenshotTool.Presentation;
 internal sealed class MainForm : Form
 {
     private const string GalleryPageId = "gallery";
+    private const string ScreenshotSettingsPageId = "screenshot-settings";
 
     private readonly ISettingsStore _settingsStore;
     private readonly IGlobalHotkeyService _hotkeyService;
@@ -22,6 +23,8 @@ internal sealed class MainForm : Form
     private readonly IWindowLocator _windowLocator;
     private readonly IFileLocationService _fileLocationService;
     private readonly IModuleManager _moduleManager;
+    private readonly IStartupRegistrationService _startupRegistrationService;
+    private readonly StartupWorkspaceReason _startupWorkspaceReason;
     private readonly NotifyIcon _trayIcon;
     private readonly System.Windows.Forms.Timer _moduleRefreshTimer;
     private readonly AppShellControl _shell;
@@ -30,10 +33,12 @@ internal sealed class MainForm : Form
     private readonly DrawingCoefficientsSettingsPage _drawingCoefficientsPage;
     private readonly ScreenshotSettingsPage _screenshotSettingsPage;
     private readonly SavePathSettingsPage _savePathPage;
+    private readonly ModuleManagementPage _moduleManagementPage;
     private readonly ScreenshotGalleryPage _galleryPage;
     private readonly Dictionary<string, IModuleSettingsPage> _moduleSettingsPages =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _backgroundIntegrationEnabled;
+    private readonly bool _startInBackground;
     private AppSettings _settings;
     private bool _isCapturing;
     private bool _isExiting;
@@ -50,7 +55,11 @@ internal sealed class MainForm : Form
         IWindowLocator windowLocator,
         IFileLocationService fileLocationService,
         IModuleManager moduleManager,
-        bool enableBackgroundIntegration = true)
+        IStartupRegistrationService startupRegistrationService,
+        bool enableBackgroundIntegration = true,
+        AppSettings? initialSettings = null,
+        StartupWorkspaceReason startupWorkspaceReason = StartupWorkspaceReason.None,
+        bool startInBackground = false)
     {
         _settingsStore = settingsStore;
         _hotkeyService = hotkeyService;
@@ -60,8 +69,11 @@ internal sealed class MainForm : Form
         _windowLocator = windowLocator;
         _fileLocationService = fileLocationService;
         _moduleManager = moduleManager;
+        _startupRegistrationService = startupRegistrationService;
         _backgroundIntegrationEnabled = enableBackgroundIntegration;
-        _settings = settingsStore.Load();
+        _startInBackground = startInBackground;
+        _settings = initialSettings ?? settingsStore.Load();
+        _startupWorkspaceReason = startupWorkspaceReason;
 
         Text = "轻截 - 截图工作台";
         Font = AppTheme.CreateFont(9F);
@@ -88,11 +100,13 @@ internal sealed class MainForm : Form
         _screenshotSettingsPage = new ScreenshotSettingsPage(
             _settings.GetHotkey(),
             _settings.StartMinimized,
+            ReadStartupRegistration(),
             _settings.Preferences.DismissSaveNotificationBeforeCapture,
             _settings.Preferences.HideMainWindowDuringCapture);
         _savePathPage = new SavePathSettingsPage(
             _settings.OutputFolder,
             _settings.Preferences.ScreenshotFileNameMode);
+        _moduleManagementPage = new ModuleManagementPage(_moduleManager, _fileLocationService);
         _galleryPage = new ScreenshotGalleryPage(_settings.OutputFolder, _fileLocationService);
         ComposePages();
         WirePageEvents();
@@ -125,7 +139,7 @@ internal sealed class MainForm : Form
             100));
 
         _shell.AddPage(new AppPage(
-            "screenshot-settings",
+            ScreenshotSettingsPageId,
             "截图设置",
             "设置截图前提示与主窗口显示行为",
             _screenshotSettingsPage,
@@ -153,11 +167,18 @@ internal sealed class MainForm : Form
             700));
 
         _shell.AddPage(new AppPage(
+            "modules",
+            "插件模块",
+            "查看、启用、禁用或永久删除已安装的扩展模块",
+            _moduleManagementPage,
+            800));
+
+        _shell.AddPage(new AppPage(
             GalleryPageId,
             "查看截图",
             "浏览保存目录中的最近截图，双击即可查看",
             _galleryPage,
-            800));
+            900));
     }
 
     private void WirePageEvents()
@@ -168,6 +189,10 @@ internal sealed class MainForm : Form
             if (pageId == GalleryPageId)
             {
                 _galleryPage.RefreshScreenshots();
+            }
+            else if (pageId == "modules")
+            {
+                _moduleManagementPage.RefreshPackages();
             }
         };
         _stickerBehaviorPage.SaveRequested += SaveSettings;
@@ -185,6 +210,7 @@ internal sealed class MainForm : Form
         _savePathPage.SaveRequested += SaveSettings;
         _savePathPage.BrowseRequested += BrowseFolder;
         _savePathPage.OpenRequested += OpenOutputFolder;
+        _moduleManagementPage.OperationCompleted += HandleModuleOperationCompleted;
     }
 
     private NotifyIcon BuildTrayIcon(bool visible)
@@ -243,6 +269,7 @@ internal sealed class MainForm : Form
                 StartMinimized = _screenshotSettingsPage.StartMinimized,
                 HotkeyModifiers = newHotkey.Modifiers,
                 HotkeyVirtualKey = newHotkey.VirtualKey,
+                LastLaunchedVersion = _settings.LastLaunchedVersion,
                 Preferences = new UserPreferences
                 {
                     StickerSelectionMoveMode = _stickerBehaviorPage.Mode,
@@ -310,6 +337,7 @@ internal sealed class MainForm : Form
             _savePathPage.FolderPath = candidate.OutputFolder;
             _galleryPage.FolderPath = candidate.OutputFolder;
             _trayIcon.Text = $"轻截（{newHotkey.ToDisplayText()}）";
+            var startupRegistrationError = TryApplyStartupRegistration();
             if (imagesToMove.Count > 0)
             {
                 var migration = ScreenshotFolderMigration.MoveImages(
@@ -331,6 +359,17 @@ internal sealed class MainForm : Form
             {
                 _shell.ShowStatus("设置已保存", AppTheme.Success);
             }
+
+            if (startupRegistrationError is not null)
+            {
+                _shell.ShowStatus("其他设置已保存，但开机自动启动设置失败", AppTheme.Danger);
+                MessageBox.Show(
+                    this,
+                    $"其他设置已保存，但开机自动启动设置失败：{startupRegistrationError}",
+                    "开机启动设置失败",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -344,6 +383,37 @@ internal sealed class MainForm : Form
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
         StringComparison.OrdinalIgnoreCase);
+
+    private bool ReadStartupRegistration()
+    {
+        try
+        {
+            return _startupRegistrationService.IsEnabled;
+        }
+        catch (Exception exception) when (IsStartupRegistrationException(exception))
+        {
+            System.Diagnostics.Debug.WriteLine($"读取开机启动设置失败：{exception}");
+            return false;
+        }
+    }
+
+    private string? TryApplyStartupRegistration()
+    {
+        try
+        {
+            _startupRegistrationService.SetEnabled(_screenshotSettingsPage.StartWithWindows);
+            return null;
+        }
+        catch (Exception exception) when (IsStartupRegistrationException(exception))
+        {
+            _screenshotSettingsPage.StartWithWindows = ReadStartupRegistration();
+            return exception.Message;
+        }
+    }
+
+    private static bool IsStartupRegistrationException(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or ArgumentException or
+        System.Security.SecurityException;
 
     private void BrowseFolder(object? sender, EventArgs e)
     {
@@ -401,6 +471,7 @@ internal sealed class MainForm : Form
             if (result.Changed || force)
             {
                 SyncModuleSettingsPages();
+                _moduleManagementPage.RefreshPackages();
             }
             if (result.Errors.Count > 0)
             {
@@ -426,6 +497,20 @@ internal sealed class MainForm : Form
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
+    }
+
+    private void HandleModuleOperationCompleted(
+        object? sender,
+        ModuleOperationCompletedEventArgs e)
+    {
+        if (e.Result.RefreshResult is not null)
+        {
+            SyncModuleSettingsPages();
+        }
+
+        _shell.ShowStatus(
+            e.Result.Message,
+            e.Result.Succeeded ? AppTheme.Success : AppTheme.Danger);
     }
 
     private void SyncModuleSettingsPages()
@@ -605,6 +690,18 @@ internal sealed class MainForm : Form
         }
 
         _initialMinimizeHandled = true;
+        if (_startupWorkspaceReason != StartupWorkspaceReason.None)
+        {
+            WindowState = FormWindowState.Normal;
+            _shell.SelectPage(ScreenshotSettingsPageId);
+            _shell.ShowStatus(
+                _startupWorkspaceReason == StartupWorkspaceReason.FirstRun
+                    ? "欢迎使用轻截，请检查截图与保存设置"
+                    : "轻截已更新，请检查本版本的设置",
+                AppTheme.Accent);
+            Activate();
+        }
+
         if (_pendingHotkeyError is not null)
         {
             MessageBox.Show(this, _pendingHotkeyError, "快捷键不可用",
@@ -613,7 +710,10 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (_settings.StartMinimized)
+        if (StartupWorkspacePolicy.ShouldStartMinimized(
+                _settings.StartMinimized,
+                _startupWorkspaceReason,
+                _startInBackground))
         {
             BeginInvoke(() =>
             {

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="按需下载轻截的长截图、录屏等插件模块，也可以直接选择已经整合模块的轻量完整包。"
+    >
+    <meta name="theme-color" content="#06142e">
+    <meta property="og:title" content="轻截 · 插件模块下载">
+    <meta
+      property="og:description"
+      content="为轻截按需选择插件模块，保持基础截图轻巧，也可直接下载整合完整包。"
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://xdioez.github.io/CutCut/modules.html">
+    <meta
+      property="og:image"
+      content="https://xdioez.github.io/CutCut/assets/lightshot-icon.png"
+    >
+    <link rel="icon" href="assets/lightshot-icon.png">
+    <link rel="apple-touch-icon" href="assets/lightshot-icon.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="modules.js" defer></script>
+    <title>轻截 · 插件模块下载</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+
+    <div class="page-glow page-glow--one" aria-hidden="true"></div>
+    <div class="page-glow page-glow--two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="返回轻截首页">
+        <img src="assets/lightshot-icon.png" width="42" height="42" alt="">
+        <span>轻截</span>
+      </a>
+      <nav aria-label="主要导航">
+        <a href="index.html">首页</a>
+        <a href="index.html#download">完整下载</a>
+        <a href="modules.html" aria-current="page">模块下载</a>
+        <a
+          class="github-link"
+          href="https://github.com/XDIOEZ/CutCut/releases"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span>Releases</span>
+        </a>
+      </nav>
+    </header>
+
+    <main id="main" class="modules-main">
+      <section class="modules-hero">
+        <div class="eyebrow">
+          <span class="eyebrow-dot" aria-hidden="true"></span>
+          按需扩展
+        </div>
+        <h1>只装你需要的<span>模块。</span></h1>
+        <p>
+          长截图、录屏等能力都可以独立下载。多数用户仍建议直接选择已经整合好的轻量完整包，
+          解压后即可一次拥有常用功能。
+        </p>
+      </section>
+
+      <aside class="bundle-recommendation" aria-label="完整包推荐">
+        <div>
+          <span class="recommendation-label">推荐给大多数用户</span>
+          <h2>下载已经整合模块的轻量完整包</h2>
+          <p>无需逐个安装，常用模块已放入正确目录，仍保持小于 5 MiB。</p>
+        </div>
+        <a class="button button--primary" href="index.html#download">下载完整包</a>
+      </aside>
+
+      <section class="module-catalog" aria-labelledby="catalog-title">
+        <div class="section-heading module-section-heading">
+          <p>独立下载</p>
+          <h2 id="catalog-title">选择需要的模块</h2>
+        </div>
+
+        <div class="module-download-list" aria-live="polite">
+          <article class="module-download-card">
+            <div class="module-mark module-mark--cyan" aria-hidden="true">↕</div>
+            <div class="module-download-copy">
+              <div class="module-title-row">
+                <h3>长截图</h3>
+                <span class="module-availability" id="long-capture-status">正在检查最新版…</span>
+              </div>
+              <p>滚动采集网页、文档和聊天记录，并自动拼接为一张完整图片。</p>
+              <small id="long-capture-meta">独立模块 · Windows x64</small>
+            </div>
+            <a
+              class="button button--module"
+              id="long-capture-download"
+              href="https://github.com/XDIOEZ/CutCut/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+            >查看 Releases</a>
+          </article>
+
+          <article class="module-download-card">
+            <div class="module-mark module-mark--violet" aria-hidden="true">●</div>
+            <div class="module-download-copy">
+              <div class="module-title-row">
+                <h3>录屏</h3>
+                <span class="module-availability" id="screen-recording-status">正在检查最新版…</span>
+              </div>
+              <p>区域录制、系统声音、麦克风与实时标注，适合快速制作演示片段。</p>
+              <small id="screen-recording-meta">独立模块 · Windows x64</small>
+            </div>
+            <a
+              class="button button--module"
+              id="screen-recording-download"
+              href="https://github.com/XDIOEZ/CutCut/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+            >查看 Releases</a>
+          </article>
+        </div>
+        <p class="catalog-status" id="catalog-status">正在连接 GitHub Releases…</p>
+      </section>
+
+      <section class="module-installation" aria-labelledby="installation-title">
+        <div class="section-heading module-section-heading">
+          <p>安装方式</p>
+          <h2 id="installation-title">三步装回模块</h2>
+        </div>
+        <ol class="install-steps module-install-steps">
+          <li><span>01</span><p><strong>下载</strong>需要的模块 ZIP</p></li>
+          <li><span>02</span><p><strong>解压</strong>并合并其中的 Modules 文件夹</p></li>
+          <li><span>03</span><p><strong>刷新</strong>在设置工作台打开“插件模块”</p></li>
+        </ol>
+        <p class="module-install-note">
+          每个模块必须保留自己的一级文件夹。轻截运行时会自动发现变更，也可以从托盘菜单手动重新加载。
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <div class="footer-brand">
+        <img src="assets/lightshot-icon.png" width="30" height="30" alt="">
+        <span>轻截</span>
+      </div>
+      <p>基础截图保持轻巧，扩展能力按需组合。</p>
+      <a href="index.html">返回首页 <span aria-hidden="true">→</span></a>
+    </footer>
+  </body>
+</html>

@@ -19,6 +19,7 @@
     "hotkeyModifiers": "control, shift",
     "hotkeyVirtualKey": 88,
     "startMinimized": false,
+    "lastLaunchedVersion": "1.10.0",
     "preferences": {
       "stickerSelectionMoveMode": "followSelection",
       "minimumToolWidth": 2,
@@ -57,6 +58,13 @@
 ```
 
 `hotkeyModifiers`、`hotkeyVirtualKey` 和 `startMinimized` 统一在“截图设置”分页中配置。快捷键输入框获得焦点时会暂时取消全局监听，保存新组合键失败时恢复原快捷键；`startMinimized` 为 `true` 时，程序启动后直接进入系统托盘。
+
+“开机自动启动”也位于“截图设置”分页，但 Windows 当前用户启动项本身就是它的持久化来源，因此不重复写入 JSON。开启后程序在
+`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` 中维护名为 `LightShotCN` 的值，命令使用带引号的当前 EXE 绝对路径和 `--background` 参数；登录 Windows 后会安静进入托盘，即使“手动启动后最小化”处于关闭状态也不会弹出工作台。该启动项只影响当前用户且无需管理员权限。关闭开关会删除该值；程序移动后旧路径不会误显示为已开启，重新勾选即可写入新位置。
+
+首次运行或版本更新仍优先打开设置工作台：即使这次进程由 Windows 启动项以 `--background` 唤起，也不会跳过首次/更新检查。设置确认完成后，同一版本的后续开机启动才会恢复安静进入托盘。
+
+`lastLaunchedVersion` 是程序维护的启动版本标记，不属于可编辑偏好。配置中没有该字段，或字段值与当前程序版本不同时，本次启动会主动打开工作台并选中“截图设置”，即使用户启用了“启动后最小化”也不会隐藏；版本标记写入成功后，同一版本的后续启动恢复用户原来的最小化选择。版本比较使用 `主版本.次版本.补丁版本`，不受程序集修订号影响。
 
 `stickerSelectionMoveMode` 支持：
 

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$OutputRoot = "artifacts",
+    [switch]$SkipLongCaptureAddon,
     [switch]$SkipScreenRecordingAddon
 )
 
@@ -94,6 +95,13 @@ $results = foreach ($package in $packages) {
 }
 
 $results | Format-Table -AutoSize
+
+if (-not $SkipLongCaptureAddon) {
+    & (Join-Path $PSScriptRoot "Publish-LongCaptureModule.ps1") -OutputRoot $outputRootPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Long capture add-on publish failed with exit code $LASTEXITCODE."
+    }
+}
 
 if (-not $SkipScreenRecordingAddon) {
     & (Join-Path $PSScriptRoot "Publish-ScreenRecordingModule.ps1") -OutputRoot $outputRootPath

@@ -45,5 +45,20 @@ internal sealed class ExplorerFileLocationService : IFileLocationService
         });
     }
 
+    public void OpenWebPage(Uri uri)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+        if (!uri.IsAbsoluteUri || uri.Scheme is not ("https" or "http"))
+        {
+            throw new ArgumentException("只允许打开 HTTP 或 HTTPS 网页。", nameof(uri));
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = uri.AbsoluteUri,
+            UseShellExecute = true
+        });
+    }
+
     internal static string BuildSelectArguments(string filePath) => $"/select,\"{filePath}\"";
 }

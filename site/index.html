@@ -39,6 +39,7 @@
       <nav aria-label="主要导航">
         <a href="#features">功能</a>
         <a href="#download">下载</a>
+        <a href="modules.html">模块下载</a>
         <a
           class="github-link"
           href="https://github.com/XDIOEZ/CutCut"
@@ -201,7 +202,7 @@
               Windows x64
             </div>
             <h2>准备好，轻松截一下</h2>
-            <p>下载轻量完整包，解压后运行。包含长截图与录屏模块，需要预先安装 .NET 8 Desktop Runtime。</p>
+            <p>轻量完整包小于 5 MiB；没有安装 .NET 8 的用户，也可以选择旁边内置运行库的重量版。</p>
           </div>
 
           <div class="release-panel" aria-live="polite">
@@ -212,21 +213,35 @@
               </div>
               <span class="release-size" id="release-size">&lt; 5 MiB</span>
             </div>
-            <a
-              class="button button--download"
-              id="download-button"
-              href="https://github.com/XDIOEZ/CutCut/releases"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <span>
-                <small>适用于 Windows 10 / 11</small>
-                <strong id="download-label">查看发布版本</strong>
-              </span>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14" />
-              </svg>
-            </a>
+            <div class="download-actions">
+              <a
+                class="button button--download"
+                id="download-button"
+                href="https://github.com/XDIOEZ/CutCut/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span>
+                  <small>适用于 Windows 10 / 11</small>
+                  <strong id="download-label">查看发布版本</strong>
+                </span>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14" />
+                </svg>
+              </a>
+              <a
+                class="button button--portable"
+                id="portable-download-button"
+                href="https://github.com/XDIOEZ/CutCut/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="内置 .NET 8 Desktop Runtime，无需另外安装"
+              >
+                <small>免装 .NET 8</small>
+                <strong id="portable-download-label">重量版</strong>
+                <span id="portable-download-size">80+ MiB</span>
+              </a>
+            </div>
             <p class="release-status" id="release-status">正在连接 GitHub Releases…</p>
             <a
               class="runtime-link"
@@ -241,7 +256,7 @@
         </div>
 
         <ol class="install-steps" aria-label="安装步骤">
-          <li><span>01</span><p><strong>下载</strong>轻量版 ZIP 压缩包</p></li>
+          <li><span>01</span><p><strong>下载</strong>轻量版或免运行库重量版 ZIP</p></li>
           <li><span>02</span><p><strong>解压</strong>到任意可写目录</p></li>
           <li><span>03</span><p><strong>启动</strong>ScreenshotTool.exe</p></li>
         </ol>

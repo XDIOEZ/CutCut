@@ -10,5 +10,11 @@ internal interface IModuleManager : ICaptureFeatureCatalog, IDisposable
 
     IReadOnlyList<ModuleInfo> GetModules();
 
+    IReadOnlyList<ModulePackageInfo> GetInstalledPackages();
+
+    ModuleOperationResult SetPackageEnabled(string packageName, bool enabled);
+
+    ModuleOperationResult DeletePackage(string packageName);
+
     IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host);
 }

@@ -161,6 +161,10 @@ internal sealed class JsonSettingsStore : ISettingsStore
             settings.SetHotkey(HotkeyDefinition.Default);
         }
 
+        settings.LastLaunchedVersion = string.IsNullOrWhiteSpace(settings.LastLaunchedVersion)
+            ? null
+            : settings.LastLaunchedVersion.Trim();
+
         settings.Preferences ??= new UserPreferences();
         if (!Enum.IsDefined(settings.Preferences.StickerSelectionMoveMode))
         {

@@ -11,6 +11,8 @@ internal sealed class AppSettings
 
     public bool StartMinimized { get; set; }
 
+    public string? LastLaunchedVersion { get; set; }
+
     public UserPreferences Preferences { get; set; } = new();
 
     public HotkeyDefinition GetHotkey() => new(HotkeyModifiers, HotkeyVirtualKey);
