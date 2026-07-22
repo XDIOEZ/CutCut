@@ -23,6 +23,7 @@
     <link rel="apple-touch-icon" href="assets/lightshot-icon.png">
     <link rel="stylesheet" href="styles.css">
     <script src="release.js" defer></script>
+    <script src="showcase.js" defer></script>
     <title>轻截 · 轻量 Windows 截图工具</title>
   </head>
   <body>
@@ -38,6 +39,8 @@
       </a>
       <nav aria-label="主要导航">
         <a href="#features">功能</a>
+        <a href="#showcase">实拍</a>
+        <a href="#compare">对比</a>
         <a href="#download">下载</a>
         <a href="modules.html">模块下载</a>
         <a
@@ -166,8 +169,8 @@
                 <path d="m4 20 4.2-1 10-10a2 2 0 0 0-3-3l-10 10L4 20Zm9.5-12.5 3 3" />
               </svg>
             </div>
-            <h3>随手标注</h3>
-            <p>文字、箭头、画笔、形状与马赛克，支持多选、吸附、旋转和缩放。</p>
+            <h3>标注还能继续改</h3>
+            <p>文字、箭头、画笔、形状与马赛克都是可编辑对象，支持多选、吸附、旋转和缩放。</p>
           </article>
           <article class="feature-card">
             <div class="feature-icon feature-icon--violet" aria-hidden="true">
@@ -176,7 +179,7 @@
               </svg>
             </div>
             <h3>长截图与录屏</h3>
-            <p>滚动采集长页面；可选录屏模块支持区域录制、系统声音与麦克风。</p>
+            <p>滚动采集长页面；录屏时继续添加批注，并可显示鼠标点击提示。</p>
           </article>
           <article class="feature-card feature-card--wide">
             <div class="feature-icon feature-icon--green" aria-hidden="true">
@@ -187,6 +190,232 @@
             <div>
               <h3>模块化，保持清爽</h3>
               <p>长截图与录屏按模块加载。模块可以热替换或移除，基础截图流程始终保持轻快。</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="showcase-section" id="showcase">
+        <div class="section-heading showcase-heading">
+          <p>真实画面，不只是功能列表</p>
+          <h2>三步看懂轻截</h2>
+        </div>
+
+        <div
+          class="showcase-carousel"
+          data-showcase-carousel
+          data-playing="true"
+          role="region"
+          aria-roledescription="幻灯片"
+          aria-label="轻截功能宣传图"
+          tabindex="0"
+        >
+          <div class="showcase-stage">
+            <article
+              class="showcase-slide is-active"
+              data-showcase-slide
+              role="group"
+              aria-roledescription="幻灯片"
+              aria-label="第 1 张，共 3 张：精准框选"
+              aria-hidden="false"
+            >
+              <div class="showcase-media">
+                <img
+                  src="assets/showcase-selection.png"
+                  width="1226"
+                  height="470"
+                  alt="轻截蓝色选区和包含矩形、椭圆、箭头、文字、长截图与录屏等功能的浮动工具栏"
+                  decoding="async"
+                >
+                <span class="showcase-number" aria-hidden="true">01 / 03</span>
+              </div>
+              <div class="showcase-copy">
+                <p class="showcase-step">第一步 · 精准框选</p>
+                <h3>先框选，再决定怎么处理</h3>
+                <p>窗口识别、自由框选与八手柄微调都在屏幕上完成。工具栏紧贴选区，截图、长图和录屏不必来回切换应用。</p>
+                <ul>
+                  <li>选区尺寸实时可见</li>
+                  <li>常用操作集中在一条工具栏</li>
+                </ul>
+                <a class="button button--primary showcase-cta" href="#download">下载开始体验</a>
+              </div>
+            </article>
+
+            <article
+              class="showcase-slide"
+              data-showcase-slide
+              role="group"
+              aria-roledescription="幻灯片"
+              aria-label="第 2 张，共 3 张：对象级标注"
+              aria-hidden="true"
+            >
+              <div class="showcase-media">
+                <img
+                  src="assets/showcase-annotation.png"
+                  width="1287"
+                  height="452"
+                  alt="轻截选区中使用文字、箭头和矩形完成的红色批注示例"
+                  loading="lazy"
+                  decoding="async"
+                >
+                <span class="showcase-number" aria-hidden="true">02 / 03</span>
+              </div>
+              <div class="showcase-copy">
+                <p class="showcase-step">第二步 · 当场标清楚</p>
+                <h3>画完以后，还能继续改</h3>
+                <p>文字、箭头、形状和画笔不是一次性痕迹。需要时继续选择、移动、缩放、旋转或对齐，说明图不用反复重截。</p>
+                <ul>
+                  <li>多选、吸附与重叠元素轮选</li>
+                  <li>文字可再次双击编辑</li>
+                </ul>
+                <a
+                  class="button button--primary showcase-cta"
+                  href="#download"
+                  tabindex="-1"
+                >下载开始体验</a>
+              </div>
+            </article>
+
+            <article
+              class="showcase-slide"
+              data-showcase-slide
+              role="group"
+              aria-roledescription="幻灯片"
+              aria-label="第 3 张，共 3 张：长截图预览"
+              aria-hidden="true"
+            >
+              <div class="showcase-media">
+                <img
+                  src="assets/showcase-long-capture.png"
+                  width="1308"
+                  height="620"
+                  alt="轻截正在代码编辑器中进行长截图并显示长截图预览窗口"
+                  loading="lazy"
+                  decoding="async"
+                >
+                <span class="showcase-number" aria-hidden="true">03 / 03</span>
+              </div>
+              <div class="showcase-copy">
+                <p class="showcase-step">第三步 · 超出一屏也能截</p>
+                <h3>边滚动，边看长图长出来</h3>
+                <p>向上或向下滚动时自动采集和拼接，独立预览窗同步显示结果。完成后直接回到同一套截图编辑工具继续标注。</p>
+                <ul>
+                  <li>双向采集与实时拼接预览</li>
+                  <li>完成后继续添加批注和贴图</li>
+                </ul>
+                <a
+                  class="button button--primary showcase-cta"
+                  href="#download"
+                  tabindex="-1"
+                >下载开始体验</a>
+              </div>
+            </article>
+          </div>
+
+          <div class="showcase-controls">
+            <div class="showcase-arrows">
+              <button type="button" data-showcase-previous aria-label="上一张宣传图">←</button>
+              <button type="button" data-showcase-next aria-label="下一张宣传图">→</button>
+            </div>
+            <div class="showcase-dots" aria-label="选择宣传图">
+              <button
+                type="button"
+                class="is-active"
+                data-showcase-dot="0"
+                aria-label="查看第一张：精准框选"
+                aria-current="true"
+              ></button>
+              <button
+                type="button"
+                data-showcase-dot="1"
+                aria-label="查看第二张：对象级标注"
+              ></button>
+              <button
+                type="button"
+                data-showcase-dot="2"
+                aria-label="查看第三张：长截图预览"
+              ></button>
+            </div>
+            <button class="showcase-autoplay" type="button" data-showcase-autoplay>
+              暂停自动播放
+            </button>
+          </div>
+          <p class="visually-hidden" data-showcase-status aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section class="comparison-section" id="compare">
+        <div class="comparison-intro">
+          <p class="comparison-kicker">和 Windows 自带截图有什么不同</p>
+          <h2>系统负责“截一下”，<br>轻截负责“当场做完”。</h2>
+          <p class="comparison-lead">
+            只需要偶尔截一张？<kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd>
+            已经很方便。需要把截图做成说明图、长页面或演示视频时，轻截把捕捉和编辑留在同一条工作流里。
+          </p>
+          <ul class="comparison-highlights" aria-label="轻截的主要差异">
+            <li>可持续编辑的标注对象</li>
+            <li>双向滚动长截图</li>
+            <li>录屏中的实时批注</li>
+            <li>可自由装卸的插件模块</li>
+          </ul>
+        </div>
+
+        <div class="comparison-board" aria-label="轻截与 Windows 自带截图对比">
+          <div class="comparison-board-head" aria-hidden="true">
+            <span>使用场景</span>
+            <span>Windows 自带截图</span>
+            <span>轻截</span>
+          </div>
+
+          <article class="comparison-row">
+            <h3>制作说明图</h3>
+            <div class="comparison-answer comparison-answer--system">
+              <span>Windows 自带截图</span>
+              <p>画笔、形状和裁剪，适合快速标一下就分享。</p>
+            </div>
+            <div class="comparison-answer comparison-answer--lightshot">
+              <span>轻截</span>
+              <strong>标注始终是可编辑对象</strong>
+              <p>多选、移动、八手柄缩放、旋转、吸附和文字二次编辑，不必画错后重来。</p>
+            </div>
+          </article>
+
+          <article class="comparison-row">
+            <h3>截取长页面</h3>
+            <div class="comparison-answer comparison-answer--system">
+              <span>Windows 自带截图</span>
+              <p>更适合当前屏幕里看得见的单张画面。</p>
+            </div>
+            <div class="comparison-answer comparison-answer--lightshot">
+              <span>轻截</span>
+              <strong>滚动采集后继续完整编辑</strong>
+              <p>向上或向下采集并自动拼接，完成后仍可添加文字、形状、马赛克和贴图。</p>
+            </div>
+          </article>
+
+          <article class="comparison-row">
+            <h3>录制操作演示</h3>
+            <div class="comparison-answer comparison-answer--system">
+              <span>Windows 自带截图</span>
+              <p>快速录制区域与声音，适合直接保存分享。</p>
+            </div>
+            <div class="comparison-answer comparison-answer--lightshot">
+              <span>轻截</span>
+              <strong>录屏时也能实时批注</strong>
+              <p>边操作边添加和编辑标注，可显示点击提示，并让录制范围线不进入最终视频。</p>
+            </div>
+          </article>
+
+          <article class="comparison-row">
+            <h3>控制软件重量</h3>
+            <div class="comparison-answer comparison-answer--system">
+              <span>Windows 自带截图</span>
+              <p>系统内置、零安装，这是它最直接的优势。</p>
+            </div>
+            <div class="comparison-answer comparison-answer--lightshot">
+              <span>轻截</span>
+              <strong>只留下你需要的能力</strong>
+              <p>长截图和录屏可以启用、禁用、永久删除或独立下载，基础截图保持轻巧。</p>
             </div>
           </article>
         </div>

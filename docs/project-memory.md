@@ -1,0 +1,92 @@
+# 轻截项目记忆
+
+这份文档保存跨对话仍应延续的产品取舍、当前实现入口和发布约定。它不是需求清单，也不替代源码、测试或 GitHub 的实时状态。涉及版本、文件大小和线上资产时，先按文末命令重新核对。
+
+## 当前快照
+
+- 快照日期：2026-07-22。
+- 主程序版本：`1.10.0`。
+- 长截图模块版本：`1.1.0`。
+- 录屏模块版本：`1.7.0`，最低要求主程序 `1.10.0`。
+- GitHub 仓库：`XDIOEZ/CutCut`，默认分支 `main`。
+- 当前 Release：`v1.10.0`。
+- 发布首页：<https://xdioez.github.io/CutCut/>。
+- 模块下载页：<https://xdioez.github.io/CutCut/modules.html>。
+
+## 已确认的产品取舍
+
+### 启动与设置工作台
+
+- 首次运行，或配置中的 `lastLaunchedVersion` 与当前主程序版本不一致时，主动打开设置工作台并选中“截图设置”。这是帮助新用户完成必要配置、让升级用户检查新选项的固定行为。
+- 首次/更新检查优先级高于“手动启动后最小化”和 `--background`；同一版本完成标记后，后续启动才恢复用户选择的安静启动行为。
+- “开机自动启动”是重要功能：使用当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `LightShotCN`，命令为带引号的当前 EXE 绝对路径加 `--background`。不要求管理员权限，登录后安静进入托盘。
+- 相关入口：`Application/StartupWorkspaceService.cs`、`Core/StartupWorkspacePolicy.cs`、`Infrastructure/WindowsRunStartupEntryStore.cs`、`Application/StartupRegistrationService.cs`、`Presentation/MainForm.cs`。
+
+### 插件与设置页
+
+- 设置工作台包含宿主级“插件模块”页，使用纵向单列布局。用户可以查看已安装或已禁用模块，并自主启用、禁用或永久删除。
+- 禁用只退役程序集并保留文件和跨重启标记；永久删除会删除该模块自己的一级目录。删除前必须明确提示不可恢复，并说明重新安装需要前往模块发布页下载。
+- 模块自己的设置页仍由模块契约动态加入导航；模块禁用或删除后立即移除，重新启用后恢复。
+- 完整包通常预装长截图与录屏模块，但仍要保留独立模块包，供按需安装或永久删除后恢复。
+- 相关入口：`Infrastructure/Modules/ModuleHost.cs`、`Presentation/Pages/ModuleManagementPage.cs`、`Presentation/MainForm.cs`、`ScreenshotTool.Contracts/ModuleContracts.cs`。
+
+### 发布页体验
+
+- 轻量版是主下载入口，保持视觉优先级最高；它依赖目标电脑安装 .NET 8 Desktop Runtime。
+- 内置 .NET 8 的重量版是次级、小尺寸按钮，避免喧宾夺主，但必须能够一键直接下载，不能把普通用户转到 Releases 自己找文件。
+- 模块页上的长截图和录屏也必须一键直接下载 ZIP。虽然独立下载使用率可能较低，但它是完整的恢复路径。
+- 页面只有在 GitHub API 暂时不可用或某个未来 Release 确实没有对应资产时才允许显示回退状态。对正式承诺提供的版本，不应只改文案或放假链接；应上传真实资产。
+- 首页与模块页都是 `site/` 下的纯静态页面，通过 GitHub API 读取最新 Release。只补充同一 Release 的资产时不需要重新部署 Pages，页面会自动识别；修改 `site/**` 并推送到 `main` 时由 `.github/workflows/pages.yml` 部署。
+- 首页用“系统负责截一下，轻截负责当场做完”解释与 Windows 自带截图的差异。表达必须客观承认系统工具零安装、偶尔截图很方便，重点突出轻截的对象级标注编辑、双向长截图、录屏实时批注和插件自由装卸，避免贬低式比较。
+- 首页功能区后使用三张真实软件截图轮播演示精准框选、对象级标注和长截图预览。轮播自动播放，但必须保留前后切换、圆点跳转、键盘方向键、悬停/聚焦暂停和减少动态效果支持；每张图都提供通往下载区的明确入口。
+- 相关入口：`site/release.js`、`site/modules.js`、`site/index.html`、`site/modules.html`。
+
+## 发布资产契约
+
+发布页依赖下列稳定文件名；修改命名时必须同时更新发布脚本、页面识别规则、文档和线上验证：
+
+| 资产 | 固定文件名 | 页面用途 |
+| --- | --- | --- |
+| 轻量完整包 | `complete-lightweight-win-x64.zip` | 首页主下载按钮 |
+| 内置运行库重量完整包 | `complete-portable-win-x64.zip` | 首页次级直接下载按钮 |
+| 长截图独立模块 | `long-capture-addon-win-x64.zip` | 模块页长截图按钮 |
+| 录屏独立模块 | `screen-recording-addon-win-x64.zip` | 模块页录屏按钮 |
+| 校验和 | `SHA256SUMS.txt` | Release 完整性校验 |
+
+截至本快照，`v1.10.0` 已包含以上五个资产。页面线上核对结果为：
+
+- 轻量完整包约 `0.95 MiB`。
+- 重量完整包约 `58.76 MiB`。
+- 长截图独立模块约 `0.06 MiB`。
+- 录屏独立模块约 `0.45 MiB`。
+- 两个完整包都已整合常用模块；独立模块包保持程序旁 `Modules/<模块目录>/...` 的目录结构，解压到程序目录即可安装。
+
+发布脚本 `scripts/Publish-Release.ps1` 会生成两种完整包、两个独立模块包和免解压运行目录，并检查轻量版小于 `5 MiB`、重量版小于 `90 MiB`。只有用户在当前需求中明确要求打包或发布时才运行；不能因为记忆里已有 Release 就擅自发布。
+
+## 后续开发时优先保持
+
+- “轻截”的产品身份是轻巧、低干扰：主界面和发布页优先突出轻量版，重量版与可选模块作为补充，但补充入口也必须完整可用。
+- 新设置项继续采用纵向单列、一行一个设置项；不要把多个独立开关横向塞在同一行。
+- 新功能优先进入独立服务、页面或模块，不继续扩大 `MainForm`、`CaptureOverlayForm` 和 `CompositionRoot` 的职责。
+- 新增可选模块时，除模块实现和生命周期测试外，还要补齐模块管理显示、独立发布脚本、模块页卡片、稳定资产名和永久删除后的恢复路径。
+- 发布后不要只看 GitHub Actions 成功状态：还要在线核对按钮文案、`href`、`download` 属性，并实际重新下载资产核对大小或 SHA-256。
+
+## 核对与验证入口
+
+获取当前版本和线上资产，不要只依赖本快照：
+
+```powershell
+Select-Xml -Path .\src\ScreenshotTool\ScreenshotTool.csproj -XPath '/Project/PropertyGroup/Version'
+gh release view --json tagName,name,publishedAt,assets,url
+```
+
+常规交付前至少执行：
+
+```powershell
+dotnet format .\ScreenshotTool.sln --verify-no-changes
+dotnet run --project .\tests\ScreenshotTool.LogicTests\ScreenshotTool.LogicTests.csproj -c Release
+$verificationRoot = Join-Path (Resolve-Path .) 'artifacts\build-verification'
+dotnet build .\ScreenshotTool.sln -c Release -p:UseArtifactsOutput=true "-p:ArtifactsPath=$verificationRoot"
+```
+
+涉及设置工作台时，按变更范围运行 `ScreenshotTool.UiPreview` 对应的 smoke 参数，例如 `--screenshot-settings-page-smoke`、`--main-navigation-smoke` 或 `--module-management-page-smoke`，并查看生成图片。涉及发布页时，除静态脚本检查外，还要在已部署网址中检查 GitHub API 填充后的真实状态。
