@@ -7,7 +7,10 @@ using ScreenshotTool.Editing;
 
 namespace ScreenshotTool.Presentation;
 
-internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
+internal sealed class CaptureOverlayForm : Form,
+    ILiveCaptureFeatureHost,
+    ICaptureArtifactHost,
+    IConfigurableCaptureAnnotationHost
 {
     private readonly DesktopSnapshot _snapshot;
     private readonly Bitmap _dimmedImage;
@@ -17,15 +20,21 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
     private readonly CaptureFeatureSession _featureSession;
     private readonly ISelectionMoveAnnotationStrategy _selectionMoveAnnotationStrategy;
     private readonly ToolWidthController _toolWidthController;
-    private readonly IReadOnlyDictionary<string, bool> _featurePreferences;
+    private readonly int _annotationRotationStepDegrees;
+    private readonly DrawingCursorIndicator _drawingCursorIndicator;
+    private readonly int _annotationSnapThresholdPixels;
+    private readonly int _ctrlDragStepPixels;
+    private readonly ControlDoubleTapDetector _controlDoubleTapDetector = new();
+    private readonly IReadOnlyDictionary<string, bool> _booleanFeaturePreferences;
+    private readonly IReadOnlyDictionary<string, int> _integerFeaturePreferences;
+    private readonly ScreenshotFileNameMode _screenshotFileNameMode;
     private readonly SelectionRedrawGuard _selectionRedrawGuard = new();
     private readonly CaptureAnnotationEditor _annotationEditor;
+    private readonly LiveAnnotationSessionFactory _annotationSessionFactory;
     private AnnotationSelection _annotationSelection => _annotationEditor.Selection;
     private readonly string _outputFolder;
     private AnnotationDocument _document => _annotationEditor.Document;
-    private readonly FlowLayoutPanel _toolbar;
-    private readonly Dictionary<EditorTool, Button> _toolButtons = [];
-    private readonly List<Button> _colorButtons = [];
+    private readonly CaptureEditorToolbar _toolbar;
     private readonly Button _widthButton;
     private readonly ToolTip _toolTip = new();
     private readonly Stopwatch _hoverLookupClock = Stopwatch.StartNew();
@@ -54,8 +63,13 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
     private Point _movableDragOrigin;
     private Dictionary<MovableAnnotation, Rectangle> _movableOriginBounds = [];
     private Rectangle _movableGroupOriginBounds;
+    private MovableAnnotation? _controlClickToggleCandidate;
+    private bool _movableInteractionDidDrag;
     private bool _isDrawing;
     private TransparentTextEditorControl? _textEditor;
+    private MovableAnnotation? _textDoubleClickCandidate;
+    private Point _textDoubleClickPoint;
+    private long _textDoubleClickAt;
     private Bitmap? _replacementCaptureImage;
     private double _replacementZoom = 1D;
     private Point _replacementScroll;
@@ -67,6 +81,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
     private Rectangle _replacementFrameOrigin;
     private bool _featureCommandRunning;
     private bool _liveCaptureOverlayParked;
+    private bool _annotationSnappingEnabled;
     private bool _finished;
 
     public CaptureOverlayForm(
@@ -77,9 +92,17 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         ICaptureFeatureCatalog featureCatalog,
         ISelectionMoveAnnotationStrategy selectionMoveAnnotationStrategy,
         ToolWidthController toolWidthController,
-        IReadOnlyDictionary<string, bool> featurePreferences,
+        LiveAnnotationSessionFactory annotationSessionFactory,
+        IReadOnlyDictionary<string, bool> booleanFeaturePreferences,
+        IReadOnlyDictionary<string, int> integerFeaturePreferences,
         string outputFolder,
-        DrawingToolCoefficients? drawingToolCoefficients = null)
+        ScreenshotFileNameMode screenshotFileNameMode = ScreenshotFileNameMode.DateTime,
+        DrawingToolCoefficients? drawingToolCoefficients = null,
+        int annotationRotationStepDegrees = AnnotationRotationStep.DefaultDegrees,
+        DrawingCursorShape drawingCursorShape = DrawingCursorShape.Circle,
+        bool annotationSnappingEnabled = AnnotationLayoutOptions.DefaultSnappingEnabled,
+        int annotationSnapThresholdPixels = AnnotationLayoutOptions.DefaultSnapThresholdPixels,
+        int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels)
     {
         _snapshot = snapshot;
         _dimmedImage = CreateDimmedImage(snapshot.Image);
@@ -88,12 +111,25 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         _windowLocator = windowLocator;
         _selectionMoveAnnotationStrategy = selectionMoveAnnotationStrategy;
         _toolWidthController = toolWidthController;
+        _annotationSessionFactory = annotationSessionFactory;
+        _annotationRotationStepDegrees = AnnotationRotationStep.Normalize(
+            annotationRotationStepDegrees);
         _annotationEditor = new CaptureAnnotationEditor(drawingToolCoefficients);
-        _featurePreferences = featurePreferences.ToDictionary(
+        _drawingCursorIndicator = new DrawingCursorIndicator(drawingCursorShape);
+        _annotationSnappingEnabled = annotationSnappingEnabled;
+        _annotationSnapThresholdPixels = AnnotationLayoutOptions.NormalizeSnapThreshold(
+            annotationSnapThresholdPixels);
+        _ctrlDragStepPixels = AnnotationLayoutOptions.NormalizeCtrlDragStep(ctrlDragStepPixels);
+        _booleanFeaturePreferences = booleanFeaturePreferences.ToDictionary(
+            preference => preference.Key,
+            preference => preference.Value,
+            StringComparer.Ordinal);
+        _integerFeaturePreferences = integerFeaturePreferences.ToDictionary(
             preference => preference.Key,
             preference => preference.Value,
             StringComparer.Ordinal);
         _outputFolder = outputFolder;
+        _screenshotFileNameMode = screenshotFileNameMode;
 
         Text = "轻截 - 选择截图区域";
         FormBorderStyle = FormBorderStyle.None;
@@ -110,6 +146,8 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         SetStyle(ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.UserPaint |
                  ControlStyles.OptimizedDoubleBuffer |
+                 ControlStyles.StandardClick |
+                 ControlStyles.StandardDoubleClick |
                  ControlStyles.ResizeRedraw, true);
 
         _featureSession = new CaptureFeatureSession(featureCatalog, this);
@@ -117,17 +155,64 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         Controls.Add(_toolbar);
         _toolbar.Visible = false;
         _widthButton = (Button)_toolbar.Controls.Find("WidthButton", false)[0];
+        _toolbar.MouseEnter += HandleEditorSurfaceLeave;
+        foreach (Control control in _toolbar.Controls)
+        {
+            control.MouseEnter += HandleEditorSurfaceLeave;
+        }
 
         KeyDown += HandleKeyDown;
         KeyUp += HandleKeyUp;
         MouseDown += HandleMouseDown;
+        MouseDoubleClick += HandleMouseDoubleClick;
         MouseMove += HandleMouseMove;
         MouseUp += HandleMouseUp;
         MouseWheel += HandleEditorMouseWheel;
-        Deactivate += (_, _) => CancelTextEditor(commit: true);
+        MouseLeave += HandleEditorSurfaceLeave;
+        Deactivate += (_, _) =>
+        {
+            HideDrawingCursorIndicator();
+            CancelTextEditor(commit: true);
+        };
     }
 
-    public event EventHandler<string>? ScreenshotSaved;
+    public event EventHandler<string>? ArtifactSaved;
+
+    string ICaptureArtifactHost.OutputFolder => _outputFolder;
+
+    void ICaptureArtifactHost.NotifyArtifactSaved(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArtifactSaved?.Invoke(this, Path.GetFullPath(path));
+    }
+
+    void ICaptureArtifactHost.CompleteCaptureSession()
+    {
+        if (_finished || IsDisposed)
+        {
+            return;
+        }
+
+        _finished = true;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    ICaptureAnnotationSession ICaptureAnnotationHost.CreateAnnotationSession(
+        Rectangle screenBounds) => _annotationSessionFactory.Create(
+            screenBounds,
+            _toolWidthController,
+            _color,
+            color => _color = color);
+
+    ICaptureAnnotationSession IConfigurableCaptureAnnotationHost.CreateAnnotationSession(
+        Rectangle screenBounds,
+        CaptureAnnotationSessionOptions options) => _annotationSessionFactory.Create(
+            screenBounds,
+            _toolWidthController,
+            _color,
+            color => _color = color,
+            options);
 
     protected override void OnShown(EventArgs e)
     {
@@ -180,7 +265,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             else
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                _document.Render(e.Graphics, _snapshot.Image);
+                _annotationEditor.Render(e.Graphics, _snapshot.Image);
                 _featureSession.Render(e.Graphics, CaptureRenderTarget.Preview);
                 RenderDraft(e.Graphics);
                 DrawMovableSelection(e.Graphics);
@@ -193,6 +278,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         e.Graphics.DrawRectangle(border, displaySelection.X, displaySelection.Y,
             Math.Max(1, displaySelection.Width - 1), Math.Max(1, displaySelection.Height - 1));
         DrawSizeBadge(e.Graphics, displaySelection);
+        _drawingCursorIndicator.Draw(e.Graphics);
     }
 
     private void DrawDesktopLayers(Graphics graphics)
@@ -279,92 +365,74 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         return Rectangle.FromLTRB(topLeft.X, topLeft.Y, bottomRight.X, bottomRight.Y);
     }
 
-    private FlowLayoutPanel BuildToolbar()
+    private Rectangle ToClientBounds(Rectangle editingBounds)
     {
-        var toolbar = new FlowLayoutPanel
+        if (_replacementCaptureImage is null)
         {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false,
-            FlowDirection = FlowDirection.LeftToRight,
-            Padding = new Padding(7, 6, 7, 6),
-            Margin = Padding.Empty,
-            BackColor = Color.FromArgb(26, 32, 44),
-            Font = new Font("Microsoft YaHei UI", 8.5F)
-        };
-
-        foreach (var tool in CaptureEditorToolCatalog.Tools)
-        {
-            AddToolButton(toolbar, tool.Text, tool.Tool, tool.ToolTip);
+            return editingBounds;
         }
-        toolbar.Controls.Add(CreateSeparator());
 
-        var undo = CreateToolbarButton("撤销", 48);
-        undo.Click += (_, _) =>
+        var topLeft = ToClientPoint(editingBounds.Location);
+        var bottomRight = ToClientPoint(new Point(editingBounds.Right, editingBounds.Bottom));
+        return Rectangle.FromLTRB(topLeft.X, topLeft.Y, bottomRight.X, bottomRight.Y);
+    }
+
+    private CaptureEditorToolbar BuildToolbar()
+    {
+        var toolbar = new CaptureEditorToolbar(
+            CaptureEditorToolCatalog.Tools.Select(tool => new CaptureAnnotationToolDefinition(
+                ToContractTool(tool.Tool),
+                tool.Text,
+                tool.ToolTip,
+                tool.Width)).ToArray(),
+            CaptureEditorToolCatalog.Palette,
+            activeTool: null,
+            _color,
+            _toolWidthController.Current,
+            _toolWidthController.Range.Minimum,
+            _toolWidthController.Range.Maximum,
+            _annotationSnappingEnabled);
+        toolbar.ToolClicked += tool =>
+            SelectTool(EditorToolSelection.Toggle(_tool, ToEditorTool(tool)));
+        toolbar.UndoClicked += () =>
         {
             CancelTextEditor(commit: false);
             UndoLastAnnotation();
         };
-        _toolTip.SetToolTip(undo, "撤销上一步（Ctrl+Z）");
-        toolbar.Controls.Add(undo);
-
-        var width = CreateToolbarButton($"粗细 {_toolWidthController.Current}", 68);
-        width.Name = "WidthButton";
-        width.Click += (_, _) => CycleWidth();
-        width.MouseEnter += (_, _) => width.Focus();
-        width.MouseLeave += (_, _) => Focus();
-        width.MouseWheel += HandleWidthMouseWheel;
-        _toolTip.SetToolTip(width,
-            $"单击切换；悬停后滚轮调整（{_toolWidthController.Range.Minimum}–{_toolWidthController.Range.Maximum}）");
-        toolbar.Controls.Add(width);
-
-        foreach (var color in CaptureEditorToolCatalog.Palette)
-        {
-            var colorButton = new Button
-            {
-                Size = new Size(24, 28),
-                Margin = new Padding(2, 1, 2, 1),
-                BackColor = color,
-                FlatStyle = FlatStyle.Flat,
-                Cursor = Cursors.Hand,
-                TabStop = false
-            };
-            colorButton.FlatAppearance.BorderColor = color == _color ? Color.White : Color.FromArgb(71, 85, 105);
-            colorButton.FlatAppearance.BorderSize = color == _color ? 2 : 1;
-            colorButton.Click += (_, _) => SelectColor(color);
-            _colorButtons.Add(colorButton);
-            toolbar.Controls.Add(colorButton);
-        }
+        toolbar.WidthCycleRequested += CycleWidth;
+        toolbar.WidthButton.MouseLeave += (_, _) => Focus();
+        toolbar.WidthButton.MouseWheel += HandleWidthMouseWheel;
+        toolbar.ColorClicked += SelectColor;
+        toolbar.SnappingToggleRequested += ToggleAnnotationSnapping;
 
         var featureCommands = _featureSession.GetToolbarCommands();
         if (featureCommands.Count > 0)
         {
-            toolbar.Controls.Add(CreateSeparator());
+            toolbar.AddExtensionSeparator();
             foreach (var featureCommand in featureCommands)
             {
                 var command = featureCommand.Command;
-                var button = CreateToolbarButton(command.Text, Math.Max(42, command.Width));
+                var button = toolbar.AddCommandButton(
+                    command.Text,
+                    Math.Max(42, command.Width),
+                    command.ToolTip);
                 button.Click += async (_, _) => await ExecuteFeatureCommandAsync(featureCommand, button);
-                _toolTip.SetToolTip(button, command.ToolTip);
-                toolbar.Controls.Add(button);
             }
         }
 
-        toolbar.Controls.Add(CreateSeparator());
-        var copy = CreateToolbarButton("复制", 48);
+        toolbar.AddExtensionSeparator();
+        var copy = toolbar.AddCommandButton("复制", 48, "复制到剪贴板并结束（Ctrl+C）");
         copy.Click += (_, _) => CopySelectionAndClose();
-        _toolTip.SetToolTip(copy, "复制到剪贴板并结束（Ctrl+C）");
-        toolbar.Controls.Add(copy);
 
-        var save = CreateToolbarButton("保存", 48, Color.FromArgb(37, 99, 235));
+        var save = toolbar.AddCommandButton(
+            "保存",
+            48,
+            "保存到挂接文件夹并复制（Ctrl+S）",
+            CaptureAnnotationToolbarCommandStyle.Primary);
         save.Click += (_, _) => SaveSelectionAndClose();
-        _toolTip.SetToolTip(save, "保存到挂接文件夹并复制（Ctrl+S）");
-        toolbar.Controls.Add(save);
 
-        var cancel = CreateToolbarButton("取消", 48);
+        var cancel = toolbar.AddCommandButton("取消", 48, "取消截图（Esc）");
         cancel.Click += (_, _) => Close();
-        _toolTip.SetToolTip(cancel, "取消截图（Esc）");
-        toolbar.Controls.Add(cancel);
         return toolbar;
     }
 
@@ -381,7 +449,16 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         button.Enabled = false;
         try
         {
-            await _featureSession.ExecuteToolbarCommandAsync(command);
+            var result = await _featureSession.ExecuteToolbarCommandAsync(command);
+            if (!string.IsNullOrWhiteSpace(result.ErrorMessage) && !IsDisposed)
+            {
+                MessageBox.Show(
+                    this,
+                    result.ErrorMessage,
+                    "模块功能执行失败",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
         finally
         {
@@ -394,47 +471,23 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         }
     }
 
-    private void AddToolButton(FlowLayoutPanel toolbar, string text, EditorTool tool, string tip)
-    {
-        var button = CreateToolbarButton(text, tool == EditorTool.Mosaic ? 58 : 48);
-        button.Click += (_, _) => SelectTool(EditorToolSelection.Toggle(_tool, tool));
-        _toolTip.SetToolTip(button, tip);
-        _toolButtons.Add(tool, button);
-        toolbar.Controls.Add(button);
-    }
-
-    private static Button CreateToolbarButton(string text, int width, Color? backColor = null)
-    {
-        var color = backColor ?? Color.FromArgb(45, 55, 72);
-        var button = new Button
-        {
-            Text = text,
-            Size = new Size(width, 30),
-            Margin = new Padding(2, 0, 2, 0),
-            BackColor = color,
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Cursor = Cursors.Hand,
-            TabStop = false
-        };
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(71, 85, 105);
-        return button;
-    }
-
-    private static Panel CreateSeparator() => new()
-    {
-        Size = new Size(1, 24),
-        BackColor = Color.FromArgb(71, 85, 105),
-        Margin = new Padding(5, 3, 5, 3)
-    };
-
     private void HandleMouseDown(object? sender, MouseEventArgs e)
     {
+        if (e.Button == MouseButtons.Left)
+        {
+            TrackTextDoubleClickCandidate(e.Location);
+        }
+
+        if (e.Button == MouseButtons.Right)
+        {
+            HideDrawingCursorIndicator();
+        }
+
         if (_replacementCaptureImage is not null &&
             e.Button == MouseButtons.Left &&
             IsReplacementFrameMoveHandle(e.Location))
         {
+            HideDrawingCursorIndicator();
             CancelTextEditor(commit: true);
             _isMovingReplacementFrame = true;
             _replacementFramePointerOrigin = e.Location;
@@ -447,6 +500,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
         if (_featureSession.HandleMouseDown(e))
         {
+            HideDrawingCursorIndicator();
             return;
         }
 
@@ -503,7 +557,11 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             var multiSelect = IsControlPressed();
             if (multiSelect)
             {
-                if (TryBeginMovableInteraction(editingPoint, multiSelect: true))
+                _controlDoubleTapDetector.CancelCurrentTap();
+                _controlClickToggleCandidate = FindSelectedMovableHit(editingPoint);
+                if (TryBeginMovableInteraction(
+                    editingPoint,
+                    multiSelect: _controlClickToggleCandidate is null))
                 {
                     return;
                 }
@@ -617,6 +675,61 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         Capture = true;
     }
 
+    private void TrackTextDoubleClickCandidate(Point clientPoint)
+    {
+        var now = Environment.TickCount64;
+        if (_textDoubleClickCandidate is not null &&
+            now - _textDoubleClickAt <= SystemInformation.DoubleClickTime &&
+            IsWithinDoubleClickRegion(_textDoubleClickPoint, clientPoint))
+        {
+            return;
+        }
+
+        _textDoubleClickCandidate = null;
+        if (_annotationSelection.Count != 1 ||
+            _annotationSelection.Primary is not { } selected ||
+            !TextAnnotationEditSession.CanEdit(selected))
+        {
+            return;
+        }
+
+        var editingPoint = ToEditingPoint(clientPoint);
+        if (!selected.HitTest(editingPoint, GetMovableHitTolerance()))
+        {
+            return;
+        }
+
+        _textDoubleClickCandidate = selected;
+        _textDoubleClickPoint = clientPoint;
+        _textDoubleClickAt = now;
+    }
+
+    private void HandleMouseDoubleClick(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left || _textEditor is not null)
+        {
+            return;
+        }
+
+        var candidate = _textDoubleClickCandidate;
+        _textDoubleClickCandidate = null;
+        if (candidate is null ||
+            !_document.Contains(candidate) ||
+            !candidate.HitTest(ToEditingPoint(e.Location), GetMovableHitTolerance()))
+        {
+            return;
+        }
+
+        BeginExistingTextEditor(candidate);
+    }
+
+    private static bool IsWithinDoubleClickRegion(Point first, Point second)
+    {
+        var size = SystemInformation.DoubleClickSize;
+        return Math.Abs(second.X - first.X) <= Math.Max(1, size.Width / 2) &&
+               Math.Abs(second.Y - first.Y) <= Math.Max(1, size.Height / 2);
+    }
+
     private void HandleMouseMove(object? sender, MouseEventArgs e)
     {
         if (_isMovingReplacementFrame)
@@ -637,8 +750,11 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
         if (_featureSession.HandleMouseMove(e))
         {
+            HideDrawingCursorIndicator();
             return;
         }
+
+        UpdateDrawingCursorIndicator(e.Location);
 
         if (_isPanningReplacement)
         {
@@ -694,12 +810,32 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             var pointerOffset = new Point(
                 editingPoint.X - _movableDragOrigin.X,
                 editingPoint.Y - _movableDragOrigin.Y);
+            var controlStepActive = IsControlPressed();
+            _movableInteractionDidDrag |= IsManualDrag(_movableDragOrigin, editingPoint);
+            if (controlStepActive)
+            {
+                pointerOffset = AnnotationAlignment.QuantizeOffset(
+                    pointerOffset,
+                    _ctrlDragStepPixels);
+            }
             if (_activeMovableTarget == StickerHitTarget.Move)
             {
                 var actualOffset = GroupMoveLayout.ClampOffset(
                     _movableGroupOriginBounds,
                     pointerOffset,
                     EditingBounds);
+                if (_annotationSnappingEnabled && !controlStepActive)
+                {
+                    actualOffset = AnnotationAlignment.SnapMoveOffset(
+                        _movableGroupOriginBounds,
+                        actualOffset,
+                        GetStationaryMovableBounds(),
+                        _annotationSnapThresholdPixels);
+                    actualOffset = GroupMoveLayout.ClampOffset(
+                        _movableGroupOriginBounds,
+                        actualOffset,
+                        EditingBounds);
+                }
                 foreach (var (annotation, origin) in _movableOriginBounds)
                 {
                     annotation.SetBounds(new Rectangle(
@@ -711,17 +847,58 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             }
             else if (_movableOriginBounds.TryGetValue(activeMovable, out var origin))
             {
-                var resizedBounds = activeMovable.PreserveAspectRatioWhenResizing
+                var resizePoint = AnnotationRotation.ToUnrotatedPoint(
+                    editingPoint,
+                    origin,
+                    activeMovable.RotationDegrees);
+                if (controlStepActive)
+                {
+                    var resizeOrigin = AnnotationRotation.ToUnrotatedPoint(
+                        _movableDragOrigin,
+                        origin,
+                        activeMovable.RotationDegrees);
+                    var resizeOffset = AnnotationAlignment.QuantizeOffset(
+                        new Point(
+                            resizePoint.X - resizeOrigin.X,
+                            resizePoint.Y - resizeOrigin.Y),
+                        _ctrlDragStepPixels);
+                    resizePoint = new Point(
+                        resizeOrigin.X + resizeOffset.X,
+                        resizeOrigin.Y + resizeOffset.Y);
+                }
+                else if (_annotationSnappingEnabled &&
+                    Math.Abs(activeMovable.RotationDegrees) < 0.001F)
+                {
+                    resizePoint = AnnotationAlignment.SnapResizePoint(
+                        resizePoint,
+                        _activeMovableTarget,
+                        GetStationaryMovableBounds(),
+                        _annotationSnapThresholdPixels);
+                }
+                var resizedBounds = activeMovable.PreserveAspectRatioWhenResizing &&
+                    StickerLayout.IsCorner(_activeMovableTarget)
                     ? StickerLayout.Resize(
                         origin,
                         _activeMovableTarget,
-                        editingPoint,
+                        resizePoint,
                         EditingBounds)
                     : AnnotationResizeLayout.Resize(
                         origin,
                         _activeMovableTarget,
-                        editingPoint,
+                        resizePoint,
                         EditingBounds);
+                resizedBounds = AnnotationRotation.PreserveOppositeCorner(
+                    origin,
+                    resizedBounds,
+                    _activeMovableTarget,
+                    activeMovable.RotationDegrees);
+                var resizeClampOffset = GroupMoveLayout.ClampOffset(
+                    AnnotationRotation.GetRotatedBounds(
+                        resizedBounds,
+                        activeMovable.RotationDegrees),
+                    Point.Empty,
+                    EditingBounds);
+                resizedBounds.Offset(resizeClampOffset);
                 activeMovable.SetBounds(resizedBounds);
             }
             InvalidateMovableTransition(previousBounds, _annotationSelection.Bounds);
@@ -746,6 +923,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             var current = Geometry.Clamp(editingPoint, EditingBounds);
             if (IsManualDrag(_annotationMarqueeStart, current))
             {
+                _annotationEditor.ResetHitCycle();
                 _isPendingAnnotationMarquee = false;
                 _isSelectingAnnotations = true;
                 ClearAnnotationSelection();
@@ -871,6 +1049,12 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         {
             var currentBounds = _annotationSelection.Bounds;
             _activeMovableTarget = StickerHitTarget.None;
+            if (!_movableInteractionDidDrag && _controlClickToggleCandidate is { } toggleCandidate)
+            {
+                _annotationSelection.Remove(toggleCandidate);
+            }
+            _controlClickToggleCandidate = null;
+            _movableInteractionDidDrag = false;
             if (_tool != EditorTool.None)
             {
                 _annotationSelection.Clear();
@@ -901,9 +1085,18 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             _isPendingAnnotationMarquee = false;
             _annotationMarqueeBounds = Rectangle.Empty;
             var previousSelectionBounds = _annotationSelection.Bounds;
-            var movable = _document.FindTopMovableAt(
-                _annotationMarqueeStart,
-                GetMovableHitTolerance());
+            var movable = _annotationSelection.Count > 1
+                ? _document.FindTopMovableAt(
+                    _annotationMarqueeStart,
+                    GetMovableHitTolerance())
+                : _annotationEditor.FindNextMovableAt(
+                    _annotationMarqueeStart,
+                    GetMovableHitTolerance(),
+                    GetMovableHitTolerance());
+            if (_annotationSelection.Count > 1)
+            {
+                _annotationEditor.ResetHitCycle();
+            }
             if (movable is null)
             {
                 ClearAnnotationSelection();
@@ -982,6 +1175,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         var annotation = BuildDraftAnnotation();
         if (annotation is not null)
         {
+            _annotationEditor.ResetHitCycle();
             _document.Add(annotation);
         }
         _draftPoints.Clear();
@@ -990,6 +1184,8 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void BeginSelectionResize(SelectionResizeEdges edges)
     {
+        _annotationEditor.ResetHitCycle();
+        HideDrawingCursorIndicator();
         _activeResizeEdges = edges;
         _resizeOriginSelection = _selection;
         _toolbar.Visible = false;
@@ -999,6 +1195,8 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void BeginSelectionMove(Point pointer)
     {
+        _annotationEditor.ResetHitCycle();
+        HideDrawingCursorIndicator();
         CancelTextEditor(commit: true);
         _isMovingSelection = true;
         _selectionMoveDidDrag = false;
@@ -1010,6 +1208,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void BeginAnnotationMarquee(Point pointer)
     {
+        HideDrawingCursorIndicator();
         _isPendingAnnotationMarquee = true;
         _isSelectingAnnotations = false;
         _annotationMarqueeStart = Geometry.Clamp(pointer, EditingBounds);
@@ -1024,6 +1223,11 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         if (!EditingBounds.Contains(point))
         {
             return false;
+        }
+
+        if (multiSelect)
+        {
+            _annotationEditor.ResetHitCycle();
         }
 
         var altPressed = IsAltPressed();
@@ -1075,7 +1279,10 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         {
             SelectTool(EditorTool.None);
         }
-        if (target == StickerHitTarget.Move && _annotationSelection.RequiresAltToMove && !altPressed)
+        if (target == StickerHitTarget.Move &&
+            _annotationSelection.RequiresAltToMove &&
+            !altPressed &&
+            !IsControlPressed())
         {
             InvalidateMovableTransition(previousSelectionBounds, _annotationSelection.Bounds);
             if (!multiSelect)
@@ -1093,6 +1300,8 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         }
 
         _activeMovableTarget = target;
+        _movableInteractionDidDrag = false;
+        _annotationEditor.ResetHitCycle();
         _movableDragOrigin = point;
         _movableOriginBounds = _annotationSelection.Items.ToDictionary(
             annotation => annotation,
@@ -1122,10 +1331,9 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void ClearAnnotations()
     {
-        _annotationSelection.Clear();
+        _annotationEditor.Clear();
         _activeMovableTarget = StickerHitTarget.None;
         _movableOriginBounds.Clear();
-        _document.Clear();
     }
 
     private void UndoLastAnnotation()
@@ -1160,6 +1368,11 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void UpdateIdleCursor(Point point)
     {
+        if (UpdateDrawingCursorIndicator(point))
+        {
+            return;
+        }
+
         if (_replacementCaptureImage is not null && IsReplacementFrameMoveHandle(point))
         {
             Cursor = Cursors.SizeAll;
@@ -1204,11 +1417,76 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         }
 
         Cursor = EditorIdleCursorPolicy.UsesDrawingCursor(
-            _hasSelection,
-            _selection.Contains(point),
-            _tool)
-            ? Cursors.Cross
-            : Cursors.Default;
+                _hasSelection,
+                _selection.Contains(point),
+                _tool) &&
+            !DrawingCursorIndicator.Supports(_tool)
+                ? Cursors.Cross
+                : Cursors.Default;
+    }
+
+    private bool UpdateDrawingCursorIndicator(Point point)
+    {
+        if (!CanShowDrawingCursorIndicator(point))
+        {
+            HideDrawingCursorIndicator();
+            return false;
+        }
+
+        var editingDiameter = _annotationEditor.GetDrawingCursorDiameter(
+            _tool,
+            _toolWidthController.Current);
+        var dirty = _drawingCursorIndicator.Update(
+            point,
+            editingDiameter,
+            _replacementCaptureImage is null ? 1D : _replacementZoom);
+        _drawingCursorIndicator.HideSystemCursor();
+        InvalidateDrawingCursor(dirty);
+        return true;
+    }
+
+    private bool CanShowDrawingCursorIndicator(Point point) =>
+        DrawingCursorIndicator.Supports(_tool) &&
+        _hasSelection &&
+        ClientRectangle.Contains(point) &&
+        _selection.Contains(point) &&
+        !_toolbar.Bounds.Contains(point) &&
+        _textEditor is null &&
+        !IsAltPressed() &&
+        !IsControlPressed() &&
+        !_isMovingSelection &&
+        !_isMovingReplacementFrame &&
+        !_isPanningReplacement &&
+        _activeMovableTarget == StickerHitTarget.None &&
+        _activeResizeEdges == SelectionResizeEdges.None &&
+        !_isPendingAnnotationMarquee &&
+        !_isSelectingAnnotations &&
+        !_isSelecting &&
+        !_isPendingWindowSelection &&
+        !_featureCommandRunning &&
+        !_liveCaptureOverlayParked;
+
+    private void HideDrawingCursorIndicator()
+    {
+        var dirty = _drawingCursorIndicator.Hide();
+        _drawingCursorIndicator.ShowSystemCursor();
+        InvalidateDrawingCursor(dirty);
+    }
+
+    private void InvalidateDrawingCursor(Rectangle dirty)
+    {
+        dirty.Intersect(ClientRectangle);
+        if (!dirty.IsEmpty)
+        {
+            Invalidate(dirty, false);
+        }
+    }
+
+    private void HandleEditorSurfaceLeave(object? sender, EventArgs e)
+    {
+        _textDoubleClickCandidate = null;
+        _annotationEditor.ResetHitCycle();
+        HideDrawingCursorIndicator();
     }
 
     private int GetStickerHandleSize()
@@ -1233,12 +1511,55 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private static bool IsControlPressed() => (ModifierKeys & Keys.Control) == Keys.Control;
 
+    private static bool IsControlKey(Keys keyCode) =>
+        keyCode is Keys.ControlKey or Keys.LControlKey or Keys.RControlKey;
+
     private StickerHitTarget HitTestMovable(MovableAnnotation annotation, Point point) =>
         annotation.SupportsResize
-            ? StickerLayout.HitTest(annotation.Bounds, point, GetStickerHandleSize())
+            ? StickerLayout.HitTest(
+                annotation.Bounds,
+                annotation.ToUnrotatedPoint(point),
+                GetStickerHandleSize())
             : annotation.HitTest(point, GetMovableHitTolerance())
                 ? StickerHitTarget.Move
                 : StickerHitTarget.None;
+
+    private MovableAnnotation? FindSelectedMovableHit(Point point)
+    {
+        if (_annotationSelection.Count == 1 &&
+            _annotationSelection.Primary is { } primary &&
+            HitTestMovable(primary, point) != StickerHitTarget.None)
+        {
+            return primary;
+        }
+
+        var hovered = _document.FindTopMovableAt(point, GetMovableHitTolerance());
+        return hovered is not null && _annotationSelection.Contains(hovered) ? hovered : null;
+    }
+
+    private IReadOnlyList<Rectangle> GetStationaryMovableBounds()
+    {
+        var moving = _movableOriginBounds.Keys.ToHashSet();
+        return _document.GetMovableAnnotations()
+            .Where(annotation => !moving.Contains(annotation))
+            .Select(annotation => annotation.VisualBounds)
+            .ToArray();
+    }
+
+    private void ToggleAnnotationSnapping()
+    {
+        _annotationSnappingEnabled = !_annotationSnappingEnabled;
+        _toolbar.SetSnappingEnabled(_annotationSnappingEnabled);
+        if (_toolbar.Visible)
+        {
+            _toolTip.Show(
+                _annotationSnappingEnabled ? "编辑元素吸附已开启" : "编辑元素吸附已关闭",
+                _toolbar.SnappingButton,
+                0,
+                _toolbar.SnappingButton.Height + 4,
+                1200);
+        }
+    }
 
     private SelectionResizeEdges HitTestResizeEdges(Point point)
     {
@@ -1248,6 +1569,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void BeginManualSelection(Point startPoint, Rectangle previousSelection)
     {
+        HideDrawingCursorIndicator();
         ClearAnnotations();
         _isSelecting = true;
         _isPendingWindowSelection = false;
@@ -1410,7 +1732,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
                 continue;
             }
 
-            var area = annotation.Bounds;
+            var area = annotation.VisualBounds;
             var margin = Math.Max(GetStickerHandleSize() + 3, annotation.RenderMargin);
             area.Inflate(margin, margin);
             yield return area;
@@ -1581,7 +1903,10 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         }
     }
 
-    private void InvalidateMovableTransition(Rectangle previous, Rectangle current)
+    private void InvalidateMovableTransition(
+        Rectangle previous,
+        Rectangle current,
+        int renderMargin = 0)
     {
         if (_replacementCaptureImage is not null)
         {
@@ -1601,7 +1926,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
         var margin = Math.Max(
             GetStickerHandleSize() + 3,
-            _annotationSelection.RenderMargin);
+            Math.Max(_annotationSelection.RenderMargin, renderMargin));
         dirty.Inflate(margin, margin);
         dirty.Intersect(ClientRectangle);
         if (!dirty.IsEmpty)
@@ -1612,7 +1937,9 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void HandleKeyDown(object? sender, KeyEventArgs e)
     {
-        if (IsAltKey(e.KeyCode))
+        _controlDoubleTapDetector.RegisterKeyDown(e.KeyCode, Environment.TickCount64);
+
+        if (IsAltKey(e.KeyCode) || IsControlKey(e.KeyCode))
         {
             UpdateIdleCursor(PointToClient(Cursor.Position));
         }
@@ -1731,7 +2058,12 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void HandleKeyUp(object? sender, KeyEventArgs e)
     {
-        if (IsAltKey(e.KeyCode))
+        if (_controlDoubleTapDetector.RegisterKeyUp(e.KeyCode, Environment.TickCount64))
+        {
+            ToggleAnnotationSnapping();
+            e.SuppressKeyPress = true;
+        }
+        if (IsAltKey(e.KeyCode) || IsControlKey(e.KeyCode))
         {
             UpdateIdleCursor(PointToClient(Cursor.Position));
         }
@@ -1793,9 +2125,12 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void PasteTextBox(string text, Point anchor)
     {
-        var bounds = CreatePastedTextBounds(text, anchor);
+        var fontSize = TextEditorCommitLayout.CalculateImageFontSize(
+            TextToolSizing.CalculateVisualFontSize(_toolWidthController.Current),
+            _replacementCaptureImage is null ? 1D : _replacementZoom);
+        var bounds = CreatePastedTextBounds(text, anchor, fontSize);
         ClearAnnotationSelection();
-        _annotationEditor.AddAndSelect(new PastedTextAnnotation(bounds, text));
+        _annotationEditor.AddAndSelect(new PastedTextAnnotation(bounds, text, fontSize));
         SelectTool(EditorTool.None);
         InvalidateMovableTransition(Rectangle.Empty, bounds);
         UpdateIdleCursor(PointToClient(Cursor.Position));
@@ -1817,14 +2152,14 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
                     _selection.Top + _selection.Height / 2);
     }
 
-    private Rectangle CreatePastedTextBounds(string text, Point anchor)
+    private Rectangle CreatePastedTextBounds(string text, Point anchor, float fontSize)
     {
         var editingBounds = EditingBounds;
         var maximumWidth = Math.Max(1, Math.Min(editingBounds.Width, editingBounds.Width * 2 / 3));
         var maximumHeight = Math.Max(1, Math.Min(editingBounds.Height, editingBounds.Height * 2 / 3));
         using var font = new Font(
             "Microsoft YaHei UI",
-            PastedTextAnnotation.DefaultFontSize,
+            fontSize,
             FontStyle.Regular,
             GraphicsUnit.Pixel);
         var measured = TextRenderer.MeasureText(
@@ -1849,6 +2184,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void HandleSelectAllShortcut()
     {
+        _annotationEditor.ResetHitCycle();
         var editingElements = _document.GetMovableAnnotations();
         if (_replacementCaptureImage is not null)
         {
@@ -1860,9 +2196,9 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         var action = CaptureSelectAllPolicy.Resolve(
             editingElements.Count,
             _annotationSelection.IsExactSelection(editingElements));
-        if (action == CaptureSelectAllAction.ExpandSelectionToFullScreen)
+        if (action == CaptureSelectAllAction.ExpandCaptureSelection)
         {
-            SelectAllScreen();
+            ExpandSelectionForSelectAll();
             return;
         }
 
@@ -1880,7 +2216,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         UpdateIdleCursor(PointToClient(Cursor.Position));
     }
 
-    private void SelectAllScreen()
+    private void ExpandSelectionForSelectAll()
     {
         CancelTextEditor(commit: true);
         _isSelecting = false;
@@ -1888,40 +2224,61 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         _isDrawing = false;
         _hasSelection = true;
         _hoverWindowSelection = Rectangle.Empty;
-        _selection = ClientRectangle;
+        _selection = CaptureSelectAllPolicy.ResolveSelectionTarget(
+            _selection,
+            _snapshot.Bounds,
+            Screen.FromPoint(Cursor.Position).Bounds);
         SelectTool(EditorTool.None);
         PositionToolbar();
         _toolbar.Visible = true;
         Invalidate();
     }
 
+    private static EditorTool ToEditorTool(CaptureAnnotationTool tool) => tool switch
+    {
+        CaptureAnnotationTool.Rectangle => EditorTool.Rectangle,
+        CaptureAnnotationTool.Ellipse => EditorTool.Ellipse,
+        CaptureAnnotationTool.Arrow => EditorTool.Arrow,
+        CaptureAnnotationTool.Pen => EditorTool.Pen,
+        CaptureAnnotationTool.Text => EditorTool.Text,
+        CaptureAnnotationTool.Mosaic => EditorTool.Mosaic,
+        _ => EditorTool.None
+    };
+
+    private static CaptureAnnotationTool ToContractTool(EditorTool tool) => tool switch
+    {
+        EditorTool.Rectangle => CaptureAnnotationTool.Rectangle,
+        EditorTool.Ellipse => CaptureAnnotationTool.Ellipse,
+        EditorTool.Arrow => CaptureAnnotationTool.Arrow,
+        EditorTool.Pen => CaptureAnnotationTool.Pen,
+        EditorTool.Text => CaptureAnnotationTool.Text,
+        EditorTool.Mosaic => CaptureAnnotationTool.Mosaic,
+        _ => CaptureAnnotationTool.Select
+    };
+
     private void SelectTool(EditorTool tool)
     {
         CancelTextEditor(commit: true);
+        HideDrawingCursorIndicator();
+        if (_tool != tool)
+        {
+            _annotationEditor.ResetHitCycle();
+        }
         if (tool != EditorTool.None)
         {
             ClearAnnotationSelection();
         }
         _tool = tool;
-        foreach (var pair in _toolButtons)
-        {
-            pair.Value.BackColor = pair.Key == tool
-                ? Color.FromArgb(37, 99, 235)
-                : Color.FromArgb(45, 55, 72);
-        }
-        Cursor = tool == EditorTool.None ? Cursors.Default : Cursors.Cross;
+        _toolbar.SetActiveTool(tool == EditorTool.None ? null : ToContractTool(tool));
+        Cursor = tool == EditorTool.None || DrawingCursorIndicator.Supports(tool)
+            ? Cursors.Default
+            : Cursors.Cross;
     }
 
     private void SelectColor(Color color)
     {
         _color = color;
-        foreach (var button in _colorButtons)
-        {
-            button.FlatAppearance.BorderColor = button.BackColor.ToArgb() == color.ToArgb()
-                ? Color.White
-                : Color.FromArgb(71, 85, 105);
-            button.FlatAppearance.BorderSize = button.BackColor.ToArgb() == color.ToArgb() ? 2 : 1;
-        }
+        _toolbar.SetSelectedColor(color);
     }
 
     private void CycleWidth()
@@ -1954,6 +2311,19 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void HandleEditorMouseWheel(object? sender, MouseEventArgs e)
     {
+        if (IsControlPressed())
+        {
+            _controlDoubleTapDetector.CancelCurrentTap();
+            ScaleAnnotationUnderPointer(e);
+            return;
+        }
+
+        if (IsAltPressed())
+        {
+            RotateAnnotationUnderPointer(e);
+            return;
+        }
+
         if (_replacementCaptureImage is null ||
             !_selection.Contains(e.Location) ||
             _toolbar.Bounds.Contains(e.Location))
@@ -1976,6 +2346,98 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         _replacementZoom = nextZoom;
         _replacementScroll = ClampReplacementScroll(_replacementScroll);
         Invalidate(_selection, false);
+        UpdateIdleCursor(e.Location);
+    }
+
+    private void RotateAnnotationUnderPointer(MouseEventArgs e)
+    {
+        var annotation = FindAnnotationUnderPointer(e.Location, out _);
+        if (annotation is null)
+        {
+            return;
+        }
+
+        var rotationDelta = AnnotationRotation.GetWheelDeltaDegrees(
+            e.Delta,
+            _annotationRotationStepDegrees,
+            SystemInformation.MouseWheelScrollDelta);
+        if (Math.Abs(rotationDelta) < 0.001F)
+        {
+            return;
+        }
+
+        var targets = _annotationSelection.GetTransformTargets(annotation);
+        var previousBounds = GetAnnotationVisualBounds(targets);
+        foreach (var target in targets)
+        {
+            target.RotateBy(rotationDelta);
+        }
+        InvalidateMovableTransition(
+            previousBounds,
+            GetAnnotationVisualBounds(targets),
+            targets.Max(target => target.RenderMargin));
+    }
+
+    private void ScaleAnnotationUnderPointer(MouseEventArgs e)
+    {
+        var annotation = FindAnnotationUnderPointer(e.Location, out var editingPoint);
+        if (annotation is null)
+        {
+            return;
+        }
+
+        var targets = _annotationSelection.GetTransformTargets(annotation);
+        var scaleFactor = AnnotationScaling.GetWheelScaleFactor(
+            e.Delta,
+            SystemInformation.MouseWheelScrollDelta);
+        var scaledBounds = AnnotationScaling.ScaleGroupAt(
+            targets,
+            editingPoint,
+            scaleFactor,
+            EditingBounds);
+        if (targets.All(target => scaledBounds[target] == target.Bounds))
+        {
+            return;
+        }
+
+        var previousBounds = GetAnnotationVisualBounds(targets);
+        foreach (var target in targets)
+        {
+            target.SetBounds(scaledBounds[target]);
+        }
+        InvalidateMovableTransition(
+            previousBounds,
+            GetAnnotationVisualBounds(targets),
+            targets.Max(target => target.RenderMargin));
+    }
+
+    private MovableAnnotation? FindAnnotationUnderPointer(
+        Point clientPoint,
+        out Point editingPoint)
+    {
+        editingPoint = Point.Empty;
+        if (!_hasSelection ||
+            !_selection.Contains(clientPoint) ||
+            _toolbar.Bounds.Contains(clientPoint))
+        {
+            return null;
+        }
+
+        editingPoint = ToEditingPoint(clientPoint);
+        return EditingBounds.Contains(editingPoint)
+            ? _document.FindTopMovableAt(editingPoint, GetMovableHitTolerance())
+            : null;
+    }
+
+    private static Rectangle GetAnnotationVisualBounds(
+        IReadOnlyList<MovableAnnotation> annotations)
+    {
+        var bounds = annotations[0].VisualBounds;
+        for (var index = 1; index < annotations.Count; index++)
+        {
+            bounds = Rectangle.Union(bounds, annotations[index].VisualBounds);
+        }
+        return bounds;
     }
 
     private Point ClampReplacementScroll(Point scroll)
@@ -1995,7 +2457,9 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
     private void UpdateWidthButton()
     {
-        _widthButton.Text = $"粗细 {_toolWidthController.Current}";
+        _toolbar.SetToolWidth(_toolWidthController.Current);
+        _textEditor?.SetTextFontSize(
+            TextToolSizing.CalculateVisualFontSize(_toolWidthController.Current));
     }
 
     private void PositionToolbar()
@@ -2020,13 +2484,72 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         var minimumSize = new Size(
             Math.Min(120, _selection.Width),
             Math.Min(38, _selection.Height));
-        _textEditor = new TransparentTextEditorControl(
+        ShowTextEditor(
             location,
             minimumSize,
             _color,
+            TextToolSizing.CalculateVisualFontSize(_toolWidthController.Current));
+    }
+
+    private void BeginExistingTextEditor(MovableAnnotation annotation)
+    {
+        CancelTextEditor(commit: true);
+        if (!_annotationEditor.TryBeginTextEdit(annotation, out var descriptor) ||
+            descriptor is null)
+        {
+            return;
+        }
+
+        var previousBounds = annotation.VisualBounds;
+        _isPendingAnnotationMarquee = false;
+        _isSelectingAnnotations = false;
+        _annotationMarqueeBounds = Rectangle.Empty;
+        _activeMovableTarget = StickerHitTarget.None;
+        _movableOriginBounds.Clear();
+        Capture = false;
+        _annotationSelection.Clear();
+
+        var zoom = _replacementCaptureImage is null ? 1D : _replacementZoom;
+        var padding = new Size(
+            Math.Max(0, (int)Math.Round(descriptor.TextPadding.Width * zoom)),
+            Math.Max(0, (int)Math.Round(descriptor.TextPadding.Height * zoom)));
+        var editorBounds = ToClientBounds(descriptor.Bounds);
+        if (descriptor.BoundsMode == TextAnnotationEditorBoundsMode.Content)
+        {
+            editorBounds.Inflate(padding.Width, padding.Height);
+        }
+
+        ShowTextEditor(
+            editorBounds.Location,
+            editorBounds.Size,
+            descriptor.ForegroundColor,
+            (float)(descriptor.FontSize * zoom),
+            padding,
+            descriptor.FontStyle);
+        _textEditor!.Text = descriptor.Text;
+        _textEditor.SelectText(descriptor.Text.Length, 0);
+        InvalidateMovableTransition(previousBounds, Rectangle.Empty, annotation.RenderMargin);
+    }
+
+    private void ShowTextEditor(
+        Point location,
+        Size minimumSize,
+        Color foregroundColor,
+        float fontSize,
+        Size? textPadding = null,
+        FontStyle fontStyle = FontStyle.Bold)
+    {
+        _textEditor = new TransparentTextEditorControl(
+            location,
+            minimumSize,
+            foregroundColor,
             _selection,
-            _clipboardService);
+            _clipboardService,
+            fontSize,
+            textPadding,
+            fontStyle);
         _textEditor.CommitRequested += (_, _) => CancelTextEditor(commit: true);
+        _textEditor.MouseEnter += HandleEditorSurfaceLeave;
         Controls.Add(_textEditor);
         _textEditor.BringToFront();
         _textEditor.Focus();
@@ -2185,16 +2708,31 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
 
         var editor = _textEditor;
         _textEditor = null;
-        if (commit && !string.IsNullOrWhiteSpace(editor.Text))
+        var imageFontSize = TextEditorCommitLayout.CalculateImageFontSize(
+            editor.TextFontSize,
+            _replacementCaptureImage is null ? 1D : _replacementZoom);
+        if (_annotationEditor.ActiveTextEditAnnotation is not null)
         {
+            var annotation = _annotationEditor.EndTextEdit(
+                commit,
+                ToEditingBounds(editor.Bounds),
+                ToEditingBounds(editor.TextContentBounds),
+                editor.Text,
+                imageFontSize);
+            if (annotation is not null && _document.Contains(annotation))
+            {
+                _annotationSelection.SelectOnly(annotation);
+            }
+        }
+        else if (commit && !string.IsNullOrWhiteSpace(editor.Text))
+        {
+            _annotationEditor.ResetHitCycle();
             ClearAnnotationSelection();
             var annotation = new TextAnnotation(
                 ToEditingBounds(editor.TextContentBounds),
                 editor.Text.TrimEnd(),
                 editor.ForeColor,
-                TextEditorCommitLayout.CalculateImageFontSize(
-                    editor.TextFontSize,
-                    _replacementCaptureImage is null ? 1D : _replacementZoom));
+                imageFontSize);
             _document.Add(annotation);
             _annotationSelection.SelectOnly(annotation);
         }
@@ -2208,7 +2746,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
     {
         if (!_hasSelection || _selection.Width <= 0 || _selection.Height <= 0)
         {
-            throw new InvalidOperationException("请先拖动鼠标选择截图区域；没有编辑元素时也可按 Ctrl+A 选择全部画面。 ");
+            throw new InvalidOperationException("请先拖动鼠标选择截图区域；没有编辑元素时也可按 Ctrl+A 选择鼠标所在显示器，再按一次选择全部显示器。 ");
         }
 
         CancelTextEditor(commit: true);
@@ -2250,7 +2788,11 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
         try
         {
             using var image = RenderSelection();
-            var path = _imageSaveService.SavePng(image, _outputFolder);
+            var path = _imageSaveService.SavePng(
+                image,
+                _outputFolder,
+                _screenshotFileNameMode,
+                _document.GetVisibleTextContents(EditingBounds));
             try
             {
                 _clipboardService.SetImage(image);
@@ -2258,7 +2800,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             catch (Exception clipboardException)
             {
                 _finished = true;
-                ScreenshotSaved?.Invoke(this, path);
+                ArtifactSaved?.Invoke(this, path);
                 MessageBox.Show(this,
                     $"截图已保存到：\n{path}\n\n但复制到剪贴板失败：{clipboardException.Message}",
                     "已保存，复制失败",
@@ -2270,7 +2812,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
             }
 
             _finished = true;
-            ScreenshotSaved?.Invoke(this, path);
+            ArtifactSaved?.Invoke(this, path);
             DialogResult = DialogResult.OK;
             Close();
         }
@@ -2306,7 +2848,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
     private void DrawScreenHints(Graphics graphics)
     {
         const string primary = "移动鼠标智能选择窗口";
-        const string secondary = "单击选择窗口   ·   拖动自由框选   ·   Ctrl+A 全选元素/全屏   ·   Esc 取消";
+        const string secondary = "单击选择窗口   ·   拖动自由框选   ·   Ctrl+A 当前显示器/全部显示器   ·   Esc 取消";
         using var primaryFont = new Font("Microsoft YaHei UI", 17F, FontStyle.Bold);
         using var secondaryFont = new Font("Microsoft YaHei UI", 10F);
         using var textBrush = new SolidBrush(Color.White);
@@ -2377,6 +2919,7 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
     {
         if (disposing)
         {
+            _drawingCursorIndicator.Dispose();
             _featureSession.Dispose();
             _annotationEditor.Dispose();
             _toolTip.Dispose();
@@ -2397,7 +2940,15 @@ internal sealed class CaptureOverlayForm : Form, ILiveCaptureFeatureHost
     bool ICaptureFeatureHost.GetBooleanPreference(string id, bool defaultValue)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        return _featurePreferences.TryGetValue(id, out var value)
+        return _booleanFeaturePreferences.TryGetValue(id, out var value)
+            ? value
+            : defaultValue;
+    }
+
+    int ICaptureFeatureHost.GetIntegerPreference(string id, int defaultValue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return _integerFeaturePreferences.TryGetValue(id, out var value)
             ? value
             : defaultValue;
     }

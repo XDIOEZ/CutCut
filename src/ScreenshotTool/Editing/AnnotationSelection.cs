@@ -23,16 +23,21 @@ internal sealed class AnnotationSelection
                 return Rectangle.Empty;
             }
 
-            var bounds = _items[0].Bounds;
+            var bounds = _items[0].VisualBounds;
             for (var index = 1; index < _items.Count; index++)
             {
-                bounds = Rectangle.Union(bounds, _items[index].Bounds);
+                bounds = Rectangle.Union(bounds, _items[index].VisualBounds);
             }
             return bounds;
         }
     }
 
     public bool Contains(MovableAnnotation annotation) => _items.Contains(annotation);
+
+    public IReadOnlyList<MovableAnnotation> GetTransformTargets(MovableAnnotation hovered) =>
+        _items.Count > 1 && _items.Contains(hovered)
+            ? _items.ToArray()
+            : [hovered];
 
     public void SelectOnly(MovableAnnotation annotation)
     {
@@ -66,7 +71,7 @@ internal sealed class AnnotationSelection
         _items.Clear();
         foreach (var annotation in annotations)
         {
-            if (selectionArea.IntersectsWith(annotation.Bounds))
+            if (selectionArea.IntersectsWith(annotation.VisualBounds))
             {
                 Add(annotation);
             }

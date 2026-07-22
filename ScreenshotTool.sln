@@ -15,6 +15,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.UiPreview", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.LongCapture", "src\ScreenshotTool.LongCapture\ScreenshotTool.LongCapture.csproj", "{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.ScreenRecording", "src\ScreenshotTool.ScreenRecording\ScreenshotTool.ScreenRecording.csproj", "{E5D97B5A-7266-4FDB-BE56-3C178CA0A6E9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.ScreenRecording.Recorder", "src\ScreenshotTool.ScreenRecording.Recorder\ScreenshotTool.ScreenRecording.Recorder.csproj", "{BC0F6089-1254-4B90-AAD4-F2D83C84DF21}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -45,5 +49,13 @@ Global
 		{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AF5E413A-B806-4DCF-A4F5-A8650598DBF0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E5D97B5A-7266-4FDB-BE56-3C178CA0A6E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E5D97B5A-7266-4FDB-BE56-3C178CA0A6E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E5D97B5A-7266-4FDB-BE56-3C178CA0A6E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E5D97B5A-7266-4FDB-BE56-3C178CA0A6E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BC0F6089-1254-4B90-AAD4-F2D83C84DF21}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{BC0F6089-1254-4B90-AAD4-F2D83C84DF21}.Debug|Any CPU.Build.0 = Debug|x64
+		{BC0F6089-1254-4B90-AAD4-F2D83C84DF21}.Release|Any CPU.ActiveCfg = Release|x64
+		{BC0F6089-1254-4B90-AAD4-F2D83C84DF21}.Release|Any CPU.Build.0 = Release|x64
 	EndGlobalSection
 EndGlobal

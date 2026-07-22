@@ -87,11 +87,12 @@ internal sealed class CaptureFeatureSession : IDisposable
         return commands;
     }
 
-    public async Task<bool> ExecuteToolbarCommandAsync(CaptureFeatureCommand command)
+    public async Task<CaptureFeatureCommandExecutionResult> ExecuteToolbarCommandAsync(
+        CaptureFeatureCommand command)
     {
         if (!_features.Contains(command.Feature))
         {
-            return false;
+            return CaptureFeatureCommandExecutionResult.NotExecuted;
         }
 
         try
@@ -99,16 +100,19 @@ internal sealed class CaptureFeatureSession : IDisposable
             await command.Provider.ExecuteToolbarCommandAsync(
                 command.Command.Id,
                 _lifetimeCancellation.Token);
-            return true;
+            return CaptureFeatureCommandExecutionResult.Success;
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
-            return false;
+            return CaptureFeatureCommandExecutionResult.NotExecuted;
         }
         catch (Exception exception)
         {
             Disable(command.Feature, exception);
-            return false;
+            var cause = exception.GetBaseException();
+            return new CaptureFeatureCommandExecutionResult(
+                false,
+                $"“{command.Command.Text}”执行失败，已在本次截图中停用。\n\n{cause.Message}");
         }
     }
 
@@ -168,3 +172,10 @@ internal sealed record CaptureFeatureCommand(
     ICaptureFeature Feature,
     ICaptureToolbarCommandProvider Provider,
     CaptureToolbarCommand Command);
+
+internal sealed record CaptureFeatureCommandExecutionResult(bool Succeeded, string? ErrorMessage)
+{
+    public static CaptureFeatureCommandExecutionResult Success { get; } = new(true, null);
+
+    public static CaptureFeatureCommandExecutionResult NotExecuted { get; } = new(false, null);
+}

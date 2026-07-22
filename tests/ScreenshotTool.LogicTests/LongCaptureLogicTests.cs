@@ -45,7 +45,7 @@ internal static class LongCaptureLogicTests
         using var module = new LongCaptureModule();
         AssertEqual("screenshot-tool.long-capture", module.Id, "长截图模块 ID 保持稳定");
         AssertEqual("长截图", module.DisplayName, "长截图模块显示名称");
-        AssertEqual(new Version(1, 0, 0), module.Version, "长截图模块版本");
+        AssertEqual(new Version(1, 1, 0), module.Version, "长截图模块版本");
 
         var features = module.CreateCaptureFeatures().ToArray();
         AssertEqual(1, features.Length, "长截图模块按会话创建一个功能实例");
@@ -78,7 +78,9 @@ internal static class LongCaptureLogicTests
         Directory.CreateDirectory(directory);
         try
         {
-            var modulePath = Path.Combine(directory, "ScreenshotTool.LongCapture.dll");
+            var packageDirectory = Path.Combine(directory, "LongCapture");
+            Directory.CreateDirectory(packageDirectory);
+            var modulePath = Path.Combine(packageDirectory, "ScreenshotTool.LongCapture.dll");
             File.Copy(typeof(LongCaptureModule).Assembly.Location, modulePath);
             using var moduleHost = new ModuleHost(directory);
             var loaded = moduleHost.Refresh();
@@ -102,9 +104,9 @@ internal static class LongCaptureLogicTests
                 commands[0].Id,
                 "热加载后的长截图命令 ID 保持稳定");
 
-            File.Delete(modulePath);
+            Directory.Delete(packageDirectory, recursive: true);
             var removed = moduleHost.Refresh();
-            AssertEqual(0, removed.Modules.Count, "删除 DLL 后长截图模块退出目录目录快照");
+            AssertEqual(0, removed.Modules.Count, "删除模块文件夹后长截图模块退出目录快照");
             AssertEqual(
                 1,
                 ((ICaptureToolbarCommandProvider)feature).GetToolbarCommands().Count,

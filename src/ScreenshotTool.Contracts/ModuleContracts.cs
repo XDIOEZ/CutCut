@@ -39,6 +39,41 @@ public interface IModuleContext
     Version HostVersion { get; }
 }
 
+public interface IModuleSettingsPageProvider
+{
+    IEnumerable<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host);
+}
+
+public interface IModuleSettingsPage : IDisposable
+{
+    string Id { get; }
+
+    string Title { get; }
+
+    string Description { get; }
+
+    int Order { get; }
+
+    Control Content { get; }
+}
+
+public interface IModuleSettingsHost
+{
+    bool GetBoolean(string id, bool defaultValue);
+
+    int GetInteger(string id, int defaultValue);
+
+    string GetString(string id, string defaultValue);
+
+    void SetBoolean(string id, bool value);
+
+    void SetInteger(string id, int value);
+
+    void SetString(string id, string value);
+
+    void Save();
+}
+
 public interface ICaptureFeature : IDisposable
 {
     string Id { get; }
@@ -112,6 +147,8 @@ public interface ICaptureFeatureHost
 
     bool GetBooleanPreference(string id, bool defaultValue);
 
+    int GetIntegerPreference(string id, int defaultValue);
+
     void InvalidateAll();
 
     void Invalidate(Rectangle bounds);
@@ -121,12 +158,6 @@ public interface ICaptureFeatureHost
     void SetMouseCapture(bool capture);
 
     Bitmap CopyDesktopSelection();
-}
-
-public static class CaptureFeaturePreferenceIds
-{
-    public const string LongCaptureSafetyChecks =
-        "screenshot-tool.long-capture.safety-checks";
 }
 
 public interface ILiveCaptureFeatureHost : ICaptureFeatureHost
@@ -140,6 +171,123 @@ public interface ILiveCaptureFeatureHost : ICaptureFeatureHost
     Bitmap CaptureLiveSelection();
 
     void ReplaceCaptureResult(Bitmap image);
+}
+
+public interface ICaptureArtifactHost : ICaptureFeatureHost
+{
+    string OutputFolder { get; }
+
+    void NotifyArtifactSaved(string path);
+
+    void CompleteCaptureSession();
+}
+
+public enum CaptureAnnotationTool
+{
+    Operation,
+    Select,
+    Rectangle,
+    Ellipse,
+    Arrow,
+    Pen,
+    Text,
+    Mosaic
+}
+
+public sealed record CaptureAnnotationToolDefinition(
+    CaptureAnnotationTool Tool,
+    string Text,
+    string ToolTip,
+    int Width = 48);
+
+public interface ICaptureAnnotationSession : IDisposable
+{
+    IReadOnlyList<CaptureAnnotationToolDefinition> Tools { get; }
+
+    IReadOnlyList<Color> Palette { get; }
+
+    CaptureAnnotationTool ActiveTool { get; set; }
+
+    Color Color { get; set; }
+
+    int ToolWidth { get; }
+
+    int MinimumWidth { get; }
+
+    int MaximumWidth { get; }
+
+    int AnnotationCount { get; }
+
+    bool AdjustWidth(int steps);
+
+    bool CycleWidth();
+
+    bool Undo();
+
+    void Clear();
+
+    void Show();
+
+    void BringToFrontForEditing();
+
+    void Close();
+}
+
+public enum CaptureAnnotationToolbarCommandStyle
+{
+    Default,
+    Primary,
+    Danger
+}
+
+public sealed record CaptureAnnotationToolbarCommand(
+    string Id,
+    string Text,
+    string ToolTip,
+    int Width = 48,
+    CaptureAnnotationToolbarCommandStyle Style = CaptureAnnotationToolbarCommandStyle.Default);
+
+public sealed class CaptureAnnotationToolbarCommandEventArgs(string commandId) : EventArgs
+{
+    public string CommandId { get; } = commandId;
+}
+
+public interface ICaptureAnnotationToolbarSession : ICaptureAnnotationSession
+{
+    event EventHandler<CaptureAnnotationToolbarCommandEventArgs>? ToolbarCommandInvoked;
+
+    void SetToolVisible(CaptureAnnotationTool tool, bool visible);
+
+    void ConfigureToolbar(
+        string? statusText,
+        IReadOnlyList<CaptureAnnotationToolbarCommand> commands);
+
+    void UpdateToolbarStatus(string? statusText);
+
+    void UpdateToolbarCommand(string commandId, string text, bool enabled);
+}
+
+public interface ICaptureAnnotationHost : ICaptureFeatureHost
+{
+    ICaptureAnnotationSession CreateAnnotationSession(Rectangle screenBounds);
+}
+
+public enum CaptureRegionIndicatorStyle
+{
+    Solid,
+    Dashed,
+    None
+}
+
+public sealed record CaptureAnnotationSessionOptions(
+    CaptureRegionIndicatorStyle RegionIndicatorStyle = CaptureRegionIndicatorStyle.Dashed,
+    bool ShowMouseClickIndicator = true);
+
+public interface IConfigurableCaptureAnnotationHost : ICaptureAnnotationHost
+{
+    ICaptureAnnotationSession CreateAnnotationSession(
+        Rectangle screenBounds,
+        CaptureAnnotationSessionOptions options);
 }
 
 public enum CaptureRenderTarget

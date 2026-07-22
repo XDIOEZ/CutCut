@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ScreenshotTool.Abstractions;
+using ScreenshotTool.Contracts;
 using ScreenshotTool.Core;
 
 namespace ScreenshotTool.Infrastructure;
@@ -169,9 +170,86 @@ internal sealed class JsonSettingsStore : ISettingsStore
         var toolWidthRange = settings.Preferences.GetToolWidthRange();
         settings.Preferences.MinimumToolWidth = toolWidthRange.Minimum;
         settings.Preferences.MaximumToolWidth = toolWidthRange.Maximum;
+        settings.Preferences.RememberToolWidth(settings.Preferences.LastToolWidth);
+        settings.Preferences.AnnotationRotationStepDegrees = AnnotationRotationStep.Normalize(
+            settings.Preferences.AnnotationRotationStepDegrees);
+        if (!Enum.IsDefined(settings.Preferences.DrawingCursorShape))
+        {
+            settings.Preferences.DrawingCursorShape = DrawingCursorShape.Circle;
+        }
+        settings.Preferences.AnnotationSnapThresholdPixels =
+            AnnotationLayoutOptions.NormalizeSnapThreshold(
+                settings.Preferences.AnnotationSnapThresholdPixels);
+        settings.Preferences.CtrlDragStepPixels = AnnotationLayoutOptions.NormalizeCtrlDragStep(
+            settings.Preferences.CtrlDragStepPixels);
+        if (!Enum.IsDefined(settings.Preferences.RecordingRegionIndicatorStyle))
+        {
+            settings.Preferences.RecordingRegionIndicatorStyle =
+                RecordingRegionIndicatorStyle.Dashed;
+        }
+        settings.Preferences.ScreenRecordingFramesPerSecond =
+            NormalizeNearest(
+                settings.Preferences.ScreenRecordingFramesPerSecond,
+                [30, 60]);
+        settings.Preferences.ScreenRecordingVideoBitrate =
+            NormalizeNearest(
+                settings.Preferences.ScreenRecordingVideoBitrate,
+                [2_000_000, 4_000_000, 8_000_000, 12_000_000, 20_000_000]);
+        settings.Preferences.ModuleBooleanPreferences = new Dictionary<string, bool>(
+            settings.Preferences.ModuleBooleanPreferences ?? [],
+            StringComparer.Ordinal);
+        settings.Preferences.ModuleIntegerPreferences = new Dictionary<string, int>(
+            settings.Preferences.ModuleIntegerPreferences ?? [],
+            StringComparer.Ordinal);
+        settings.Preferences.ModuleStringPreferences = new Dictionary<string, string>(
+            settings.Preferences.ModuleStringPreferences ?? [],
+            StringComparer.Ordinal);
+        settings.Preferences.ModuleBooleanPreferences.TryAdd(
+            "screenshot-tool.long-capture.safety-checks",
+            settings.Preferences.LongCaptureSafetyChecksEnabled);
+        settings.Preferences.ModuleBooleanPreferences.TryAdd(
+            "screenshot-tool.screen-recording.capture-system-audio",
+            settings.Preferences.ScreenRecordingCaptureSystemAudio);
+        settings.Preferences.ModuleBooleanPreferences.TryAdd(
+            "screenshot-tool.screen-recording.capture-microphone",
+            settings.Preferences.ScreenRecordingCaptureMicrophone);
+        settings.Preferences.ModuleBooleanPreferences.TryAdd(
+            "screenshot-tool.screen-recording.show-mouse-click-indicator",
+            settings.Preferences.ScreenRecordingShowMouseClickIndicator);
+        settings.Preferences.ModuleIntegerPreferences.TryAdd(
+            "screenshot-tool.screen-recording.frames-per-second",
+            settings.Preferences.ScreenRecordingFramesPerSecond);
+        settings.Preferences.ModuleIntegerPreferences.TryAdd(
+            "screenshot-tool.screen-recording.video-bitrate",
+            settings.Preferences.ScreenRecordingVideoBitrate);
+        settings.Preferences.ModuleIntegerPreferences.TryAdd(
+            "screenshot-tool.screen-recording.region-indicator-style",
+            (int)settings.Preferences.RecordingRegionIndicatorStyle);
+        if (!Enum.IsDefined(settings.Preferences.ScreenshotFileNameMode))
+        {
+            settings.Preferences.ScreenshotFileNameMode = ScreenshotFileNameMode.DateTime;
+        }
         settings.Preferences.DrawingToolCoefficients ??= new DrawingToolCoefficients();
         settings.Preferences.DrawingToolCoefficients.Normalize();
         return settings;
+    }
+
+    private static int NormalizeNearest(int value, IReadOnlyList<int> supportedValues)
+    {
+        var nearest = supportedValues[0];
+        var nearestDistance = long.MaxValue;
+        foreach (var supportedValue in supportedValues)
+        {
+            var distance = Math.Abs((long)supportedValue - value);
+            if (distance >= nearestDistance)
+            {
+                continue;
+            }
+
+            nearest = supportedValue;
+            nearestDistance = distance;
+        }
+        return nearest;
     }
 
     private static string GetProfileFileName(string profileId)

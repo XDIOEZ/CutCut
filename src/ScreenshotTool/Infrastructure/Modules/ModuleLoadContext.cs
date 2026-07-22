@@ -33,6 +33,17 @@ internal sealed class ModuleLoadContext : AssemblyLoadContext
         return LoadFromStream(stream);
     }
 
+    protected override nint LoadUnmanagedDll(string unmanagedDllName)
+    {
+        var fileName = unmanagedDllName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            ? unmanagedDllName
+            : $"{unmanagedDllName}.dll";
+        var dependencyPath = Path.Combine(_moduleDirectory, fileName);
+        return File.Exists(dependencyPath)
+            ? LoadUnmanagedDllFromPath(dependencyPath)
+            : nint.Zero;
+    }
+
     public Assembly LoadModule(string assemblyPath)
     {
         using var assemblyStream = OpenReadShared(assemblyPath);

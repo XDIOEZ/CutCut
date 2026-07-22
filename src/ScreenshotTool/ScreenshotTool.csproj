@@ -10,10 +10,14 @@
     <RootNamespace>ScreenshotTool</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>1.0.0</Version>
+    <ApplicationIcon>Assets\LightShotIcon.ico</ApplicationIcon>
+    <Version>1.10.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Assets\LightShotIcon.ico" />
+    <EmbeddedResource Include="Assets\LightShotIcon.ico"
+                      LogicalName="ScreenshotTool.Assets.LightShotIcon.ico" />
     <ProjectReference Include="..\ScreenshotTool.Contracts\ScreenshotTool.Contracts.csproj" />
     <ProjectReference Include="..\ScreenshotTool.LongCapture\ScreenshotTool.LongCapture.csproj"
                       ReferenceOutputAssembly="false"
@@ -28,11 +32,12 @@
           AfterTargets="CopyFilesToOutputDirectory"
           Condition="'@(FirstPartyModule)' != ''">
     <MakeDir Directories="$(OutDir)Modules" />
+    <MakeDir Directories="$(OutDir)Modules\LongCapture" />
     <Copy SourceFiles="@(FirstPartyModule)"
-          DestinationFolder="$(OutDir)Modules"
+          DestinationFolder="$(OutDir)Modules\LongCapture"
           SkipUnchangedFiles="true" />
     <ItemGroup>
-      <FileWrites Include="@(FirstPartyModule->'$(OutDir)Modules\%(Filename)%(Extension)')" />
+      <FileWrites Include="@(FirstPartyModule->'$(OutDir)Modules\LongCapture\%(Filename)%(Extension)')" />
     </ItemGroup>
   </Target>
 
@@ -42,7 +47,7 @@
           Condition="'@(FirstPartyModule)' != ''">
     <ItemGroup>
       <ResolvedFileToPublish Include="@(FirstPartyModule)">
-        <RelativePath>Modules\%(Filename)%(Extension)</RelativePath>
+        <RelativePath>Modules\LongCapture\%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>

@@ -12,7 +12,7 @@ internal static class AnnotationResizeLayout
         Point pointer,
         Rectangle selection)
     {
-        if (!IsCorner(corner) || original.IsEmpty || selection.IsEmpty)
+        if (!StickerLayout.IsResizeHandle(corner) || original.IsEmpty || selection.IsEmpty)
         {
             return original;
         }
@@ -30,6 +30,26 @@ internal static class AnnotationResizeLayout
                 ClampLeading(pointer.Y, selection.Top, anchor.Y),
                 ClampTrailing(pointer.X, anchor.X, selection.Right),
                 anchor.Y),
+            StickerHitTarget.Top => Rectangle.FromLTRB(
+                original.Left,
+                ClampLeading(pointer.Y, selection.Top, original.Bottom),
+                original.Right,
+                original.Bottom),
+            StickerHitTarget.Right => Rectangle.FromLTRB(
+                original.Left,
+                original.Top,
+                ClampTrailing(pointer.X, original.Left, selection.Right),
+                original.Bottom),
+            StickerHitTarget.Bottom => Rectangle.FromLTRB(
+                original.Left,
+                original.Top,
+                original.Right,
+                ClampTrailing(pointer.Y, original.Top, selection.Bottom)),
+            StickerHitTarget.Left => Rectangle.FromLTRB(
+                ClampLeading(pointer.X, selection.Left, original.Right),
+                original.Top,
+                original.Right,
+                original.Bottom),
             StickerHitTarget.BottomLeft => Rectangle.FromLTRB(
                 ClampLeading(pointer.X, selection.Left, anchor.X),
                 anchor.Y,
@@ -67,9 +87,4 @@ internal static class AnnotationResizeLayout
         _ => bounds.Location
     };
 
-    private static bool IsCorner(StickerHitTarget target) => target is
-        StickerHitTarget.TopLeft or
-        StickerHitTarget.TopRight or
-        StickerHitTarget.BottomLeft or
-        StickerHitTarget.BottomRight;
 }

@@ -1,3 +1,5 @@
+using ScreenshotTool.Contracts;
+
 namespace ScreenshotTool.Abstractions;
 
 internal interface IModuleManager : ICaptureFeatureCatalog, IDisposable
@@ -7,4 +9,6 @@ internal interface IModuleManager : ICaptureFeatureCatalog, IDisposable
     ModuleRefreshResult Refresh(bool force = false);
 
     IReadOnlyList<ModuleInfo> GetModules();
+
+    IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host);
 }

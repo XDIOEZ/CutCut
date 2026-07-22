@@ -27,9 +27,10 @@
 - 新模块至少验证：发现与加载、功能实例创建、核心输入/渲染行为、删除后的目录卸载，以及活动会话的延迟释放。
 - 修改截图输出时必须验证最终导出位图，而不只验证屏幕预览。
 - 交付前运行 `dotnet format ScreenshotTool.sln --verify-no-changes`、逻辑测试和 Release 构建；不要通过关闭用户正在运行的程序来解除构建锁，应改用独立输出目录。
-- 日常修改无需打包发布；仅在重大功能、架构、依赖或发布相关修改时执行打包发布。发布默认使用 `LightweightWinX64` 配置；需要免安装运行时才额外提供 `PortableCompressedWinX64`。不得为压缩体积启用未经完整回归验证的 WinForms 程序集裁剪。
-- 需要发布时，优先通过 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Publish-Release.ps1` 运行发布脚本，保持轻量版低于 5 MiB、便携压缩版低于 90 MiB；超限必须先解释和处理新增依赖。
+- 无论修改规模或类型，只有用户在当前需求中明确要求“打包”或“发布”时才执行打包发布；不得根据重大功能、版本变化、既往要求或发布习惯自行打包。未明确要求时，只执行必要的格式检查、测试与 Release 构建验证，不创建或更新 `Relase`、发布压缩包或免解压目录。
+- 用户明确要求打包发布后，默认使用 `LightweightWinX64` 配置；需要免安装运行时才额外提供 `PortableCompressedWinX64`。不得为压缩体积启用未经完整回归验证的 WinForms 程序集裁剪。优先通过 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Publish-Release.ps1` 运行发布脚本，保持轻量版低于 5 MiB、便携压缩版低于 90 MiB；超限必须先解释和处理新增依赖。
 
 ## 其他要求
 
  - 可以的话 减少子智能体的使用
+ - 设置分页统一使用纵向单列布局；每一行只承载一个设置项，不把多个独立选项横向并排。选项较多时允许页面变长并使用滚动区域。

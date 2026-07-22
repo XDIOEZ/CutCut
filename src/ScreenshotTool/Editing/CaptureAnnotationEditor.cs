@@ -11,6 +11,8 @@ internal sealed record AnnotationDeleteResult(
 internal sealed class CaptureAnnotationEditor : IDisposable
 {
     private readonly DrawingToolCoefficients _coefficients;
+    private readonly AnnotationHitCycle _hitCycle = new();
+    private readonly TextAnnotationEditSession _textEditSession = new();
 
     public CaptureAnnotationEditor(DrawingToolCoefficients? coefficients = null)
     {
@@ -20,6 +22,14 @@ internal sealed class CaptureAnnotationEditor : IDisposable
     public AnnotationDocument Document { get; } = new();
 
     public AnnotationSelection Selection { get; } = new();
+
+    public float GetDrawingCursorDiameter(EditorTool tool, float width) => tool switch
+    {
+        EditorTool.Pen => _coefficients.ApplyPen(width),
+        EditorTool.Mosaic => MosaicAnnotation.CalculateBrushDiameter(
+            _coefficients.ApplyMosaic(width)),
+        _ => 0F
+    };
 
     public Annotation? BuildDraft(
         EditorTool tool,
@@ -74,11 +84,36 @@ internal sealed class CaptureAnnotationEditor : IDisposable
             return false;
         }
 
+        ResetHitCycle();
         Document.Add(annotation);
         return true;
     }
 
-    public void Render(Graphics graphics, Bitmap source) => Document.Render(graphics, source);
+    public MovableAnnotation? ActiveTextEditAnnotation => _textEditSession.ActiveAnnotation;
+
+    public void Render(Graphics graphics, Bitmap source) =>
+        Document.Render(graphics, source, ActiveTextEditAnnotation);
+
+    public bool TryBeginTextEdit(
+        MovableAnnotation annotation,
+        out TextAnnotationEditDescriptor? descriptor)
+    {
+        ResetHitCycle();
+        return _textEditSession.TryBegin(Document, annotation, out descriptor);
+    }
+
+    public MovableAnnotation? EndTextEdit(
+        bool commit,
+        Rectangle editorOuterBounds,
+        Rectangle editorContentBounds,
+        string text,
+        float fontSize) =>
+        _textEditSession.End(
+            commit,
+            editorOuterBounds,
+            editorContentBounds,
+            text,
+            fontSize);
 
     public Bitmap RenderResult(Bitmap source)
     {
@@ -110,6 +145,7 @@ internal sealed class CaptureAnnotationEditor : IDisposable
             return false;
         }
 
+        ResetHitCycle();
         Selection.Prune(Document.Contains);
         return true;
     }
@@ -124,6 +160,7 @@ internal sealed class CaptureAnnotationEditor : IDisposable
         var bounds = Selection.Bounds;
         var renderMargin = Selection.RenderMargin;
         var annotations = Selection.Items.Cast<Annotation>().ToArray();
+        ResetHitCycle();
         Selection.Clear();
         return new AnnotationDeleteResult(
             Document.Remove(annotations),
@@ -139,8 +176,20 @@ internal sealed class CaptureAnnotationEditor : IDisposable
     public MovableAnnotation? FindTopMovableAt(Point point, int tolerance) =>
         Document.FindTopMovableAt(point, tolerance);
 
+    public MovableAnnotation? FindNextMovableAt(
+        Point point,
+        int hitTolerance,
+        int regionTolerance) =>
+        _hitCycle.SelectNext(
+            point,
+            Document.FindMovablesAt(point, hitTolerance),
+            regionTolerance);
+
+    public void ResetHitCycle() => _hitCycle.Reset();
+
     public StickerAnnotation AddSticker(Bitmap image, Rectangle bounds)
     {
+        ResetHitCycle();
         var sticker = new StickerAnnotation(image, bounds);
         Document.Add(sticker);
         Selection.SelectOnly(sticker);
@@ -149,6 +198,7 @@ internal sealed class CaptureAnnotationEditor : IDisposable
 
     public T AddAndSelect<T>(T annotation) where T : MovableAnnotation
     {
+        ResetHitCycle();
         Document.Add(annotation);
         Selection.SelectOnly(annotation);
         return annotation;
@@ -169,7 +219,16 @@ internal sealed class CaptureAnnotationEditor : IDisposable
         {
             if (Document.Contains(annotation))
             {
-                graphics.DrawRectangle(border, annotation.Bounds);
+                var state = graphics.Save();
+                try
+                {
+                    annotation.ApplyRotationTransform(graphics);
+                    graphics.DrawRectangle(border, annotation.Bounds);
+                }
+                finally
+                {
+                    graphics.Restore(state);
+                }
             }
         }
 
@@ -180,15 +239,26 @@ internal sealed class CaptureAnnotationEditor : IDisposable
 
         using var fill = new SolidBrush(Color.White);
         using var outline = new Pen(Color.FromArgb(14, 165, 233), Math.Max(1F, 1.5F / scale));
-        foreach (var (_, handle) in StickerLayout.GetHandles(primary.Bounds, handleSize))
+        var handleState = graphics.Save();
+        try
         {
-            graphics.FillRectangle(fill, handle);
-            graphics.DrawRectangle(outline, handle);
+            primary.ApplyRotationTransform(graphics);
+            foreach (var (_, handle) in StickerLayout.GetHandles(primary.Bounds, handleSize))
+            {
+                graphics.FillRectangle(fill, handle);
+                graphics.DrawRectangle(outline, handle);
+            }
+        }
+        finally
+        {
+            graphics.Restore(handleState);
         }
     }
 
     public void Clear()
     {
+        ResetHitCycle();
+        _textEditSession.Cancel();
         Selection.Clear();
         Document.Clear();
     }

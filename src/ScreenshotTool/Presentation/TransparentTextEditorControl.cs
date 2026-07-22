@@ -1,15 +1,17 @@
 using System.Drawing.Drawing2D;
 using ScreenshotTool.Abstractions;
+using ScreenshotTool.Editing;
 
 namespace ScreenshotTool.Presentation;
 
 internal sealed class TransparentTextEditorControl : Control
 {
-    private const int HorizontalPadding = 4;
-    private const int VerticalPadding = 3;
     private const int GlyphSafetyPadding = 3;
 
-    private readonly Font _editorFont;
+    private Font _editorFont;
+    private readonly int _horizontalPadding;
+    private readonly int _verticalPadding;
+    private readonly FontStyle _fontStyle;
     private readonly Size _minimumSize;
     private readonly Rectangle _movementBounds;
     private readonly IClipboardService? _clipboardService;
@@ -26,8 +28,16 @@ internal sealed class TransparentTextEditorControl : Control
         Size minimumSize,
         Color foregroundColor,
         Rectangle movementBounds,
-        IClipboardService? clipboardService = null)
+        IClipboardService? clipboardService = null,
+        float textFontSize = TextToolSizing.DefaultFontSize,
+        Size? textPadding = null,
+        FontStyle fontStyle = FontStyle.Bold)
     {
+        if (!float.IsFinite(textFontSize) || textFontSize <= 0F)
+        {
+            throw new ArgumentOutOfRangeException(nameof(textFontSize));
+        }
+
         SetStyle(
             ControlStyles.AllPaintingInWmPaint |
             ControlStyles.OptimizedDoubleBuffer |
@@ -39,6 +49,10 @@ internal sealed class TransparentTextEditorControl : Control
         _movementBounds = movementBounds.IsEmpty
             ? new Rectangle(location, minimumSize)
             : movementBounds;
+        var effectivePadding = textPadding ?? new Size(4, 3);
+        _horizontalPadding = Math.Max(0, effectivePadding.Width);
+        _verticalPadding = Math.Max(0, effectivePadding.Height);
+        _fontStyle = fontStyle;
         _clipboardService = clipboardService;
         _textMenu = new ContextMenuStrip();
         _textMenu.Items.Add("剪切", null, (_, _) => CutSelectedText());
@@ -66,7 +80,11 @@ internal sealed class TransparentTextEditorControl : Control
         Cursor = Cursors.IBeam;
         ImeMode = ImeMode.On;
         TabStop = true;
-        _editorFont = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold, GraphicsUnit.Pixel);
+        _editorFont = new Font(
+            "Microsoft YaHei UI",
+            textFontSize,
+            _fontStyle,
+            GraphicsUnit.Pixel);
         Font = _editorFont;
         ResizeToContent();
     }
@@ -84,12 +102,42 @@ internal sealed class TransparentTextEditorControl : Control
         : Text.Substring(SelectionStart, SelectionLength);
 
     public Rectangle TextContentBounds => Rectangle.FromLTRB(
-        Left + HorizontalPadding,
-        Top + VerticalPadding,
-        Math.Max(Left + HorizontalPadding + 1, Right - HorizontalPadding),
-        Math.Max(Top + VerticalPadding + 1, Bottom - VerticalPadding));
+        Left + _horizontalPadding,
+        Top + _verticalPadding,
+        Math.Max(Left + _horizontalPadding + 1, Right - _horizontalPadding),
+        Math.Max(Top + _verticalPadding + 1, Bottom - _verticalPadding));
 
     public float TextFontSize => _editorFont.Size;
+
+    public void SetTextFontSize(float textFontSize)
+    {
+        if (!float.IsFinite(textFontSize) || textFontSize <= 0F)
+        {
+            throw new ArgumentOutOfRangeException(nameof(textFontSize));
+        }
+        if (Math.Abs(_editorFont.Size - textFontSize) < 0.001F)
+        {
+            return;
+        }
+
+        var previousFont = _editorFont;
+        _editorFont = new Font(
+            "Microsoft YaHei UI",
+            textFontSize,
+            _fontStyle,
+            GraphicsUnit.Pixel);
+        Font = _editorFont;
+        previousFont.Dispose();
+        if (Text.Length > 0)
+        {
+            var wrapped = WrapToRightBoundary(Text, _caretIndex);
+            Text = wrapped.Text;
+            _caretIndex = wrapped.CaretIndex;
+            _selectionAnchor = _caretIndex;
+        }
+        ResizeToContent();
+        Invalidate();
+    }
 
     public bool IsTextFullyVisible
     {
@@ -109,7 +157,8 @@ internal sealed class TransparentTextEditorControl : Control
             return;
         }
 
-        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var normalized = TextInputNormalizer.ToHalfWidthLatin(
+            value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'));
         var selectionStart = SelectionStart;
         var candidate = Text
             .Remove(selectionStart, SelectionLength)
@@ -524,7 +573,7 @@ internal sealed class TransparentTextEditorControl : Control
     {
         var lines = Text.Split('\n');
         var lineIndex = Math.Clamp(
-            (point.Y - VerticalPadding) / Math.Max(1, Font.Height),
+            (point.Y - _verticalPadding) / Math.Max(1, Font.Height),
             0,
             Math.Max(0, lines.Length - 1));
         var lineStart = 0;
@@ -534,7 +583,7 @@ internal sealed class TransparentTextEditorControl : Control
         }
 
         var line = lines[lineIndex];
-        var relativeX = point.X - HorizontalPadding;
+        var relativeX = point.X - _horizontalPadding;
         if (relativeX <= 0)
         {
             return lineStart;
@@ -575,8 +624,8 @@ internal sealed class TransparentTextEditorControl : Control
                 var selectedWidth = MeasureLineWidth(line[(start - lineStart)..(end - lineStart)]);
                 graphics.FillRectangle(
                     brush,
-                    HorizontalPadding + prefixWidth,
-                    VerticalPadding + lineIndex * Font.Height,
+                    _horizontalPadding + prefixWidth,
+                    _verticalPadding + lineIndex * Font.Height,
                     Math.Max(1, selectedWidth),
                     Font.Height);
             }
@@ -604,7 +653,7 @@ internal sealed class TransparentTextEditorControl : Control
     {
         var maximumWidth = Math.Max(
             1,
-            _movementBounds.Right - Left - HorizontalPadding * 2 - GlyphSafetyPadding);
+            _movementBounds.Right - Left - _horizontalPadding * 2 - GlyphSafetyPadding);
         var wrapped = new System.Text.StringBuilder(text.Length);
         var currentLine = new System.Text.StringBuilder();
         var wrappedCaret = -1;
@@ -652,8 +701,8 @@ internal sealed class TransparentTextEditorControl : Control
             GetContentBounds(),
             format)[0];
         var measured = region.GetBounds(graphics);
-        var x = Math.Clamp(measured.Left, HorizontalPadding, Math.Max(HorizontalPadding, ClientSize.Width - HorizontalPadding));
-        var y = Math.Clamp(measured.Top, VerticalPadding, Math.Max(VerticalPadding, ClientSize.Height - Font.Height - VerticalPadding));
+        var x = Math.Clamp(measured.Left, _horizontalPadding, Math.Max(_horizontalPadding, ClientSize.Width - _horizontalPadding));
+        var y = Math.Clamp(measured.Top, _verticalPadding, Math.Max(_verticalPadding, ClientSize.Height - Font.Height - _verticalPadding));
         return new PointF(x, y);
     }
 
@@ -669,11 +718,11 @@ internal sealed class TransparentTextEditorControl : Control
         var textWidth = lines.Max(line => MeasureLineWidth(
             string.IsNullOrEmpty(line) ? " " : line));
         var desiredWidth = Math.Clamp(
-            textWidth + HorizontalPadding * 2,
+            textWidth + _horizontalPadding * 2,
             _minimumSize.Width,
             Math.Max(_minimumSize.Width, _movementBounds.Right - Left));
         var desiredHeight = Math.Clamp(
-            lines.Length * Font.Height + VerticalPadding * 2,
+            lines.Length * Font.Height + _verticalPadding * 2,
             _minimumSize.Height,
             _movementBounds.Height);
 
@@ -701,10 +750,10 @@ internal sealed class TransparentTextEditorControl : Control
     }
 
     private RectangleF GetContentBounds() => new(
-        HorizontalPadding,
-        VerticalPadding,
-        Math.Max(1, ClientSize.Width - HorizontalPadding * 2),
-        Math.Max(1, ClientSize.Height - VerticalPadding * 2));
+        _horizontalPadding,
+        _verticalPadding,
+        Math.Max(1, ClientSize.Width - _horizontalPadding * 2),
+        Math.Max(1, ClientSize.Height - _verticalPadding * 2));
 
     private static StringFormat CreateTextFormat() => new(StringFormat.GenericTypographic)
     {

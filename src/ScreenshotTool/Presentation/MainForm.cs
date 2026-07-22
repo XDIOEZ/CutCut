@@ -25,20 +25,21 @@ internal sealed class MainForm : Form
     private readonly NotifyIcon _trayIcon;
     private readonly System.Windows.Forms.Timer _moduleRefreshTimer;
     private readonly AppShellControl _shell;
-    private readonly ShortcutSettingsPage _shortcutPage;
     private readonly StickerBehaviorSettingsPage _stickerBehaviorPage;
-    private readonly LongCaptureSettingsPage _longCapturePage;
     private readonly EditorSettingsPage _editorSettingsPage;
     private readonly DrawingCoefficientsSettingsPage _drawingCoefficientsPage;
+    private readonly ScreenshotSettingsPage _screenshotSettingsPage;
     private readonly SavePathSettingsPage _savePathPage;
     private readonly ScreenshotGalleryPage _galleryPage;
+    private readonly Dictionary<string, IModuleSettingsPage> _moduleSettingsPages =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _backgroundIntegrationEnabled;
     private AppSettings _settings;
     private bool _isCapturing;
     private bool _isExiting;
     private bool _initialMinimizeHandled;
     private string? _pendingHotkeyError;
-    private string? _pendingSavedScreenshotPath;
+    private SavedArtifactNotificationForm? _savedArtifactNotification;
 
     public MainForm(
         ISettingsStore settingsStore,
@@ -68,20 +69,30 @@ internal sealed class MainForm : Form
         ClientSize = new Size(980, 640);
         MinimumSize = new Size(880, 580);
         StartPosition = FormStartPosition.CenterScreen;
-        Icon = SystemIcons.Application;
+        Icon = AppIcon.Shared;
 
         _shell = new AppShellControl();
         Controls.Add(_shell);
 
-        _shortcutPage = new ShortcutSettingsPage(_settings.GetHotkey(), _settings.StartMinimized);
         _stickerBehaviorPage = new StickerBehaviorSettingsPage(
             _settings.Preferences.StickerSelectionMoveMode);
-        _longCapturePage = new LongCaptureSettingsPage(
-            _settings.Preferences.LongCaptureSafetyChecksEnabled);
-        _editorSettingsPage = new EditorSettingsPage(_settings.GetToolWidthRange());
+        _editorSettingsPage = new EditorSettingsPage(
+            _settings.GetToolWidthRange(),
+            _settings.Preferences.AnnotationRotationStepDegrees,
+            _settings.Preferences.DrawingCursorShape,
+            _settings.Preferences.AnnotationSnappingEnabled,
+            _settings.Preferences.AnnotationSnapThresholdPixels,
+            _settings.Preferences.CtrlDragStepPixels);
         _drawingCoefficientsPage = new DrawingCoefficientsSettingsPage(
             _settings.Preferences.DrawingToolCoefficients);
-        _savePathPage = new SavePathSettingsPage(_settings.OutputFolder);
+        _screenshotSettingsPage = new ScreenshotSettingsPage(
+            _settings.GetHotkey(),
+            _settings.StartMinimized,
+            _settings.Preferences.DismissSaveNotificationBeforeCapture,
+            _settings.Preferences.HideMainWindowDuringCapture);
+        _savePathPage = new SavePathSettingsPage(
+            _settings.OutputFolder,
+            _settings.Preferences.ScreenshotFileNameMode);
         _galleryPage = new ScreenshotGalleryPage(_settings.OutputFolder, _fileLocationService);
         ComposePages();
         WirePageEvents();
@@ -89,10 +100,10 @@ internal sealed class MainForm : Form
         _trayIcon = BuildTrayIcon(enableBackgroundIntegration);
         _moduleRefreshTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _moduleRefreshTimer.Tick += (_, _) => RefreshModules(force: false, showResult: false);
+        RefreshModules(force: false, showResult: false);
         if (enableBackgroundIntegration)
         {
             _moduleRefreshTimer.Start();
-            RefreshModules(force: false, showResult: false);
             _hotkeyService.Pressed += (_, _) => BeginCapture();
         }
 
@@ -110,58 +121,43 @@ internal sealed class MainForm : Form
             "paste",
             "信息粘贴",
             "设置图片和文字贴纸在截图框移动时的行为",
-            _stickerBehaviorPage));
+            _stickerBehaviorPage,
+            100));
 
         _shell.AddPage(new AppPage(
-            "shortcut",
-            "快捷键设置",
-            "设置后台唤起截图的全局组合键",
-            _shortcutPage));
-
-        _shell.AddPage(new AppPage(
-            "long-capture",
-            "长截图",
-            "选择宽松拼接或严格安全校验",
-            _longCapturePage));
-
-        _shell.AddPage(new AppPage(
-            "copy",
-            "图片复制",
-            "快速把编辑后的截图送到剪贴板",
-            new FeatureGuidePage(
-                "FAST COPY",
-                "完成编辑后，一键复制",
-                "截图框确认后按 Ctrl + C，最终画面会立即复制到剪贴板并结束截图。",
-                "Ctrl + C",
-                [
-                    ("包含全部编辑", "矩形、箭头、文字、马赛克和粘贴贴纸都会进入最终图片。"),
-                    ("剪贴板自动重试", "剪贴板被其他程序短暂占用时会自动重试，减少复制失败。"),
-                    ("保存并复制", "需要同时保存文件时使用 Ctrl + S，保存完成后也会复制图片。")
-                ])));
+            "screenshot-settings",
+            "截图设置",
+            "设置截图前提示与主窗口显示行为",
+            _screenshotSettingsPage,
+            200));
 
         _shell.AddPage(new AppPage(
             "save",
             "保存路径",
             "设置截图文件夹并快速打开保存位置",
-            _savePathPage));
+            _savePathPage,
+            500));
 
         _shell.AddPage(new AppPage(
             "edit",
             "图片修改",
-            "设置画笔、形状和马赛克等编辑工具的粗细范围",
-            _editorSettingsPage));
+            "设置绘图粗细、元素吸附、Ctrl 拖动步长与旋转步进",
+            _editorSettingsPage,
+            600));
 
         _shell.AddPage(new AppPage(
             "drawing-coefficients",
             "绘制系数",
             "配置各绘制元素的基础尺寸，工具栏粗细作为统一倍率",
-            _drawingCoefficientsPage));
+            _drawingCoefficientsPage,
+            700));
 
         _shell.AddPage(new AppPage(
             GalleryPageId,
             "查看截图",
             "浏览保存目录中的最近截图，双击即可查看",
-            _galleryPage));
+            _galleryPage,
+            800));
     }
 
     private void WirePageEvents()
@@ -174,13 +170,12 @@ internal sealed class MainForm : Form
                 _galleryPage.RefreshScreenshots();
             }
         };
-        _shortcutPage.SaveRequested += SaveSettings;
         _stickerBehaviorPage.SaveRequested += SaveSettings;
-        _longCapturePage.SaveRequested += SaveSettings;
         _editorSettingsPage.SaveRequested += SaveSettings;
         _drawingCoefficientsPage.SaveRequested += SaveSettings;
-        _shortcutPage.HotkeyInputEntered += (_, _) => _hotkeyService.Unregister();
-        _shortcutPage.HotkeyInputLeft += (_, _) =>
+        _screenshotSettingsPage.SaveRequested += SaveSettings;
+        _screenshotSettingsPage.HotkeyInputEntered += (_, _) => _hotkeyService.Unregister();
+        _screenshotSettingsPage.HotkeyInputLeft += (_, _) =>
         {
             if (!_isCapturing)
             {
@@ -205,14 +200,12 @@ internal sealed class MainForm : Form
 
         var icon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = AppIcon.Shared,
             Text = $"轻截（{_settings.GetHotkey().ToDisplayText()}）",
             Visible = visible,
             ContextMenuStrip = menu
         };
         icon.DoubleClick += (_, _) => ShowFromTray();
-        icon.BalloonTipClicked += HandleTrayBalloonTipClicked;
-        icon.BalloonTipClosed += (_, _) => _pendingSavedScreenshotPath = null;
         return icon;
     }
 
@@ -239,7 +232,7 @@ internal sealed class MainForm : Form
         }
 
         var oldHotkey = _settings.GetHotkey();
-        var newHotkey = _shortcutPage.Hotkey;
+        var newHotkey = _screenshotSettingsPage.Hotkey;
 
         try
         {
@@ -247,7 +240,7 @@ internal sealed class MainForm : Form
             var candidate = new AppSettings
             {
                 OutputFolder = Path.GetFullPath(folder),
-                StartMinimized = _shortcutPage.StartMinimized,
+                StartMinimized = _screenshotSettingsPage.StartMinimized,
                 HotkeyModifiers = newHotkey.Modifiers,
                 HotkeyVirtualKey = newHotkey.VirtualKey,
                 Preferences = new UserPreferences
@@ -255,7 +248,26 @@ internal sealed class MainForm : Form
                     StickerSelectionMoveMode = _stickerBehaviorPage.Mode,
                     MinimumToolWidth = toolWidthRange.Minimum,
                     MaximumToolWidth = toolWidthRange.Maximum,
-                    LongCaptureSafetyChecksEnabled = _longCapturePage.SafetyChecksEnabled,
+                    LastToolWidth = _settings.Preferences.GetLastToolWidth(),
+                    AnnotationRotationStepDegrees = _editorSettingsPage.RotationStepDegrees,
+                    DrawingCursorShape = _editorSettingsPage.DrawingCursorShape,
+                    AnnotationSnappingEnabled = _editorSettingsPage.SnappingEnabled,
+                    AnnotationSnapThresholdPixels = _editorSettingsPage.SnapThresholdPixels,
+                    CtrlDragStepPixels = _editorSettingsPage.CtrlDragStepPixels,
+                    ModuleBooleanPreferences = new Dictionary<string, bool>(
+                        _settings.Preferences.ModuleBooleanPreferences,
+                        StringComparer.Ordinal),
+                    ModuleIntegerPreferences = new Dictionary<string, int>(
+                        _settings.Preferences.ModuleIntegerPreferences,
+                        StringComparer.Ordinal),
+                    ModuleStringPreferences = new Dictionary<string, string>(
+                        _settings.Preferences.ModuleStringPreferences,
+                        StringComparer.Ordinal),
+                    ScreenshotFileNameMode = _savePathPage.FileNameMode,
+                    DismissSaveNotificationBeforeCapture =
+                        _screenshotSettingsPage.DismissSaveNotificationBeforeCapture,
+                    HideMainWindowDuringCapture =
+                        _screenshotSettingsPage.HideMainWindowDuringCapture,
                     DrawingToolCoefficients = _drawingCoefficientsPage.Coefficients
                 }
             };
@@ -288,7 +300,7 @@ internal sealed class MainForm : Form
             if (!_hotkeyService.TryRegister(newHotkey, out var error))
             {
                 _hotkeyService.TryRegister(oldHotkey, out _);
-                _shortcutPage.Hotkey = oldHotkey;
+                _screenshotSettingsPage.Hotkey = oldHotkey;
                 MessageBox.Show(this, error, "快捷键不可用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -386,6 +398,10 @@ internal sealed class MainForm : Form
         try
         {
             var result = _moduleManager.Refresh(force);
+            if (result.Changed || force)
+            {
+                SyncModuleSettingsPages();
+            }
             if (result.Errors.Count > 0)
             {
                 _shell.ShowStatus($"模块加载失败：{result.Errors[0]}", AppTheme.Danger);
@@ -412,6 +428,58 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void SyncModuleSettingsPages()
+    {
+        foreach (var current in _moduleSettingsPages)
+        {
+            _shell.RemovePage(current.Key);
+            DisposeModuleSettingsPage(current.Value);
+        }
+        _moduleSettingsPages.Clear();
+
+        foreach (var page in _moduleManager.CreateSettingsPages(
+                     new MainFormModuleSettingsHost(this)))
+        {
+            try
+            {
+                var id = page.Id;
+                if (_shell.ContainsPage(id) || _moduleSettingsPages.ContainsKey(id))
+                {
+                    DisposeModuleSettingsPage(page);
+                    _shell.ShowStatus($"模块设置页 ID 重复：{id}", AppTheme.Danger);
+                    continue;
+                }
+
+                _shell.AddPage(new AppPage(
+                    id,
+                    page.Title,
+                    page.Description,
+                    page.Content,
+                    page.Order));
+                _moduleSettingsPages.Add(id, page);
+            }
+            catch (Exception exception)
+            {
+                DisposeModuleSettingsPage(page);
+                _shell.ShowStatus(
+                    $"模块设置页加载失败：{exception.Message}",
+                    AppTheme.Danger);
+            }
+        }
+    }
+
+    private static void DisposeModuleSettingsPage(IModuleSettingsPage page)
+    {
+        try
+        {
+            page.Dispose();
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"模块设置页释放失败：{exception}");
+        }
+    }
+
     private async void BeginCapture()
     {
         if (_isCapturing || IsDisposed)
@@ -419,9 +487,27 @@ internal sealed class MainForm : Form
             return;
         }
 
+        ApplySavedArtifactNotificationCaptureStartPolicy();
         _isCapturing = true;
-        var restoreMainWindow = Visible && WindowState != FormWindowState.Minimized;
-        Hide();
+        var mainWindowWasVisible = Visible && WindowState != FormWindowState.Minimized;
+        var hideMainWindow = MainWindowCaptureVisibilityPolicy.ShouldHide(
+            _settings.Preferences.HideMainWindowDuringCapture,
+            Visible,
+            WindowState);
+        var originalOpacity = Opacity;
+        var originalWindowState = WindowState;
+        var captureProtectionApplied = false;
+        if (hideMainWindow)
+        {
+            captureProtectionApplied = WindowCaptureProtection.TryExclude(this);
+            DwmFlush();
+            Opacity = 0D;
+            DwmFlush();
+            captureProtectionApplied =
+                WindowCaptureProtection.TryExclude(this) || captureProtectionApplied;
+            Hide();
+            DwmFlush();
+        }
 
         try
         {
@@ -429,6 +515,17 @@ internal sealed class MainForm : Form
             DwmFlush();
             await Task.Delay(90);
             using var snapshot = _captureService.CaptureDesktop();
+            var toolWidthController = new ToolWidthController(
+                _settings.GetToolWidthRange(),
+                _settings.Preferences.GetLastToolWidth());
+            var annotationSessionFactory = new LiveAnnotationSessionFactory(
+                _clipboardService,
+                _settings.Preferences.DrawingToolCoefficients,
+                _settings.Preferences.AnnotationRotationStepDegrees,
+                _settings.Preferences.DrawingCursorShape,
+                _settings.Preferences.AnnotationSnappingEnabled,
+                _settings.Preferences.AnnotationSnapThresholdPixels,
+                _settings.Preferences.CtrlDragStepPixels);
             using var overlay = new CaptureOverlayForm(
                 snapshot,
                 _imageSaveService,
@@ -437,24 +534,29 @@ internal sealed class MainForm : Form
                 _moduleManager,
                 SelectionMoveAnnotationStrategyFactory.Create(
                     _settings.Preferences.StickerSelectionMoveMode),
-                new ToolWidthController(_settings.GetToolWidthRange()),
-                new Dictionary<string, bool>(StringComparer.Ordinal)
-                {
-                    [CaptureFeaturePreferenceIds.LongCaptureSafetyChecks] =
-                        _settings.Preferences.LongCaptureSafetyChecksEnabled
-                },
+                toolWidthController,
+                annotationSessionFactory,
+                _settings.Preferences.ModuleBooleanPreferences,
+                _settings.Preferences.ModuleIntegerPreferences,
                 _settings.OutputFolder,
-                _settings.Preferences.DrawingToolCoefficients);
-            overlay.ScreenshotSaved += (_, path) =>
+                _settings.Preferences.ScreenshotFileNameMode,
+                _settings.Preferences.DrawingToolCoefficients,
+                _settings.Preferences.AnnotationRotationStepDegrees,
+                _settings.Preferences.DrawingCursorShape,
+                _settings.Preferences.AnnotationSnappingEnabled,
+                _settings.Preferences.AnnotationSnapThresholdPixels,
+                _settings.Preferences.CtrlDragStepPixels);
+            overlay.ArtifactSaved += (_, path) =>
             {
                 _shell.ShowStatus($"已保存：{Path.GetFileName(path)}", AppTheme.Success);
-                ShowScreenshotSavedNotification(path);
+                ShowSavedArtifactNotification(path);
                 if (_shell.SelectedPageId == GalleryPageId)
                 {
                     _galleryPage.RefreshScreenshots();
                 }
             };
             overlay.ShowDialog();
+            SaveLastToolWidth(toolWidthController.Current);
         }
         catch (Exception exception)
         {
@@ -464,10 +566,34 @@ internal sealed class MainForm : Form
         finally
         {
             _isCapturing = false;
-            if (restoreMainWindow && !_isExiting)
+            Opacity = originalOpacity;
+            if (hideMainWindow && mainWindowWasVisible && !_isExiting)
             {
-                ShowFromTray();
+                Show();
+                WindowState = originalWindowState;
+                Activate();
             }
+            if (captureProtectionApplied)
+            {
+                WindowCaptureProtection.TryAllow(this);
+            }
+        }
+    }
+
+    private void SaveLastToolWidth(int toolWidth)
+    {
+        if (!_settings.Preferences.RememberToolWidth(toolWidth))
+        {
+            return;
+        }
+
+        try
+        {
+            _settingsStore.Save(_settings);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _shell.ShowStatus($"粗细参数保存失败：{exception.Message}", AppTheme.Danger);
         }
     }
 
@@ -493,7 +619,6 @@ internal sealed class MainForm : Form
             {
                 Hide();
                 _hotkeyService.TryRegister(_settings.GetHotkey(), out _);
-                _pendingSavedScreenshotPath = null;
                 _trayIcon.ShowBalloonTip(1800, "轻截正在后台运行",
                     $"按 {_settings.GetHotkey().ToDisplayText()} 开始截图", ToolTipIcon.Info);
             });
@@ -516,7 +641,6 @@ internal sealed class MainForm : Form
         e.Cancel = true;
         Hide();
         _hotkeyService.TryRegister(_settings.GetHotkey(), out _);
-        _pendingSavedScreenshotPath = null;
         _trayIcon.ShowBalloonTip(1600, "轻截仍在运行",
             $"按 {_settings.GetHotkey().ToDisplayText()} 截图；右键托盘图标可退出。", ToolTipIcon.Info);
     }
@@ -533,32 +657,59 @@ internal sealed class MainForm : Form
         Activate();
     }
 
-    private void ShowScreenshotSavedNotification(string path)
+    private void ShowSavedArtifactNotification(string path)
     {
-        _pendingSavedScreenshotPath = Path.GetFullPath(path);
-        _trayIcon.ShowBalloonTip(
-            3000,
-            "截图保存成功",
-            $"{Path.GetFileName(path)}\n点击打开文件所在位置",
-            ToolTipIcon.Info);
-    }
-
-    private void HandleTrayBalloonTipClicked(object? sender, EventArgs e)
-    {
-        var path = _pendingSavedScreenshotPath;
-        _pendingSavedScreenshotPath = null;
-        if (string.IsNullOrWhiteSpace(path))
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var fullPath = Path.GetFullPath(path);
+        if (IsDisposed)
         {
             return;
         }
 
+        if (InvokeRequired)
+        {
+            if (IsHandleCreated)
+            {
+                BeginInvoke((Action)(() => ShowSavedArtifactNotification(fullPath)));
+            }
+            return;
+        }
+
+        _savedArtifactNotification?.Close();
+        var notification = new SavedArtifactNotificationForm(fullPath);
+        notification.OpenRequested += HandleSavedArtifactOpenRequested;
+        notification.FormClosed += (_, _) =>
+        {
+            notification.OpenRequested -= HandleSavedArtifactOpenRequested;
+            if (ReferenceEquals(_savedArtifactNotification, notification))
+            {
+                _savedArtifactNotification = null;
+            }
+            notification.Dispose();
+        };
+        _savedArtifactNotification = notification;
+        notification.Show();
+    }
+
+    internal void ApplySavedArtifactNotificationCaptureStartPolicy()
+    {
+        if (!_settings.Preferences.DismissSaveNotificationBeforeCapture)
+        {
+            return;
+        }
+
+        _savedArtifactNotification?.Close();
+    }
+
+    private void HandleSavedArtifactOpenRequested(object? sender, string path)
+    {
         try
         {
             _fileLocationService.ShowFileInFolder(path);
         }
         catch (Exception exception) when (IsFileLocationException(exception))
         {
-            MessageBox.Show($"无法打开截图位置：{exception.Message}", "打开失败",
+            MessageBox.Show($"无法打开文件位置：{exception.Message}", "打开失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
@@ -581,8 +732,17 @@ internal sealed class MainForm : Form
         {
             _moduleRefreshTimer.Stop();
             _moduleRefreshTimer.Dispose();
+            _savedArtifactNotification?.Close();
+            _savedArtifactNotification?.Dispose();
+            _savedArtifactNotification = null;
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
+            foreach (var page in _moduleSettingsPages)
+            {
+                _shell.RemovePage(page.Key);
+                DisposeModuleSettingsPage(page.Value);
+            }
+            _moduleSettingsPages.Clear();
         }
 
         base.Dispose(disposing);
@@ -590,4 +750,48 @@ internal sealed class MainForm : Form
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmFlush();
+
+    private sealed class MainFormModuleSettingsHost(MainForm owner) : IModuleSettingsHost
+    {
+        public bool GetBoolean(string id, bool defaultValue) =>
+            owner._settings.Preferences.ModuleBooleanPreferences.TryGetValue(id, out var value)
+                ? value
+                : defaultValue;
+
+        public int GetInteger(string id, int defaultValue) =>
+            owner._settings.Preferences.ModuleIntegerPreferences.TryGetValue(id, out var value)
+                ? value
+                : defaultValue;
+
+        public string GetString(string id, string defaultValue) =>
+            owner._settings.Preferences.ModuleStringPreferences.TryGetValue(id, out var value)
+                ? value
+                : defaultValue;
+
+        public void SetBoolean(string id, bool value) =>
+            owner._settings.Preferences.ModuleBooleanPreferences[id] = value;
+
+        public void SetInteger(string id, int value) =>
+            owner._settings.Preferences.ModuleIntegerPreferences[id] = value;
+
+        public void SetString(string id, string value) =>
+            owner._settings.Preferences.ModuleStringPreferences[id] = value;
+
+        public void Save()
+        {
+            owner._settingsStore.Save(owner._settings);
+            owner._shell.ShowStatus("模块设置已保存", AppTheme.Success);
+        }
+    }
+}
+
+internal static class MainWindowCaptureVisibilityPolicy
+{
+    public static bool ShouldHide(
+        bool hideMainWindowDuringCapture,
+        bool isVisible,
+        FormWindowState windowState) =>
+        hideMainWindowDuringCapture &&
+        isVisible &&
+        windowState != FormWindowState.Minimized;
 }

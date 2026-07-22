@@ -56,8 +56,36 @@ internal sealed class AnnotationDocument : IDisposable
         return null;
     }
 
+    public IReadOnlyList<MovableAnnotation> FindMovablesAt(Point point, int tolerance = 0)
+    {
+        var matches = new List<MovableAnnotation>();
+        for (var index = _annotations.Count - 1; index >= 0; index--)
+        {
+            if (_annotations[index] is MovableAnnotation movable &&
+                movable.HitTest(point, tolerance))
+            {
+                matches.Add(movable);
+            }
+        }
+
+        return matches;
+    }
+
     public IReadOnlyList<MovableAnnotation> GetMovableAnnotations() =>
         _annotations.OfType<MovableAnnotation>().ToArray();
+
+    public IReadOnlyList<string> GetVisibleTextContents(Rectangle visibleBounds) =>
+        _annotations
+            .Where(annotation => Rectangle.Intersect(annotation.VisualBounds, visibleBounds) is { IsEmpty: false })
+            .Select(annotation => annotation switch
+            {
+                TextAnnotation text => text.Text,
+                PastedTextAnnotation text => text.Text,
+                _ => null
+            })
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Cast<string>()
+            .ToArray();
 
     public void Clear()
     {
@@ -110,10 +138,15 @@ internal sealed class AnnotationDocument : IDisposable
         return areas;
     }
 
-    public void Render(Graphics graphics, Bitmap source)
+    public void Render(Graphics graphics, Bitmap source, Annotation? excluded = null)
     {
         foreach (var annotation in _annotations)
         {
+            if (ReferenceEquals(annotation, excluded))
+            {
+                continue;
+            }
+
             annotation.Render(graphics, source);
         }
     }

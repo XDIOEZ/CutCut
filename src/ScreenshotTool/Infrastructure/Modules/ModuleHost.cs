@@ -7,11 +7,11 @@ namespace ScreenshotTool.Infrastructure.Modules;
 
 internal sealed class ModuleHost : IModuleManager
 {
-    private readonly Dictionary<string, LoadedModuleAssembly> _assemblies =
+    private readonly Dictionary<string, LoadedModuleAssembly> _packages =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, FileStamp> _failedFiles =
+    private readonly Dictionary<string, PackageStamp> _failedPackages =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, FileStamp> _nonModuleFiles =
+    private readonly Dictionary<string, PackageStamp> _nonModulePackages =
         new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
@@ -29,15 +29,21 @@ internal sealed class ModuleHost : IModuleManager
 
         var errors = new List<string>();
         var changed = false;
-        var files = Directory.EnumerateFiles(ModulesDirectory, "*.dll", SearchOption.TopDirectoryOnly)
+        var packages = Directory
+            .EnumerateDirectories(ModulesDirectory, "*", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFullPath)
-            .ToDictionary(path => path, FileStamp.FromFile, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                path => path,
+                PackageStamp.FromDirectory,
+                StringComparer.OrdinalIgnoreCase);
 
-        foreach (var current in _assemblies.ToArray())
+        foreach (var current in _packages.ToArray())
         {
-            if (!files.TryGetValue(current.Key, out var stamp) || force || current.Value.Stamp != stamp)
+            if (!packages.TryGetValue(current.Key, out var stamp) ||
+                force ||
+                current.Value.Stamp != stamp)
             {
-                _assemblies.Remove(current.Key);
+                _packages.Remove(current.Key);
                 current.Value.Retire();
                 changed = true;
             }
@@ -46,43 +52,50 @@ internal sealed class ModuleHost : IModuleManager
         if (changed)
         {
             // A duplicate-ID or dependency failure may become valid after another module is removed.
-            _failedFiles.Clear();
+            _failedPackages.Clear();
         }
 
-        foreach (var failed in _failedFiles.Keys.Except(files.Keys, StringComparer.OrdinalIgnoreCase).ToArray())
+        foreach (var failed in _failedPackages.Keys
+                     .Except(packages.Keys, StringComparer.OrdinalIgnoreCase)
+                     .ToArray())
         {
-            _failedFiles.Remove(failed);
+            _failedPackages.Remove(failed);
         }
-        foreach (var ignored in _nonModuleFiles.Keys.Except(files.Keys, StringComparer.OrdinalIgnoreCase).ToArray())
+        foreach (var ignored in _nonModulePackages.Keys
+                     .Except(packages.Keys, StringComparer.OrdinalIgnoreCase)
+                     .ToArray())
         {
-            _nonModuleFiles.Remove(ignored);
+            _nonModulePackages.Remove(ignored);
         }
 
-        foreach (var file in files)
+        foreach (var package in packages)
         {
-            if (_assemblies.ContainsKey(file.Key))
+            if (_packages.ContainsKey(package.Key))
             {
                 continue;
             }
-            if (!force && _failedFiles.TryGetValue(file.Key, out var failedStamp) && failedStamp == file.Value)
+            if (!force &&
+                _failedPackages.TryGetValue(package.Key, out var failedStamp) &&
+                failedStamp == package.Value)
             {
                 continue;
             }
-            if (!force && _nonModuleFiles.TryGetValue(file.Key, out var ignoredStamp) && ignoredStamp == file.Value)
+            if (!force &&
+                _nonModulePackages.TryGetValue(package.Key, out var ignoredStamp) &&
+                ignoredStamp == package.Value)
             {
                 continue;
             }
 
             try
             {
-                var loaded = LoadedModuleAssembly.Load(file.Key, file.Value);
-                if (loaded.Modules.Count == 0)
+                var loaded = LoadedModuleAssembly.LoadPackage(package.Key, package.Value);
+                if (loaded is null)
                 {
-                    loaded.Retire();
-                    _nonModuleFiles[file.Key] = file.Value;
+                    _nonModulePackages[package.Key] = package.Value;
                     continue;
                 }
-                var existingIds = _assemblies.Values
+                var existingIds = _packages.Values
                     .SelectMany(assembly => assembly.Modules)
                     .Select(module => module.Id)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -95,15 +108,15 @@ internal sealed class ModuleHost : IModuleManager
                     loaded.Retire();
                     throw new InvalidDataException($"模块 ID 重复：{duplicateId}");
                 }
-                _assemblies.Add(file.Key, loaded);
-                _failedFiles.Remove(file.Key);
-                _nonModuleFiles.Remove(file.Key);
+                _packages.Add(package.Key, loaded);
+                _failedPackages.Remove(package.Key);
+                _nonModulePackages.Remove(package.Key);
                 changed = true;
             }
             catch (Exception exception)
             {
-                _failedFiles[file.Key] = file.Value;
-                errors.Add($"{Path.GetFileName(file.Key)}：{GetLoadError(exception)}");
+                _failedPackages[package.Key] = package.Value;
+                errors.Add($"{Path.GetFileName(package.Key)}：{GetLoadError(exception)}");
                 changed = true;
             }
         }
@@ -111,7 +124,7 @@ internal sealed class ModuleHost : IModuleManager
         return new ModuleRefreshResult(GetModules(), errors, changed);
     }
 
-    public IReadOnlyList<ModuleInfo> GetModules() => _assemblies.Values
+    public IReadOnlyList<ModuleInfo> GetModules() => _packages.Values
         .SelectMany(assembly => assembly.Modules.Select(module => new ModuleInfo(
             module.Id,
             module.DisplayName,
@@ -123,10 +136,19 @@ internal sealed class ModuleHost : IModuleManager
     public IReadOnlyList<ICaptureFeature> CreateCaptureFeatures()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return _assemblies.Values
+        return _packages.Values
             .SelectMany(assembly => assembly.CreateFeatureLeases())
             .OrderBy(feature => feature.Order)
             .ThenBy(feature => feature.Id, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    public IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(host);
+        return _packages.Values
+            .SelectMany(assembly => assembly.CreateSettingsPageLeases(host))
             .ToArray();
     }
 
@@ -138,13 +160,13 @@ internal sealed class ModuleHost : IModuleManager
         }
 
         _disposed = true;
-        foreach (var assembly in _assemblies.Values)
+        foreach (var assembly in _packages.Values)
         {
             assembly.Retire();
         }
-        _assemblies.Clear();
-        _failedFiles.Clear();
-        _nonModuleFiles.Clear();
+        _packages.Clear();
+        _failedPackages.Clear();
+        _nonModulePackages.Clear();
     }
 
     private static string GetLoadError(Exception exception)
@@ -156,25 +178,34 @@ internal sealed class ModuleHost : IModuleManager
         return exception.InnerException?.Message ?? exception.Message;
     }
 
-    private readonly record struct FileStamp(long Length, DateTime LastWriteTimeUtc)
+    private readonly record struct PackageStamp(string Fingerprint)
     {
-        public static FileStamp FromFile(string path)
+        public static PackageStamp FromDirectory(string path)
         {
-            var info = new FileInfo(path);
-            return new FileStamp(info.Length, info.LastWriteTimeUtc);
+            var fingerprint = string.Join(
+                '\n',
+                Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+                    .Select(file => new FileInfo(file))
+                    .OrderBy(
+                        file => Path.GetRelativePath(path, file.FullName),
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(file =>
+                        $"{Path.GetRelativePath(path, file.FullName)}|" +
+                        $"{file.Length}|{file.LastWriteTimeUtc.Ticks}"));
+            return new PackageStamp(fingerprint);
         }
     }
 
     private sealed class LoadedModuleAssembly
     {
         private readonly ModuleLoadContext _loadContext;
-        private int _activeFeatures;
+        private int _activeLeases;
         private bool _retired;
         private bool _unloaded;
 
         private LoadedModuleAssembly(
             string assemblyPath,
-            FileStamp stamp,
+            PackageStamp stamp,
             ModuleLoadContext loadContext,
             IReadOnlyList<IScreenshotToolModule> modules)
         {
@@ -185,10 +216,66 @@ internal sealed class ModuleHost : IModuleManager
         }
 
         public string AssemblyPath { get; }
-        public FileStamp Stamp { get; }
+        public PackageStamp Stamp { get; }
         public IReadOnlyList<IScreenshotToolModule> Modules { get; }
 
-        public static LoadedModuleAssembly Load(string assemblyPath, FileStamp stamp)
+        public static LoadedModuleAssembly? LoadPackage(
+            string packageDirectory,
+            PackageStamp stamp)
+        {
+            LoadedModuleAssembly? package = null;
+            var loadErrors = new List<Exception>();
+            foreach (var assemblyPath in Directory
+                         .EnumerateFiles(packageDirectory, "*.dll", SearchOption.TopDirectoryOnly)
+                         .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            {
+                LoadedModuleAssembly candidate;
+                try
+                {
+                    candidate = LoadAssembly(assemblyPath, stamp);
+                }
+                catch (BadImageFormatException)
+                {
+                    // Native DLLs may live beside the module entry assembly.
+                    continue;
+                }
+                catch (Exception exception)
+                {
+                    loadErrors.Add(exception);
+                    continue;
+                }
+
+                if (candidate.Modules.Count == 0)
+                {
+                    candidate.Retire();
+                    continue;
+                }
+                if (candidate.Modules.Count > 1 || package is not null)
+                {
+                    candidate.Retire();
+                    package?.Retire();
+                    throw new InvalidDataException(
+                        $"每个模块文件夹只能包含一个模块：{packageDirectory}");
+                }
+                package = candidate;
+            }
+
+            if (package is not null)
+            {
+                return package;
+            }
+            if (loadErrors.Count > 0)
+            {
+                throw new InvalidDataException(
+                    $"模块文件夹中没有可加载的入口程序集：{packageDirectory}",
+                    loadErrors[0]);
+            }
+            return null;
+        }
+
+        private static LoadedModuleAssembly LoadAssembly(
+            string assemblyPath,
+            PackageStamp stamp)
         {
             var loadContext = new ModuleLoadContext(Path.GetDirectoryName(assemblyPath)!);
             var modules = new List<IScreenshotToolModule>();
@@ -245,8 +332,32 @@ internal sealed class ModuleHost : IModuleManager
                 }
                 foreach (var feature in features)
                 {
-                    _activeFeatures++;
-                    yield return new CaptureFeatureLease(feature, ReleaseFeature);
+                    _activeLeases++;
+                    yield return new CaptureFeatureLease(feature, ReleaseLease);
+                }
+            }
+        }
+
+        public IEnumerable<IModuleSettingsPage> CreateSettingsPageLeases(
+            IModuleSettingsHost host)
+        {
+            foreach (var module in Modules.OfType<IModuleSettingsPageProvider>())
+            {
+                IModuleSettingsPage[] pages;
+                try
+                {
+                    pages = module.CreateSettingsPages(host).ToArray();
+                }
+                catch (Exception exception)
+                {
+                    Debug.WriteLine($"模块设置页创建失败：{exception}");
+                    continue;
+                }
+
+                foreach (var page in pages)
+                {
+                    _activeLeases++;
+                    yield return new ModuleSettingsPageLease(page, ReleaseLease);
                 }
             }
         }
@@ -257,15 +368,15 @@ internal sealed class ModuleHost : IModuleManager
             TryUnload();
         }
 
-        private void ReleaseFeature()
+        private void ReleaseLease()
         {
-            _activeFeatures = Math.Max(0, _activeFeatures - 1);
+            _activeLeases = Math.Max(0, _activeLeases - 1);
             TryUnload();
         }
 
         private void TryUnload()
         {
-            if (!_retired || _activeFeatures != 0 || _unloaded)
+            if (!_retired || _activeLeases != 0 || _unloaded)
             {
                 return;
             }
@@ -318,6 +429,37 @@ internal sealed class ModuleHost : IModuleManager
             inner is ICaptureToolbarCommandProvider provider
                 ? provider.ExecuteToolbarCommandAsync(commandId, cancellationToken)
                 : Task.CompletedTask;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            try
+            {
+                inner.Dispose();
+            }
+            finally
+            {
+                release();
+            }
+        }
+    }
+
+    private sealed class ModuleSettingsPageLease(
+        IModuleSettingsPage inner,
+        Action release) : IModuleSettingsPage
+    {
+        private bool _disposed;
+
+        public string Id => inner.Id;
+        public string Title => inner.Title;
+        public string Description => inner.Description;
+        public int Order => inner.Order;
+        public Control Content => inner.Content;
 
         public void Dispose()
         {

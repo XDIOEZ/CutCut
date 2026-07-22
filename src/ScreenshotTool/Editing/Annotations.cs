@@ -42,7 +42,11 @@ internal abstract class MovableAnnotation : Annotation
 {
     public abstract Rectangle Bounds { get; protected set; }
 
-    public override Rectangle VisualBounds => Bounds;
+    public float RotationDegrees { get; private set; }
+
+    public override Rectangle VisualBounds => AnnotationRotation.GetRotatedBounds(
+        Bounds,
+        RotationDegrees);
 
     public virtual bool SupportsResize => false;
 
@@ -54,7 +58,35 @@ internal abstract class MovableAnnotation : Annotation
 
     public abstract void SetBounds(Rectangle bounds);
 
-    public virtual bool HitTest(Point point, int tolerance) => Bounds.Contains(point);
+    public sealed override void Render(Graphics graphics, Bitmap source)
+    {
+        var state = graphics.Save();
+        try
+        {
+            ApplyRotationTransform(graphics);
+            RenderUnrotated(graphics, source);
+        }
+        finally
+        {
+            graphics.Restore(state);
+        }
+    }
+
+    protected abstract void RenderUnrotated(Graphics graphics, Bitmap source);
+
+    public virtual bool HitTest(Point point, int tolerance) =>
+        HitTestUnrotated(ToUnrotatedPoint(point), tolerance);
+
+    protected virtual bool HitTestUnrotated(Point point, int tolerance) => Bounds.Contains(point);
+
+    public void RotateBy(float degrees) =>
+        RotationDegrees = AnnotationRotation.NormalizeDegrees(RotationDegrees + degrees);
+
+    internal Point ToUnrotatedPoint(Point point) =>
+        AnnotationRotation.ToUnrotatedPoint(point, Bounds, RotationDegrees);
+
+    internal void ApplyRotationTransform(Graphics graphics) =>
+        AnnotationRotation.ApplyTransform(graphics, Bounds, RotationDegrees);
 
     public bool CanMove(bool altPressed) => !RequiresAltToMove || altPressed;
 
@@ -84,7 +116,7 @@ internal sealed class ShapeAnnotation : MovableAnnotation
 
     public override int RenderMargin => (int)Math.Ceiling(Width / 2F) + 3;
 
-    public override void Render(Graphics graphics, Bitmap source)
+    protected override void RenderUnrotated(Graphics graphics, Bitmap source)
     {
         using var pen = CreatePen(Color, Width);
         if (Tool == EditorTool.Ellipse)
@@ -132,7 +164,7 @@ internal sealed class ArrowAnnotation : MovableAnnotation
     public override int RenderMargin =>
         (int)Math.Ceiling(Math.Max(Width, Math.Max(HeadWidth, HeadLength))) + 3;
 
-    public override bool HitTest(Point point, int tolerance) => AnnotationHitTesting.IsNearSegment(
+    protected override bool HitTestUnrotated(Point point, int tolerance) => AnnotationHitTesting.IsNearSegment(
         point,
         Start,
         End,
@@ -146,7 +178,7 @@ internal sealed class ArrowAnnotation : MovableAnnotation
         Bounds = CalculateBounds(Start, End);
     }
 
-    public override void Render(Graphics graphics, Bitmap source)
+    protected override void RenderUnrotated(Graphics graphics, Bitmap source)
     {
         using var pen = CreatePen(Color, Width);
         pen.CustomEndCap = new AdjustableArrowCap(
@@ -185,7 +217,7 @@ internal sealed class FreehandAnnotation : MovableAnnotation
 
     public override int RenderMargin => (int)Math.Ceiling(Width / 2F) + 3;
 
-    public override bool HitTest(Point point, int tolerance) => AnnotationHitTesting.IsNearPolyline(
+    protected override bool HitTestUnrotated(Point point, int tolerance) => AnnotationHitTesting.IsNearPolyline(
         Points,
         point,
         Math.Max(tolerance, Width / 2F + 3F));
@@ -196,7 +228,7 @@ internal sealed class FreehandAnnotation : MovableAnnotation
         Bounds = CalculateBounds(Points);
     }
 
-    public override void Render(Graphics graphics, Bitmap source)
+    protected override void RenderUnrotated(Graphics graphics, Bitmap source)
     {
         if (Points.Count == 0)
         {
@@ -239,15 +271,32 @@ internal sealed class TextAnnotation : MovableAnnotation
     }
 
     public override Rectangle Bounds { get; protected set; }
-    public string Text { get; }
+    public string Text { get; private set; }
     public Color Color { get; }
-    public float FontSize { get; }
+    public float FontSize { get; private set; }
 
     public override AnnotationCategory Category => AnnotationCategory.Sticker;
 
-    public override void SetBounds(Rectangle bounds) => Bounds = bounds;
+    public override void SetBounds(Rectangle bounds)
+    {
+        FontSize = AnnotationScaling.ScaleFontSize(FontSize, Bounds, bounds);
+        Bounds = bounds;
+    }
 
-    public override void Render(Graphics graphics, Bitmap source)
+    internal void UpdateText(Rectangle bounds, string text, float fontSize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (!float.IsFinite(fontSize) || fontSize <= 0F)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fontSize));
+        }
+
+        Bounds = bounds;
+        Text = text;
+        FontSize = fontSize;
+    }
+
+    protected override void RenderUnrotated(Graphics graphics, Bitmap source)
     {
         using var font = new Font("Microsoft YaHei UI", FontSize, FontStyle.Bold, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(Color);
@@ -267,6 +316,7 @@ internal sealed class TextAnnotation : MovableAnnotation
             graphics.Restore(state);
         }
     }
+
 }
 
 internal sealed class MosaicAnnotation : MovableAnnotation
@@ -287,7 +337,10 @@ internal sealed class MosaicAnnotation : MovableAnnotation
 
     public override bool SupportsResize => true;
 
-    public override bool HitTest(Point point, int tolerance)
+    internal static float CalculateBrushDiameter(float width) =>
+        CalculateBrushRadius(width) * 2F;
+
+    protected override bool HitTestUnrotated(Point point, int tolerance)
     {
         var hitBounds = Bounds;
         hitBounds.Inflate(tolerance, tolerance);
@@ -308,7 +361,7 @@ internal sealed class MosaicAnnotation : MovableAnnotation
         return false;
     }
 
-    public override void Render(Graphics graphics, Bitmap source)
+    protected override void RenderUnrotated(Graphics graphics, Bitmap source)
     {
         var oldMode = graphics.SmoothingMode;
         graphics.SmoothingMode = SmoothingMode.None;
@@ -411,7 +464,7 @@ internal sealed class MosaicAnnotation : MovableAnnotation
     private static HashSet<Point> BuildBlocks(IEnumerable<Point> points, float width)
     {
         var blocks = new HashSet<Point>();
-        var radius = Math.Max(BlockSize, (int)width * 3);
+        var radius = CalculateBrushRadius(width);
 
         foreach (var point in points)
         {
@@ -437,6 +490,9 @@ internal sealed class MosaicAnnotation : MovableAnnotation
 
         return blocks;
     }
+
+    private static int CalculateBrushRadius(float width) =>
+        Math.Max(BlockSize, (int)width * 3);
 }
 
 internal sealed class StickerAnnotation : MovableAnnotation
@@ -458,7 +514,7 @@ internal sealed class StickerAnnotation : MovableAnnotation
 
     public override void SetBounds(Rectangle bounds) => Bounds = bounds;
 
-    public override void Render(Graphics graphics, Bitmap source)
+    protected override void RenderUnrotated(Graphics graphics, Bitmap source)
     {
         var interpolationMode = graphics.InterpolationMode;
         var pixelOffsetMode = graphics.PixelOffsetMode;
@@ -476,25 +532,52 @@ internal sealed class PastedTextAnnotation : MovableAnnotation
 {
     public const float DefaultFontSize = 17F;
 
-    public PastedTextAnnotation(Rectangle bounds, string text)
+    public PastedTextAnnotation(
+        Rectangle bounds,
+        string text,
+        float fontSize = DefaultFontSize)
     {
+        if (!float.IsFinite(fontSize) || fontSize <= 0F)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fontSize));
+        }
+
         Bounds = bounds;
         Text = text;
+        FontSize = fontSize;
     }
 
     public override Rectangle Bounds { get; protected set; }
-    public string Text { get; }
+    public string Text { get; private set; }
+    public float FontSize { get; private set; }
 
     public override AnnotationCategory Category => AnnotationCategory.Sticker;
 
-    public override void SetBounds(Rectangle bounds) => Bounds = bounds;
+    public override void SetBounds(Rectangle bounds)
+    {
+        FontSize = AnnotationScaling.ScaleFontSize(FontSize, Bounds, bounds);
+        Bounds = bounds;
+    }
 
-    public override void Render(Graphics graphics, Bitmap source)
+    internal void UpdateText(Rectangle bounds, string text, float fontSize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (!float.IsFinite(fontSize) || fontSize <= 0F)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fontSize));
+        }
+
+        Bounds = bounds;
+        Text = text;
+        FontSize = fontSize;
+    }
+
+    protected override void RenderUnrotated(Graphics graphics, Bitmap source)
     {
         using var background = new SolidBrush(Color.FromArgb(218, 15, 23, 42));
         using var border = new Pen(Color.FromArgb(186, 230, 253), 1F);
         using var textBrush = new SolidBrush(Color.White);
-        using var font = new Font("Microsoft YaHei UI", DefaultFontSize, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var font = new Font("Microsoft YaHei UI", FontSize, FontStyle.Regular, GraphicsUnit.Pixel);
         using var format = new StringFormat
         {
             Trimming = StringTrimming.None

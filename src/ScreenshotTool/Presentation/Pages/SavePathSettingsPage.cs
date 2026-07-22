@@ -1,3 +1,4 @@
+using ScreenshotTool.Core;
 using ScreenshotTool.Presentation.Theme;
 
 namespace ScreenshotTool.Presentation.Pages;
@@ -6,10 +7,15 @@ internal sealed class SavePathSettingsPage : UserControl
 {
     private readonly TextBox _folderInput;
     private readonly Label _dropHint;
+    private readonly Button _browseButton;
+    private readonly ComboBox _fileNameModeInput;
+    private readonly Label _fileNameModeHint;
     private readonly Panel _card;
     private readonly Panel _note;
 
-    public SavePathSettingsPage(string folderPath)
+    public SavePathSettingsPage(
+        string folderPath,
+        ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime)
     {
         BackColor = AppTheme.Canvas;
         AutoScroll = true;
@@ -17,7 +23,7 @@ internal sealed class SavePathSettingsPage : UserControl
         _card = new Panel
         {
             Location = new Point(0, 0),
-            Height = 260,
+            Height = 342,
             BackColor = AppTheme.Surface,
             BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(26, 22, 26, 22)
@@ -32,7 +38,7 @@ internal sealed class SavePathSettingsPage : UserControl
             ForeColor = AppTheme.Text,
             Location = new Point(26, 23)
         };
-        var description = AppTheme.CreateBodyLabel("按 Ctrl + S 后，截图会以时间命名保存到此目录，并同步复制到剪贴板。", 650);
+        var description = AppTheme.CreateBodyLabel("按 Ctrl + S 后，截图会按下方规则命名并保存到此目录，同时复制到剪贴板。", 650);
         description.Location = new Point(28, 58);
 
         _folderInput = new TextBox
@@ -54,22 +60,66 @@ internal sealed class SavePathSettingsPage : UserControl
             Location = new Point(28, 137)
         };
 
-        var browseButton = AppTheme.CreateButton("浏览…");
-        browseButton.Size = new Size(86, 36);
-        browseButton.Top = 99;
-        browseButton.Click += (_, _) => BrowseRequested?.Invoke(this, EventArgs.Empty);
+        _browseButton = AppTheme.CreateButton("浏览…");
+        _browseButton.Size = new Size(86, 36);
+        _browseButton.Top = 99;
+        _browseButton.Click += (_, _) => BrowseRequested?.Invoke(this, EventArgs.Empty);
 
-        var saveButton = AppTheme.CreateButton("保存路径", primary: true);
-        saveButton.Location = new Point(28, 178);
+        var fileNameModeLabel = new Label
+        {
+            Text = "图片命名规则",
+            AutoSize = true,
+            Font = AppTheme.CreateFont(9F, FontStyle.Bold),
+            ForeColor = AppTheme.Text,
+            Location = new Point(28, 170)
+        };
+
+        _fileNameModeInput = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(28, 196),
+            Size = new Size(390, 34),
+            Font = AppTheme.CreateFont(9.5F),
+            BackColor = Color.White
+        };
+        _fileNameModeInput.Items.AddRange(
+        [
+            new FileNameModeOption(ScreenshotFileNameMode.DateTime, "日期 + 时间"),
+            new FileNameModeOption(ScreenshotFileNameMode.Sequence, "当前目录序号（0、1、2…）"),
+            new FileNameModeOption(ScreenshotFileNameMode.ImageText, "图片内输入的文字")
+        ]);
+        _fileNameModeInput.SelectedItem = _fileNameModeInput.Items
+            .Cast<FileNameModeOption>()
+            .First(option => option.Mode == fileNameMode);
+        _fileNameModeInput.SelectedIndexChanged += (_, _) => UpdateFileNameModeHint();
+
+        _fileNameModeHint = AppTheme.CreateBodyLabel(string.Empty, 650);
+        _fileNameModeHint.Font = AppTheme.CreateFont(8.5F);
+        _fileNameModeHint.Location = new Point(30, 234);
+        UpdateFileNameModeHint();
+
+        var saveButton = AppTheme.CreateButton("保存设置", primary: true);
+        saveButton.Location = new Point(28, 280);
         saveButton.Size = new Size(118, 38);
         saveButton.Click += (_, _) => SaveRequested?.Invoke(this, EventArgs.Empty);
 
         var openButton = AppTheme.CreateButton("打开文件夹");
-        openButton.Location = new Point(158, 178);
+        openButton.Location = new Point(158, 280);
         openButton.Size = new Size(118, 38);
         openButton.Click += (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty);
         _card.Controls.AddRange(
-            [title, description, _folderInput, _dropHint, browseButton, saveButton, openButton]);
+            [
+                title,
+                description,
+                _folderInput,
+                _dropHint,
+                _browseButton,
+                fileNameModeLabel,
+                _fileNameModeInput,
+                _fileNameModeHint,
+                saveButton,
+                openButton
+            ]);
 
         EnableFolderDrop(_card);
         EnableFolderDrop(_folderInput);
@@ -77,20 +127,22 @@ internal sealed class SavePathSettingsPage : UserControl
 
         _note = new Panel
         {
-            Location = new Point(0, 280),
-            Height = 104,
+            Location = new Point(0, 362),
+            Height = 112,
             BackColor = Color.FromArgb(240, 253, 244),
             Padding = new Padding(20, 16, 20, 14)
         };
         var noteTitle = new Label
         {
-            Text = "保存与剪贴板同步完成",
+            Text = "保存与复制",
             AutoSize = true,
             Font = AppTheme.CreateFont(9.5F, FontStyle.Bold),
             ForeColor = AppTheme.Success,
             Location = new Point(20, 15)
         };
-        var noteBody = AppTheme.CreateBodyLabel("保存成功后右下角会显示通知，点击通知可以打开目录并选中刚保存的图片。", 650);
+        var noteBody = AppTheme.CreateBodyLabel(
+            "Ctrl + S 会按当前规则保存 PNG 并复制到剪贴板；只需要复制最终画面时可在截图编辑器中按 Ctrl + C。",
+            650);
         noteBody.Location = new Point(22, 47);
         _note.Controls.AddRange([noteTitle, noteBody]);
         Controls.Add(_note);
@@ -109,14 +161,30 @@ internal sealed class SavePathSettingsPage : UserControl
         set => _folderInput.Text = value;
     }
 
+    public ScreenshotFileNameMode FileNameMode =>
+        (_fileNameModeInput.SelectedItem as FileNameModeOption)?.Mode ??
+        ScreenshotFileNameMode.DateTime;
+
     private void ResizeContent()
     {
-        var width = Math.Max(460, ClientSize.Width - 12);
+        var width = Math.Max(460, ClientSize.Width - 30);
         _card.Width = width;
         _note.Width = width;
-        var browseButton = _card.Controls.OfType<Button>().First(button => button.Text == "浏览…");
-        browseButton.Left = width - browseButton.Width - 28;
-        _folderInput.Width = Math.Max(240, browseButton.Left - _folderInput.Left - 12);
+        _browseButton.Left = width - _browseButton.Width - 28;
+        _folderInput.Width = Math.Max(240, _browseButton.Left - _folderInput.Left - 12);
+        _fileNameModeInput.Width = Math.Min(430, Math.Max(280, width - 56));
+    }
+
+    private void UpdateFileNameModeHint()
+    {
+        _fileNameModeHint.Text = FileNameMode switch
+        {
+            ScreenshotFileNameMode.Sequence =>
+                "从目录中已有的数字 PNG 继续递增；没有数字文件时从 0.png 开始。",
+            ScreenshotFileNameMode.ImageText =>
+                "组合图片内的文字元素并清理非法字符；没有可用文字时自动改用日期 + 时间。",
+            _ => "示例：截图_2026-07-21_14-30-00-123.png"
+        };
     }
 
     private void EnableFolderDrop(Control target)
@@ -152,7 +220,7 @@ internal sealed class SavePathSettingsPage : UserControl
         FolderPath = folderPath;
         _folderInput.SelectionStart = _folderInput.TextLength;
         _folderInput.SelectionLength = 0;
-        _dropHint.Text = "已引用文件夹，点击“保存路径”后生效";
+        _dropHint.Text = "已引用文件夹，点击“保存设置”后生效";
         _dropHint.ForeColor = AppTheme.Success;
         e.Effect = DragDropEffects.Link;
     }
@@ -167,4 +235,9 @@ internal sealed class SavePathSettingsPage : UserControl
         data?.GetDataPresent(DataFormats.FileDrop, autoConvert: true) == true
             ? data.GetData(DataFormats.FileDrop, autoConvert: true) as string[]
             : null;
+
+    private sealed record FileNameModeOption(ScreenshotFileNameMode Mode, string Text)
+    {
+        public override string ToString() => Text;
+    }
 }

@@ -5,9 +5,13 @@ internal enum StickerHitTarget
     None,
     Move,
     TopLeft,
+    Top,
     TopRight,
+    Right,
+    BottomRight,
+    Bottom,
     BottomLeft,
-    BottomRight
+    Left
 }
 
 internal static class StickerLayout
@@ -110,9 +114,13 @@ internal static class StickerLayout
         return
         [
             (StickerHitTarget.TopLeft, new Rectangle(bounds.Left - half, bounds.Top - half, handleSize, handleSize)),
+            (StickerHitTarget.Top, new Rectangle(bounds.Left + (bounds.Width - handleSize) / 2, bounds.Top - half, handleSize, handleSize)),
             (StickerHitTarget.TopRight, new Rectangle(bounds.Right - half, bounds.Top - half, handleSize, handleSize)),
+            (StickerHitTarget.Right, new Rectangle(bounds.Right - half, bounds.Top + (bounds.Height - handleSize) / 2, handleSize, handleSize)),
+            (StickerHitTarget.BottomRight, new Rectangle(bounds.Right - half, bounds.Bottom - half, handleSize, handleSize)),
+            (StickerHitTarget.Bottom, new Rectangle(bounds.Left + (bounds.Width - handleSize) / 2, bounds.Bottom - half, handleSize, handleSize)),
             (StickerHitTarget.BottomLeft, new Rectangle(bounds.Left - half, bounds.Bottom - half, handleSize, handleSize)),
-            (StickerHitTarget.BottomRight, new Rectangle(bounds.Right - half, bounds.Bottom - half, handleSize, handleSize))
+            (StickerHitTarget.Left, new Rectangle(bounds.Left - half, bounds.Top + (bounds.Height - handleSize) / 2, handleSize, handleSize))
         ];
     }
 
@@ -121,8 +129,35 @@ internal static class StickerLayout
         StickerHitTarget.Move => Cursors.SizeAll,
         StickerHitTarget.TopLeft or StickerHitTarget.BottomRight => Cursors.SizeNWSE,
         StickerHitTarget.TopRight or StickerHitTarget.BottomLeft => Cursors.SizeNESW,
+        StickerHitTarget.Top or StickerHitTarget.Bottom => Cursors.SizeNS,
+        StickerHitTarget.Left or StickerHitTarget.Right => Cursors.SizeWE,
         _ => Cursors.Default
     };
+
+    public static bool IsCorner(StickerHitTarget target) => target is
+        StickerHitTarget.TopLeft or
+        StickerHitTarget.TopRight or
+        StickerHitTarget.BottomLeft or
+        StickerHitTarget.BottomRight;
+
+    public static bool IsResizeHandle(StickerHitTarget target) =>
+        target is not StickerHitTarget.None and not StickerHitTarget.Move;
+
+    public static bool AdjustsHorizontalEdge(StickerHitTarget target) => target is
+        StickerHitTarget.TopLeft or
+        StickerHitTarget.TopRight or
+        StickerHitTarget.Right or
+        StickerHitTarget.BottomRight or
+        StickerHitTarget.BottomLeft or
+        StickerHitTarget.Left;
+
+    public static bool AdjustsVerticalEdge(StickerHitTarget target) => target is
+        StickerHitTarget.TopLeft or
+        StickerHitTarget.Top or
+        StickerHitTarget.TopRight or
+        StickerHitTarget.BottomRight or
+        StickerHitTarget.Bottom or
+        StickerHitTarget.BottomLeft;
 
     private static Rectangle CenterAt(Size size, Point anchor, Rectangle selection)
     {
@@ -146,9 +181,4 @@ internal static class StickerLayout
         _ => bounds.Location
     };
 
-    private static bool IsCorner(StickerHitTarget target) => target is
-        StickerHitTarget.TopLeft or
-        StickerHitTarget.TopRight or
-        StickerHitTarget.BottomLeft or
-        StickerHitTarget.BottomRight;
 }

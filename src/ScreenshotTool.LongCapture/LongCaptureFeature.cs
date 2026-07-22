@@ -35,8 +35,8 @@ internal sealed class LongCaptureFeature :
         return new LongCaptureOptions
         {
             SafetyChecksEnabled = host.GetBooleanPreference(
-                CaptureFeaturePreferenceIds.LongCaptureSafetyChecks,
-                defaultValue: false)
+                LongCapturePreferences.SafetyChecksId,
+                LongCapturePreferences.DefaultSafetyChecks)
         };
     }
 

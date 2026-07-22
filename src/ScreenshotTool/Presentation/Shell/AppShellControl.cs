@@ -9,6 +9,7 @@ internal sealed class AppShellControl : UserControl
     private readonly Label _pageTitle;
     private readonly Label _pageDescription;
     private readonly Label _statusLabel;
+    private readonly Label _versionLabel;
     private readonly Dictionary<string, (AppPage Page, Button Button)> _pages =
         new(StringComparer.OrdinalIgnoreCase);
     private string? _selectedPageId;
@@ -66,7 +67,15 @@ internal sealed class AppShellControl : UserControl
             ForeColor = Color.FromArgb(148, 163, 184),
             Location = new Point(54, 53)
         };
-        brand.Controls.AddRange([brandMark, brandName, brandCaption]);
+        _versionLabel = new Label
+        {
+            Text = FormatVersion(typeof(AppShellControl).Assembly.GetName().Version),
+            AutoSize = true,
+            Font = AppTheme.CreateFont(8F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(96, 165, 250),
+            Location = new Point(132, 31)
+        };
+        brand.Controls.AddRange([brandMark, brandName, _versionLabel, brandCaption]);
         sidebar.Controls.Add(brand);
 
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 98, BackColor = AppTheme.Sidebar };
@@ -98,6 +107,7 @@ internal sealed class AppShellControl : UserControl
         };
         sidebar.Controls.Add(_navigation);
         _navigation.BringToFront();
+        _navigation.Resize += (_, _) => UpdateNavigationButtonWidths();
 
         var right = new Panel
         {
@@ -175,6 +185,8 @@ internal sealed class AppShellControl : UserControl
 
     public string? SelectedPageId => _selectedPageId;
 
+    internal string VersionText => _versionLabel.Text;
+
     public void AddPage(AppPage page)
     {
         if (_pages.ContainsKey(page.Id))
@@ -189,7 +201,7 @@ internal sealed class AppShellControl : UserControl
         var button = new Button
         {
             Text = page.Title,
-            Size = new Size(184, 52),
+            Size = new Size(1, 52),
             Margin = new Padding(0, 3, 0, 3),
             Padding = new Padding(18, 0, 8, 0),
             TextAlign = ContentAlignment.MiddleLeft,
@@ -203,13 +215,56 @@ internal sealed class AppShellControl : UserControl
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = AppTheme.SidebarHover;
         button.Click += (_, _) => SelectPage(page.Id);
+        var insertionIndex = _pages.Values.Count(existing =>
+            existing.Page.Order <= page.Order);
         _navigation.Controls.Add(button);
+        _navigation.Controls.SetChildIndex(button, insertionIndex);
         _pages.Add(page.Id, (page, button));
+        UpdateNavigationButtonWidths();
 
         if (_selectedPageId is null)
         {
             SelectPage(page.Id);
         }
+    }
+
+    public bool ContainsPage(string id) => _pages.ContainsKey(id);
+
+    public bool RemovePage(string id)
+    {
+        if (!_pages.Remove(id, out var removed))
+        {
+            return false;
+        }
+
+        var wasSelected = string.Equals(
+            _selectedPageId,
+            id,
+            StringComparison.OrdinalIgnoreCase);
+        _contentHost.Controls.Remove(removed.Page.Content);
+        _navigation.Controls.Remove(removed.Button);
+        removed.Button.Dispose();
+
+        if (wasSelected)
+        {
+            _selectedPageId = null;
+            var replacement = _pages.Values
+                .OrderBy(entry => entry.Page.Order)
+                .ThenBy(entry => entry.Page.Id, StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (replacement.Page is not null)
+            {
+                SelectPage(replacement.Page.Id);
+            }
+            else
+            {
+                _pageTitle.Text = string.Empty;
+                _pageDescription.Text = string.Empty;
+            }
+        }
+
+        UpdateNavigationButtonWidths();
+        return true;
     }
 
     public void SelectPage(string id)
@@ -244,4 +299,22 @@ internal sealed class AppShellControl : UserControl
         _statusLabel.Text = text;
         _statusLabel.ForeColor = color;
     }
+
+    private void UpdateNavigationButtonWidths()
+    {
+        var availableWidth = Math.Max(
+            100,
+            _navigation.ClientSize.Width -
+            _navigation.Padding.Horizontal -
+            SystemInformation.VerticalScrollBarWidth -
+            2);
+        foreach (var button in _navigation.Controls.OfType<Button>())
+        {
+            button.Width = availableWidth;
+        }
+    }
+
+    internal static string FormatVersion(Version? version) => version is null
+        ? "v0.0.0"
+        : $"v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
 }

@@ -12,5 +12,6 @@
     <ProjectReference Include="..\..\src\ScreenshotTool\ScreenshotTool.csproj" />
     <ProjectReference Include="..\ScreenshotTool.TestModule\ScreenshotTool.TestModule.csproj" />
     <ProjectReference Include="..\..\src\ScreenshotTool.LongCapture\ScreenshotTool.LongCapture.csproj" />
+    <ProjectReference Include="..\..\src\ScreenshotTool.ScreenRecording\ScreenshotTool.ScreenRecording.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ScreenshotTool.ScreenRecording</AssemblyName>
+    <RootNamespace>ScreenshotTool.ScreenRecording</RootNamespace>
+    <Version>1.7.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenshotTool.Contracts\ScreenshotTool.Contracts.csproj" />
+  </ItemGroup>
+</Project>
