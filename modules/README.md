@@ -10,6 +10,12 @@
 Modules/
   LongCapture/
     ScreenshotTool.LongCapture.dll
+  Ocr/
+    ScreenshotTool.Ocr.dll
+  QrCode/
+    ScreenshotTool.QrCode.dll
+    zxing.dll
+    LICENSE-ZXING.NET.txt
   ScreenRecording/
     ScreenshotTool.ScreenRecording.dll
     Recorder/
@@ -17,8 +23,17 @@ Modules/
       ScreenRecorderLib.dll
 ```
 
-正式构建和发布会自动把第一方长截图模块放入 `Modules\LongCapture`，同时保持它与主程序解耦，以便热替换和拆卸。
+正式构建和发布会自动把第一方长截图、OCR 与二维码扫描模块分别放入 `Modules\LongCapture`、
+`Modules\Ocr` 和 `Modules\QrCode`，同时保持它们与主程序解耦，以便热替换和拆卸。OCR 使用 Windows 自带的
+离线文字识别能力，不携带云端密钥或大型模型文件；OCR 模块 1.0.0 需要轻截 1.11.0 或更高版本。
 
-录屏模块默认预装在完整包中，也保留独立的可选下载包；基础版不会携带录屏编码器，也不会显示“录屏设置”。录屏模块和基础程序必须使用兼容版本（录屏模块 1.7.0 需要基础程序 1.10.0 或更高版本）；安装或升级时，将包内 `Modules\ScreenRecording` 文件夹复制到对应版本的程序旁。模块入口、自带的录屏设置页与 `Recorder` 编码器子目录都属于同一个 `ScreenRecording` 模块。录屏批注、专属“选择”入口和菜单栏仍由基础程序通过公共契约提供，模块不携带重复批注或编辑按钮 UI。删除整个 `Modules\ScreenRecording` 文件夹即可同时卸载录屏能力与录屏设置，不影响截图、核心批注和长截图。
+二维码扫描模块 1.0.0 同样需要轻截 1.11.0 或更高版本。扫描在本机离线完成，结果交给宿主的
+通用侧边小窗显示；模块不会自动打开网址或执行二维码内容。`zxing.dll` 与许可文本是该模块的
+私有文件，安装、升级或恢复时必须与入口 DLL 一起保留在 `Modules\QrCode` 中。
+
+录屏模块默认预装在完整包中，也保留独立的可选下载包；基础版不会携带录屏编码器，也不会显示“录屏设置”。录屏模块和基础程序必须使用兼容版本（录屏模块 1.7.0 需要基础程序 1.10.0 或更高版本）；安装或升级时，将包内 `Modules\ScreenRecording` 文件夹复制到对应版本的程序旁。模块入口、自带的录屏设置页与 `Recorder` 编码器子目录都属于同一个 `ScreenRecording` 模块。录屏批注、专属“选择”入口和菜单栏仍由基础程序通过公共契约提供，模块不携带重复批注或编辑按钮 UI。删除整个 `Modules\ScreenRecording` 文件夹即可同时卸载录屏能力与录屏设置，不影响截图、核心批注、OCR 和长截图。
+
+删除整个 `Modules\Ocr` 或 `Modules\QrCode` 文件夹即可卸载对应功能；也可以在设置工作台的
+“插件模块”页禁用或永久删除。需要恢复时，重新下载对应独立模块包并放回同名目录。
 
 模块在主程序进程内以完全信任方式运行，请只加载可信来源的 DLL。开发说明见项目的 `docs/modular-architecture.md`。

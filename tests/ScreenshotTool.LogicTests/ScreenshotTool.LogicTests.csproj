@@ -13,5 +13,7 @@
     <ProjectReference Include="..\ScreenshotTool.TestModule\ScreenshotTool.TestModule.csproj" />
     <ProjectReference Include="..\..\src\ScreenshotTool.LongCapture\ScreenshotTool.LongCapture.csproj" />
     <ProjectReference Include="..\..\src\ScreenshotTool.ScreenRecording\ScreenshotTool.ScreenRecording.csproj" />
+    <ProjectReference Include="..\..\src\ScreenshotTool.Ocr\ScreenshotTool.Ocr.csproj" />
+    <ProjectReference Include="..\..\src\ScreenshotTool.QrCode\ScreenshotTool.QrCode.csproj" />
   </ItemGroup>
 </Project>

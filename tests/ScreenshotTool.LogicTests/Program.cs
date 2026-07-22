@@ -11,7 +11,48 @@ using ScreenshotTool;
 using ScreenshotTool.Abstractions;
 using ScreenshotTool.ScreenRecording;
 using ScreenshotTool.LongCapture;
+using ScreenshotTool.Ocr;
+using ScreenshotTool.QrCode;
+using ZXing;
 
+if (args.Length >= 1 && string.Equals(args[0], "--ocr-engine-smoke", StringComparison.Ordinal))
+{
+    using var smokeImage = new Bitmap(3600, 800);
+    using (var smokeGraphics = Graphics.FromImage(smokeImage))
+    using (var smokeFont = new Font("Microsoft YaHei UI", 168F, FontStyle.Bold))
+    {
+        smokeGraphics.Clear(Color.White);
+        smokeGraphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        smokeGraphics.DrawString("轻截文字识别 2026", smokeFont, Brushes.Black, 72F, 220F);
+    }
+    if (args.Length >= 2)
+    {
+        smokeImage.Save(Path.GetFullPath(args[1]), System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    var smokeText = await new WindowsOcrRecognizer().RecognizeAsync(
+        smokeImage,
+        CancellationToken.None);
+    Console.WriteLine($"OCR result: {smokeText}");
+    AssertTrue(smokeText.Contains("文字", StringComparison.Ordinal), "Windows 离线 OCR 识别实际图片");
+    return;
+}
+if (args.Length >= 1 && string.Equals(args[0], "--qr-engine-smoke", StringComparison.Ordinal))
+{
+    const string smokePayload = "https://example.com/轻截?q=2026";
+    using var smokeImage = CreateQrCodeBitmap(smokePayload, 480);
+    if (args.Length >= 2)
+    {
+        smokeImage.Save(Path.GetFullPath(args[1]), System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    var smokeResults = await new ZxingQrCodeScanner().ScanAsync(
+        smokeImage,
+        CancellationToken.None);
+    Console.WriteLine($"QR result: {string.Join(" | ", smokeResults)}");
+    AssertTrue(smokeResults.Contains(smokePayload), "ZXing 离线扫描实际二维码图片");
+    return;
+}
 var selection = new Rectangle(100, 100, 400, 300);
 const int tolerance = 6;
 
@@ -2201,6 +2242,271 @@ using (var transparentTextDocument = new AnnotationDocument())
     AssertTrue(ContainsPixelDifferentFrom(source, new Rectangle(10, 10, 70, 35), Color.CornflowerBlue), "最终导出包含文字笔画");
 }
 
+using (var ocrModule = new OcrModule())
+{
+    AssertEqual(new Version(1, 11, 0), OcrModule.MinimumHostVersion, "OCR 模块最低主程序版本");
+    AssertEqual("screenshot-tool.ocr", ocrModule.Id, "OCR 模块 ID 保持稳定");
+    AssertEqual("OCR 文字识别", ocrModule.DisplayName, "OCR 模块显示名称");
+    AssertEqual(new Version(1, 0, 0), ocrModule.Version, "OCR 模块版本");
+
+    var incompatibleOcrModuleRejected = false;
+    try
+    {
+        ocrModule.Initialize(new TestModuleContext(new Version(1, 10, 0)));
+    }
+    catch (NotSupportedException)
+    {
+        incompatibleOcrModuleRejected = true;
+    }
+    AssertTrue(incompatibleOcrModuleRejected, "OCR 模块拒绝缺少文本结果契约的旧版主程序");
+    ocrModule.Initialize(new TestModuleContext(OcrModule.MinimumHostVersion));
+
+    var ocrFeatures = ocrModule.CreateCaptureFeatures().ToArray();
+    AssertEqual(1, ocrFeatures.Length, "OCR 模块按截图会话创建功能实例");
+    using var ocrFeature = ocrFeatures[0];
+    AssertEqual("screenshot-tool.ocr.feature", ocrFeature.Id, "OCR 功能 ID 保持稳定");
+    AssertTrue(ocrFeature is ICaptureToolbarCommandProvider, "OCR 功能提供截图工具栏入口");
+    var ocrCommands = ((ICaptureToolbarCommandProvider)ocrFeature).GetToolbarCommands();
+    AssertEqual(1, ocrCommands.Count, "OCR 功能只注册一个工具栏命令");
+    AssertEqual("OCR", ocrCommands[0].Text, "OCR 工具栏命令文字");
+}
+
+AssertEqual(
+    "轻截文字识别 2026\nSecond line",
+    OcrTextNormalizer.Normalize(" 轻 截 文 字 识 别 2026\r\nSecond line "),
+    "OCR 清理中日韩文字之间的伪空格并保留英文空格和换行");
+
+using (var ocrFeature = new OcrFeature(new TestOcrRecognizer("第一行\nSecond line")))
+{
+    var ocrHost = new TestOcrCaptureHost();
+    ocrFeature.Attach(ocrHost);
+    ((ICaptureToolbarCommandProvider)ocrFeature)
+        .ExecuteToolbarCommandAsync(OcrFeature.CommandId, CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual("OCR 识别结果", ocrHost.ResultTitle ?? string.Empty, "OCR 使用通用宿主打开结果窗口");
+    AssertEqual("第一行\nSecond line", ocrHost.ResultText ?? string.Empty, "OCR 结果保留识别换行");
+    AssertTrue(ocrHost.Completed, "OCR 成功后结束冻结的截图会话");
+    AssertTrue(ocrHost.SelectionCopied, "OCR 识别宿主提供的当前选区位图");
+}
+
+using var blockingOcrRecognizer = new TestBlockingOcrRecognizer();
+var cancellableOcrFeature = new OcrFeature(blockingOcrRecognizer);
+cancellableOcrFeature.Attach(new TestOcrCaptureHost());
+var cancellableOcrTask = Task.Run(() =>
+    ((ICaptureToolbarCommandProvider)cancellableOcrFeature)
+        .ExecuteToolbarCommandAsync(OcrFeature.CommandId, CancellationToken.None));
+AssertTrue(blockingOcrRecognizer.Started.Wait(TimeSpan.FromSeconds(2)), "OCR 异步识别已经启动");
+cancellableOcrFeature.Dispose();
+var ocrDisposeCancelledRecognition = false;
+try
+{
+    cancellableOcrTask.GetAwaiter().GetResult();
+}
+catch (OperationCanceledException)
+{
+    ocrDisposeCancelledRecognition = true;
+}
+AssertTrue(ocrDisposeCancelledRecognition, "OCR 功能释放时取消活动识别任务");
+
+using (var qrCodeModule = new QrCodeModule())
+{
+    AssertEqual(new Version(1, 11, 0), QrCodeModule.MinimumHostVersion, "二维码模块最低主程序版本");
+    AssertEqual("screenshot-tool.qr-code", qrCodeModule.Id, "二维码模块 ID 保持稳定");
+    AssertEqual("二维码扫描", qrCodeModule.DisplayName, "二维码模块显示名称");
+    AssertEqual(new Version(1, 0, 0), qrCodeModule.Version, "二维码模块版本");
+
+    var incompatibleQrCodeModuleRejected = false;
+    try
+    {
+        qrCodeModule.Initialize(new TestModuleContext(new Version(1, 10, 0)));
+    }
+    catch (NotSupportedException)
+    {
+        incompatibleQrCodeModuleRejected = true;
+    }
+    AssertTrue(incompatibleQrCodeModuleRejected, "二维码模块拒绝缺少文本结果契约的旧版主程序");
+    qrCodeModule.Initialize(new TestModuleContext(QrCodeModule.MinimumHostVersion));
+
+    var qrCodeFeatures = qrCodeModule.CreateCaptureFeatures().ToArray();
+    AssertEqual(1, qrCodeFeatures.Length, "二维码模块按截图会话创建功能实例");
+    using var qrCodeFeature = qrCodeFeatures[0];
+    AssertEqual("screenshot-tool.qr-code.feature", qrCodeFeature.Id, "二维码功能 ID 保持稳定");
+    AssertTrue(qrCodeFeature is ICaptureToolbarCommandProvider, "二维码功能提供截图工具栏入口");
+    var qrCodeCommands = ((ICaptureToolbarCommandProvider)qrCodeFeature).GetToolbarCommands();
+    AssertEqual(1, qrCodeCommands.Count, "二维码功能只注册一个工具栏命令");
+    AssertEqual("二维码", qrCodeCommands[0].Text, "二维码工具栏命令文字");
+}
+
+const string qrCodePayload = "https://example.com/cutcut?source=截图框";
+using (var qrCodeBitmap = CreateQrCodeBitmap(qrCodePayload, 420))
+{
+    var decodedQrCodes = new ZxingQrCodeScanner()
+        .ScanAsync(qrCodeBitmap, CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual(1, decodedQrCodes.Count, "二维码扫描器只返回选区中的有效二维码");
+    AssertEqual(qrCodePayload, decodedQrCodes[0], "二维码扫描器保留原始内容");
+}
+using (var blankQrCodeBitmap = new Bitmap(320, 180))
+{
+    using (var graphics = Graphics.FromImage(blankQrCodeBitmap))
+    {
+        graphics.Clear(Color.White);
+    }
+    var blankQrCodeResults = new ZxingQrCodeScanner()
+        .ScanAsync(blankQrCodeBitmap, CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual(0, blankQrCodeResults.Count, "没有二维码的选区返回空结果");
+}
+
+using (var qrCodeFeature = new QrCodeFeature(
+           new TestQrCodeScanner(["https://example.com/one", "第二个二维码"])))
+{
+    var qrCodeHost = new TestOcrCaptureHost();
+    qrCodeFeature.Attach(qrCodeHost);
+    ((ICaptureToolbarCommandProvider)qrCodeFeature)
+        .ExecuteToolbarCommandAsync(QrCodeFeature.CommandId, CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual("二维码扫描结果", qrCodeHost.ResultTitle ?? string.Empty, "二维码使用通用宿主打开结果窗口");
+    AssertEqual(
+        $"https://example.com/one{Environment.NewLine}{Environment.NewLine}第二个二维码",
+        qrCodeHost.ResultText ?? string.Empty,
+        "多个二维码结果按块分隔并保留原始内容");
+    AssertTrue(qrCodeHost.Completed, "二维码扫描成功后结束冻结的截图会话");
+    AssertTrue(qrCodeHost.SelectionCopied, "二维码扫描宿主提供的当前选区位图");
+}
+
+using var blockingQrCodeScanner = new TestBlockingQrCodeScanner();
+var cancellableQrCodeFeature = new QrCodeFeature(blockingQrCodeScanner);
+cancellableQrCodeFeature.Attach(new TestOcrCaptureHost());
+var cancellableQrCodeTask = Task.Run(() =>
+    ((ICaptureToolbarCommandProvider)cancellableQrCodeFeature)
+        .ExecuteToolbarCommandAsync(QrCodeFeature.CommandId, CancellationToken.None));
+AssertTrue(blockingQrCodeScanner.Started.Wait(TimeSpan.FromSeconds(2)), "二维码异步扫描已经启动");
+cancellableQrCodeFeature.Dispose();
+var qrCodeDisposeCancelledScan = false;
+try
+{
+    cancellableQrCodeTask.GetAwaiter().GetResult();
+}
+catch (OperationCanceledException)
+{
+    qrCodeDisposeCancelledScan = true;
+}
+AssertTrue(qrCodeDisposeCancelledScan, "二维码功能释放时取消活动扫描任务");
+
+AssertEqual(
+    new Point(612, 100),
+    CaptureTextResultForm.CalculateLocation(
+        new Rectangle(100, 100, 500, 300),
+        new Rectangle(0, 0, 1920, 1080),
+        new Size(440, 320)),
+    "OCR 结果窗口优先放在选区右侧");
+AssertEqual(
+    new Point(1248, 100),
+    CaptureTextResultForm.CalculateLocation(
+        new Rectangle(1700, 100, 180, 300),
+        new Rectangle(0, 0, 1920, 1080),
+        new Size(440, 320)),
+    "右侧空间不足时 OCR 结果窗口放在选区左侧");
+AssertEqual(
+    new Point(160, 280),
+    CaptureTextResultForm.CalculateLocation(
+        new Rectangle(300, 500, 300, 120),
+        new Rectangle(0, 0, 800, 600),
+        new Size(440, 320)),
+    "两侧空间都不足时 OCR 结果窗口限制在工作区内");
+
+var ocrModuleTestDirectory = Path.Combine(
+    Path.GetTempPath(),
+    "ScreenshotTool.OcrModuleTests",
+    Guid.NewGuid().ToString("N"));
+try
+{
+    var ocrModulePackageDirectory = Path.Combine(ocrModuleTestDirectory, "Ocr");
+    Directory.CreateDirectory(ocrModulePackageDirectory);
+    File.Copy(
+        typeof(OcrModule).Assembly.Location,
+        Path.Combine(ocrModulePackageDirectory, "ScreenshotTool.Ocr.dll"));
+    using var ocrModuleHost = new ModuleHost(ocrModuleTestDirectory);
+    var loadedOcrModules = ocrModuleHost.Refresh();
+    AssertEqual(0, loadedOcrModules.Errors.Count, "OCR 模块以独立单 DLL 包加载");
+    AssertEqual(1, loadedOcrModules.Modules.Count, "发现并加载 OCR 模块");
+    AssertEqual("screenshot-tool.ocr", loadedOcrModules.Modules[0].Id, "读取 OCR 模块稳定 ID");
+    var loadedOcrFeatures = ocrModuleHost.CreateCaptureFeatures();
+    AssertEqual(1, loadedOcrFeatures.Count, "OCR 模块为截图会话创建功能实例");
+    using var loadedOcrFeature = loadedOcrFeatures[0];
+    AssertTrue(loadedOcrFeature is ICaptureToolbarCommandProvider, "加载后的 OCR 功能转发工具栏命令");
+    Directory.Delete(ocrModulePackageDirectory, recursive: true);
+    var removedOcrModules = ocrModuleHost.Refresh();
+    AssertEqual(0, removedOcrModules.Modules.Count, "删除 OCR 模块文件夹后立即从目录卸载");
+    AssertEqual(
+        "OCR",
+        ((ICaptureToolbarCommandProvider)loadedOcrFeature).GetToolbarCommands()[0].Text,
+        "活动截图会话在 OCR 模块删除后保持延迟释放租约");
+}
+finally
+{
+    if (Directory.Exists(ocrModuleTestDirectory))
+    {
+        Directory.Delete(ocrModuleTestDirectory, recursive: true);
+    }
+}
+
+var qrCodeModuleTestDirectory = Path.Combine(
+    Path.GetTempPath(),
+    "ScreenshotTool.QrCodeModuleTests",
+    Guid.NewGuid().ToString("N"));
+try
+{
+    var qrCodeModulePackageDirectory = Path.Combine(qrCodeModuleTestDirectory, "QrCode");
+    Directory.CreateDirectory(qrCodeModulePackageDirectory);
+    File.Copy(
+        typeof(QrCodeModule).Assembly.Location,
+        Path.Combine(qrCodeModulePackageDirectory, "ScreenshotTool.QrCode.dll"));
+    File.Copy(
+        typeof(BarcodeReaderGeneric).Assembly.Location,
+        Path.Combine(qrCodeModulePackageDirectory, "zxing.dll"));
+    using var qrCodeModuleHost = new ModuleHost(qrCodeModuleTestDirectory);
+    var loadedQrCodeModules = qrCodeModuleHost.Refresh();
+    AssertEqual(0, loadedQrCodeModules.Errors.Count, "二维码模块连同私有解码依赖加载");
+    AssertEqual(1, loadedQrCodeModules.Modules.Count, "发现并加载二维码模块");
+    AssertEqual("screenshot-tool.qr-code", loadedQrCodeModules.Modules[0].Id, "读取二维码模块稳定 ID");
+    var loadedQrCodeFeatures = qrCodeModuleHost.CreateCaptureFeatures();
+    AssertEqual(1, loadedQrCodeFeatures.Count, "二维码模块为截图会话创建功能实例");
+    using var loadedQrCodeFeature = loadedQrCodeFeatures[0];
+    AssertTrue(loadedQrCodeFeature is ICaptureToolbarCommandProvider, "加载后的二维码功能转发工具栏命令");
+    using var loadedQrCodeBitmap = CreateQrCodeBitmap("module-load-context", 360);
+    var loadedQrCodeHost = new TestOcrCaptureHost(loadedQrCodeBitmap);
+    loadedQrCodeFeature.Attach(loadedQrCodeHost);
+    Task.Run(() =>
+        ((ICaptureToolbarCommandProvider)loadedQrCodeFeature)
+            .ExecuteToolbarCommandAsync(QrCodeFeature.CommandId, CancellationToken.None))
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual(
+        "module-load-context",
+        loadedQrCodeHost.ResultText ?? string.Empty,
+        "热加载二维码模块从自己的目录解析并调用私有解码依赖");
+    Directory.Delete(qrCodeModulePackageDirectory, recursive: true);
+    var removedQrCodeModules = qrCodeModuleHost.Refresh();
+    AssertEqual(0, removedQrCodeModules.Modules.Count, "删除二维码模块文件夹后立即从目录卸载");
+    AssertEqual(
+        "二维码",
+        ((ICaptureToolbarCommandProvider)loadedQrCodeFeature).GetToolbarCommands()[0].Text,
+        "活动截图会话在二维码模块删除后保持延迟释放租约");
+}
+finally
+{
+    if (Directory.Exists(qrCodeModuleTestDirectory))
+    {
+        Directory.Delete(qrCodeModuleTestDirectory, recursive: true);
+    }
+}
+
 var moduleTestDirectory = Path.Combine(Path.GetTempPath(), "ScreenshotTool.ModuleTests", Guid.NewGuid().ToString("N"));
 try
 {
@@ -2750,7 +3056,7 @@ LongCapturePreparationTests.Run();
 BidirectionalLongCaptureTests.Run();
 LongCaptureWindowTests.Run();
 
-Console.WriteLine("首次与更新启动工作台、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、八手柄单边缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
+Console.WriteLine("首次与更新启动工作台、OCR 离线识别模块、二维码扫描模块、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、八手柄单边缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
 return;
 
 SelectionResizeEdges Hit(int x, int y) =>
@@ -2885,6 +3191,35 @@ static int CountNonTransparentPixels(Bitmap bitmap)
         }
     }
     return count;
+}
+
+static Bitmap CreateQrCodeBitmap(string payload, int size)
+{
+    var matrix = new MultiFormatWriter().encode(
+        payload,
+        BarcodeFormat.QR_CODE,
+        size,
+        size,
+        new Dictionary<EncodeHintType, object>
+        {
+            [EncodeHintType.CHARACTER_SET] = "UTF-8"
+        });
+    var bitmap = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+    using var graphics = Graphics.FromImage(bitmap);
+    graphics.Clear(Color.White);
+    using var blackBrush = new SolidBrush(Color.Black);
+    for (var y = 0; y < matrix.Height; y++)
+    {
+        for (var x = 0; x < matrix.Width; x++)
+        {
+            if (matrix[x, y])
+            {
+                graphics.FillRectangle(blackBrush, x, y, 1, 1);
+            }
+        }
+    }
+
+    return bitmap;
 }
 
 static int CountNonBlackPixels(Bitmap bitmap, Rectangle bounds)
@@ -3076,4 +3411,105 @@ internal sealed class TestTextClipboardService : IClipboardService
     public string? GetText() => Text;
 
     public void SetText(string text) => Text = text;
+}
+
+internal sealed class TestOcrRecognizer(string text) : IOcrRecognizer
+{
+    public Task<string> RecognizeAsync(Bitmap image, CancellationToken cancellationToken)
+    {
+        if (image.Width <= 0 || image.Height <= 0)
+        {
+            throw new InvalidOperationException("OCR 接收有效选区位图失败。");
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(text);
+    }
+}
+
+internal sealed class TestBlockingOcrRecognizer : IOcrRecognizer, IDisposable
+{
+    public ManualResetEventSlim Started { get; } = new(initialState: false);
+
+    public async Task<string> RecognizeAsync(Bitmap image, CancellationToken cancellationToken)
+    {
+        Started.Set();
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return string.Empty;
+    }
+
+    public void Dispose() => Started.Dispose();
+}
+
+internal sealed class TestQrCodeScanner(IReadOnlyList<string> results) : IQrCodeScanner
+{
+    public Task<IReadOnlyList<string>> ScanAsync(
+        Bitmap image,
+        CancellationToken cancellationToken)
+    {
+        if (image.Width <= 0 || image.Height <= 0)
+        {
+            throw new InvalidOperationException("二维码扫描器接收有效选区位图失败。");
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(results);
+    }
+}
+
+internal sealed class TestBlockingQrCodeScanner : IQrCodeScanner, IDisposable
+{
+    public ManualResetEventSlim Started { get; } = new(initialState: false);
+
+    public async Task<IReadOnlyList<string>> ScanAsync(
+        Bitmap image,
+        CancellationToken cancellationToken)
+    {
+        Started.Set();
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return [];
+    }
+
+    public void Dispose() => Started.Dispose();
+}
+
+internal sealed class TestOcrCaptureHost(Bitmap? selectionImage = null) :
+    ICaptureTextResultHost,
+    ICaptureArtifactHost
+{
+    public bool Completed { get; private set; }
+    public bool SelectionCopied { get; private set; }
+    public string? ResultTitle { get; private set; }
+    public string? ResultText { get; private set; }
+    public bool HasSelection => true;
+    public Rectangle Selection => new(
+        0,
+        0,
+        selectionImage?.Width ?? 320,
+        selectionImage?.Height ?? 120);
+    public Point CursorClientPosition => Point.Empty;
+    public int Dpi => 96;
+    public string OutputFolder => Path.GetTempPath();
+    public bool GetBooleanPreference(string id, bool defaultValue) => defaultValue;
+    public int GetIntegerPreference(string id, int defaultValue) => defaultValue;
+    public void InvalidateAll() { }
+    public void Invalidate(Rectangle bounds) { }
+    public void SetCursor(Cursor cursor) { }
+    public void SetMouseCapture(bool capture) { }
+
+    public Bitmap CopyDesktopSelection()
+    {
+        SelectionCopied = true;
+        return selectionImage is null
+            ? new Bitmap(Selection.Width, Selection.Height)
+            : new Bitmap(selectionImage);
+    }
+
+    public void ShowTextResult(string title, string text)
+    {
+        ResultTitle = title;
+        ResultText = text;
+    }
+
+    public void NotifyArtifactSaved(string path) { }
+
+    public void CompleteCaptureSession() => Completed = true;
 }

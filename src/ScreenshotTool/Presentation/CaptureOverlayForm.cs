@@ -10,6 +10,7 @@ namespace ScreenshotTool.Presentation;
 internal sealed class CaptureOverlayForm : Form,
     ILiveCaptureFeatureHost,
     ICaptureArtifactHost,
+    ICaptureTextResultHost,
     IConfigurableCaptureAnnotationHost
 {
     private readonly DesktopSnapshot _snapshot;
@@ -196,6 +197,24 @@ internal sealed class CaptureOverlayForm : Form,
         _finished = true;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    void ICaptureTextResultHost.ShowTextResult(string title, string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(text);
+
+        var selectionScreenBounds = new Rectangle(
+            _snapshot.Bounds.X + _selection.X,
+            _snapshot.Bounds.Y + _selection.Y,
+            _selection.Width,
+            _selection.Height);
+        var resultWindow = new CaptureTextResultForm(
+            title,
+            text,
+            selectionScreenBounds,
+            _clipboardService);
+        resultWindow.Show();
     }
 
     ICaptureAnnotationSession ICaptureAnnotationHost.CreateAnnotationSession(

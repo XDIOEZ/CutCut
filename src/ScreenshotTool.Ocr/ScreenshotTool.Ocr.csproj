@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ScreenshotTool.Ocr</AssemblyName>
+    <RootNamespace>ScreenshotTool.Ocr</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>None</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenshotTool.Contracts\ScreenshotTool.Contracts.csproj" />
+    <EmbeddedResource Include="WindowsOcrWorker.ps1"
+                      LogicalName="ScreenshotTool.Ocr.WindowsOcrWorker.ps1" />
+  </ItemGroup>
+</Project>
