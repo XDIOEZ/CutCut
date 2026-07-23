@@ -24,23 +24,25 @@ CaptureOverlayForm             提供受控宿主能力
 - `src/ScreenshotTool/Infrastructure/Modules`：DLL 发现、可卸载加载上下文、热更新和功能租约。
 - `src/ScreenshotTool/Presentation/CaptureFeatureSession.cs`：为一次截图创建模块功能快照，隔离单个模块异常。
 - `src/ScreenshotTool.LongCapture`：随程序发布的第一方长截图模块，仅引用 `ScreenshotTool.Contracts`。
-- `src/ScreenshotTool.Ocr`：可独立装卸的离线 OCR 模块，仅引用 `ScreenshotTool.Contracts`，使用 Windows 系统 OCR。
+- `src/ScreenshotTool.Ocr`：可独立装卸的本地 OCR 模块，仅引用 `ScreenshotTool.Contracts`，对多种预处理候选使用 Windows 系统 OCR。
+- `src/ScreenshotTool.PaddleOcr`：PP-OCRv6 Tiny/Small 入口共用的 ONNX 识别引擎，只依赖公共契约和模块私有运行库。
+- `src/ScreenshotTool.PaddleOcr.Tiny` 与 `src/ScreenshotTool.PaddleOcr.Small`：两个稳定 ID、独立目录、独立安装包的 PP-OCR 入口模块。
 - `src/ScreenshotTool.ScreenRecording`：可选录屏模块，仅引用 `ScreenshotTool.Contracts`，提供选区入口、录制控制和编码器编排；批注由宿主核心会话提供。
 - `src/ScreenshotTool.ScreenRecording.Recorder`：录屏模块私有的 x64 编码器进程，承载 Media Foundation 视频与音频依赖。
 - `Modules`：运行时扩展目录；每个一级子文件夹是一个独立模块包，复制、替换或删除整个文件夹即可触发刷新。
 
 ## 第一方模块的构建与发布
 
-宿主项目对第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将长截图和 OCR DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。
+宿主项目对随完整包预装的第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将长截图和本地 OCR DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。PP-OCR Tiny/Small 不进入宿主项目依赖树或完整包，只由各自的独立发布脚本组装。
 
-`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含长截图与 OCR 模块，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`，脚本会在压缩前确认其同时包含主程序、长截图模块、OCR 模块、录屏模块和编码器。脚本还会生成 `long-capture-addon-win-x64.zip` 与 `ocr-addon-win-x64.zip`，供发布页按需下载。
+`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含长截图与本地 OCR 模块，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`，脚本会在压缩前确认其同时包含主程序、长截图、本地 OCR、二维码扫描、录屏模块和编码器。脚本还会生成 `long-capture-addon-win-x64.zip`、`ocr-addon-win-x64.zip`、`paddle-ocr-tiny-addon-win-x64.zip` 与 `paddle-ocr-small-addon-win-x64.zip` 等独立包，供发布页按需下载。PP-OCR 模型下载脚本固定来源、版本与 SHA-256，校验不一致时停止组包。
 
 录屏仍不进入宿主的编译依赖树。标准发布脚本会额外调用 `scripts/Publish-ScreenRecordingModule.ps1`，保留可单独下载的 `screen-recording-addon-win-x64.zip`，然后将其 `Modules` 内容复制到两种完整包中。这只是发布阶段的预安装；运行时仍通过稳定契约加载可替换、可删除的录屏模块。
 
 ## 模块生命周期
 
 1. 程序启动后创建 `Modules` 目录，并每秒比较各一级模块文件夹内全部文件的相对路径、长度和修改时间。
-2. 每个模块文件夹只允许一个 `IScreenshotToolModule` 入口；入口 DLL 通过流加载到独立、可回收的 `AssemblyLoadContext`，同文件夹中的其他 DLL 作为私有依赖，因此磁盘文件不会被锁住。
+2. 每个模块文件夹只允许一个 `IScreenshotToolModule` 入口；入口和托管依赖 DLL 通过流加载到独立、可回收的 `AssemblyLoadContext`。ONNX Runtime、SkiaSharp 等原生 DLL 先复制到当前进程专属临时影子目录再加载，避免锁住模块目录，并在上下文卸载或下次进程启动时尽力清理影子文件。
 3. 每次开始截图时，已加载模块分别创建新的 `ICaptureFeature`，按 `Order` 和 `Id` 排序后组合。
 4. 模块可以处理键盘、鼠标，并分别参与预览和最终导出渲染。
 5. 实现 `IModuleSettingsPageProvider` 的模块可创建自己的设置页；宿主只按通用元数据把页面加入导航，不引用具体页面类型。
@@ -121,11 +123,13 @@ CaptureOverlayForm             提供受控宿主能力
 `ILiveCaptureFeatureHost` 使用宿主提供的通用选区、显隐、实时采集和结果替换能力，不引用宿主窗体、
 标注文档或基础设施实现，也不为该交互向 `ScreenshotTool.Contracts` 泄漏具体 UI 或可变状态。
 
-## 可选 OCR 模块
+## 三种可选 OCR 模块
 
-`ScreenshotTool.Ocr` 1.0.0 要求轻截 1.11.0 或更高版本，并作为截图会话功能提供“OCR”工具栏命令。用户框选区域后点击命令，模块通过
+`ScreenshotTool.Ocr` 1.1.0 要求轻截 1.11.0 或更高版本，并作为截图会话功能提供“OCR 本地”工具栏命令。用户框选区域后点击命令，模块通过
 `ICaptureFeatureHost.CopyDesktopSelection()` 取得由自己负责释放的选区位图，并调用 Windows 自带的
-离线 OCR。模块不上传图片、不保存识别历史，也不携带大型模型；可识别语言由系统已安装的语言组件决定。
+离线 OCR。识别前会构造原图、高清放大、自动对比度灰度增强和 Otsu 二值化四种候选图，在同一个
+PowerShell/WinRT 工作进程内依次识别，并按有效文字、词数、行数和异常字符情况选择最完整的结果。
+模块不上传图片、不保存识别历史，也不携带大型模型；可识别语言由系统已安装的语言组件决定。
 
 识别成功后，模块通过通用 `ICaptureTextResultHost` 把标题和纯文本交给宿主，并通过
 `ICaptureArtifactHost.CompleteCaptureSession()` 结束冻结的截图界面。宿主在原选区右侧优先放置独立的
@@ -134,7 +138,22 @@ CaptureOverlayForm             提供受控宿主能力
 
 Windows Runtime 的完整 .NET 投影会显著增加轻量包体，因此 OCR 模块通过隐藏的系统 Windows PowerShell
 进程调用同一套系统 OCR 接口。辅助脚本以内嵌资源随模块 DLL 加载，输入只使用会话级临时 PNG；会话取消
-时模块终止辅助进程，完成或失败后删除临时文件。模块包仍只有 `ScreenshotTool.Ocr.dll` 一个入口文件。
+时模块终止辅助进程，完成或失败后删除全部候选临时文件。模块包仍只有 `ScreenshotTool.Ocr.dll` 一个入口文件。
+
+`ScreenshotTool.PaddleOcr.Tiny` 与 `ScreenshotTool.PaddleOcr.Small` 1.0.0 同样要求轻截 1.11.0
+或更高版本，分别提供 `OCR Tiny` 与 `OCR Small` 命令。两个入口模块只保存稳定元数据，每次截图会话
+各自创建识别器；共用代码位于 `ScreenshotTool.PaddleOcr.dll`，通过 RapidOcrNet 调用 PP-OCRv6 的
+检测、方向分类和识别 ONNX 模型。Tiny 使用较小的检测/识别模型以平衡体积和速度，Small 使用较大的
+模型优先处理复杂背景、密集小字和中英混排。模型及 ONNX Runtime、SkiaSharp、RapidOcrNet 等依赖都
+是对应模块目录的私有文件，不进入宿主或另一个 OCR 模块。
+
+三个 OCR 模块分别使用稳定且互不冲突的模块、功能和命令 ID，因而可以同时安装；产品默认建议用户
+按需求只启用其中一个。Tiny 和 Small 分别位于 `Modules\PaddleOcrTiny` 与
+`Modules\PaddleOcrSmall`，删除或替换任一目录不会影响本地 OCR 或另一个 PP-OCR 模块。正在识别的
+会话由租约延迟释放；每个已加载模块在首次创建截图功能时建立一份进程临时模型快照，原生和托管
+依赖也在模块激活时进入进程专属影子目录。因此截图窗口已经打开后，即使源模块目录先被删除，用户
+仍可启动并完成识别。最后一个功能释放后关闭 ONNX 会话、释放模型快照并卸载模块上下文；被系统
+占用的临时原生文件最迟在下次进程启动时清理。
 
 ## 可选二维码扫描模块
 

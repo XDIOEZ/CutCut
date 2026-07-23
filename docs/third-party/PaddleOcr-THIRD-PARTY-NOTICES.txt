@@ -1,0 +1,35 @@
+PP-OCR optional modules third-party notices
+============================================
+
+PaddleOCR / PP-OCRv6 models
+Copyright (c) PaddlePaddle Authors.
+Licensed under the Apache License, Version 2.0.
+https://github.com/PaddlePaddle/PaddleOCR
+
+RapidOcrNet
+Copyright (c) BobLd and RapidOCR contributors.
+Licensed under the Apache License, Version 2.0.
+https://github.com/BobLd/RapidOcrNet
+
+RapidOCR
+Copyright (c) RapidAI contributors.
+Licensed under the Apache License, Version 2.0.
+https://github.com/RapidAI/RapidOCR
+
+ONNX Runtime
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT License.
+https://github.com/microsoft/onnxruntime
+
+SkiaSharp
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT License.
+https://github.com/mono/SkiaSharp
+
+Clipper2
+Copyright (c) Angus Johnson.
+Licensed under the Boost Software License 1.0.
+https://github.com/AngusJohnson/Clipper2
+
+The complete license texts and source notices are available from the project links above.
+The PP-OCR module packages preserve this notice file beside the binaries and model files.

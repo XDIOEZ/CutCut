@@ -35,47 +35,68 @@ try {
         throw "Windows 没有可用的 OCR 语言。请在系统语言和区域设置中安装当前语言的 OCR 组件。"
     }
 
-    $inputPath = [Environment]::GetEnvironmentVariable("LIGHTSHOT_OCR_INPUT")
-    $file = Wait-WinRtOperation ($storageFileType::GetFileFromPathAsync($inputPath)) $storageFileType
-    $stream = Wait-WinRtOperation ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) $randomAccessStreamType
+    $encodedInputs = [Environment]::GetEnvironmentVariable("LIGHTSHOT_OCR_INPUTS")
+    $inputsJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedInputs))
+    $inputPaths = ConvertFrom-Json -InputObject $inputsJson
+    $results = [System.Collections.Generic.List[object]]::new()
 
-    try {
-        $decoder = Wait-WinRtOperation ($bitmapDecoderType::CreateAsync($stream)) $bitmapDecoderType
-        $pixelFormat = [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8
-        $alphaMode = [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied
-        $maximumDimension = [uint32]$ocrEngineType::MaxImageDimension
-        $largestDimension = [Math]::Max($decoder.OrientedPixelWidth, $decoder.OrientedPixelHeight)
-
-        if ($largestDimension -le $maximumDimension) {
-            $bitmapOperation = $decoder.GetSoftwareBitmapAsync($pixelFormat, $alphaMode)
-        }
-        else {
-            $scale = $maximumDimension / [double]$largestDimension
-            $transform = [Windows.Graphics.Imaging.BitmapTransform]::new()
-            $transform.ScaledWidth = [Math]::Max(1, [Math]::Round($decoder.OrientedPixelWidth * $scale))
-            $transform.ScaledHeight = [Math]::Max(1, [Math]::Round($decoder.OrientedPixelHeight * $scale))
-            $transform.InterpolationMode = [Windows.Graphics.Imaging.BitmapInterpolationMode]::Fant
-            $bitmapOperation = $decoder.GetSoftwareBitmapAsync(
-                $pixelFormat,
-                $alphaMode,
-                $transform,
-                [Windows.Graphics.Imaging.ExifOrientationMode]::RespectExifOrientation,
-                [Windows.Graphics.Imaging.ColorManagementMode]::ColorManageToSRgb)
-        }
-
-        $bitmap = Wait-WinRtOperation $bitmapOperation $softwareBitmapType
+    foreach ($inputPath in $inputPaths) {
+        $file = Wait-WinRtOperation ($storageFileType::GetFileFromPathAsync($inputPath)) $storageFileType
+        $stream = Wait-WinRtOperation ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) $randomAccessStreamType
         try {
-            $result = Wait-WinRtOperation ($engine.RecognizeAsync($bitmap)) $ocrResultType
-            $resultBytes = [Text.Encoding]::UTF8.GetBytes($result.Text)
-            [Console]::Out.Write("OK:" + [Convert]::ToBase64String($resultBytes))
+            $decoder = Wait-WinRtOperation ($bitmapDecoderType::CreateAsync($stream)) $bitmapDecoderType
+            $pixelFormat = [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8
+            $alphaMode = [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied
+            $maximumDimension = [uint32]$ocrEngineType::MaxImageDimension
+            $largestDimension = [Math]::Max($decoder.OrientedPixelWidth, $decoder.OrientedPixelHeight)
+
+            if ($largestDimension -le $maximumDimension) {
+                $bitmapOperation = $decoder.GetSoftwareBitmapAsync($pixelFormat, $alphaMode)
+            }
+            else {
+                $scale = $maximumDimension / [double]$largestDimension
+                $transform = [Windows.Graphics.Imaging.BitmapTransform]::new()
+                $transform.ScaledWidth = [Math]::Max(1, [Math]::Round($decoder.OrientedPixelWidth * $scale))
+                $transform.ScaledHeight = [Math]::Max(1, [Math]::Round($decoder.OrientedPixelHeight * $scale))
+                $transform.InterpolationMode = [Windows.Graphics.Imaging.BitmapInterpolationMode]::Fant
+                $bitmapOperation = $decoder.GetSoftwareBitmapAsync(
+                    $pixelFormat,
+                    $alphaMode,
+                    $transform,
+                    [Windows.Graphics.Imaging.ExifOrientationMode]::RespectExifOrientation,
+                    [Windows.Graphics.Imaging.ColorManagementMode]::ColorManageToSRgb)
+            }
+
+            $bitmap = Wait-WinRtOperation $bitmapOperation $softwareBitmapType
+            try {
+                $result = Wait-WinRtOperation ($engine.RecognizeAsync($bitmap)) $ocrResultType
+                [int]$wordCount = 0
+                [int]$lineCount = 0
+                foreach ($line in $result.Lines) {
+                    $lineCount++
+                    foreach ($word in $line.Words) {
+                        $wordCount++
+                    }
+                }
+                $results.Add([PSCustomObject]@{
+                    Name = [IO.Path]::GetFileNameWithoutExtension($inputPath)
+                    Text = $result.Text
+                    LineCount = $lineCount
+                    WordCount = $wordCount
+                })
+            }
+            finally {
+                $bitmap.Dispose()
+            }
         }
         finally {
-            $bitmap.Dispose()
+            $stream.Dispose()
         }
     }
-    finally {
-        $stream.Dispose()
-    }
+
+    $resultJson = ConvertTo-Json -Compress -InputObject @($results)
+    $resultBytes = [Text.Encoding]::UTF8.GetBytes($resultJson)
+    [Console]::Out.Write("OK:" + [Convert]::ToBase64String($resultBytes))
 }
 catch {
     $errorBytes = [Text.Encoding]::UTF8.GetBytes($_.Exception.Message)

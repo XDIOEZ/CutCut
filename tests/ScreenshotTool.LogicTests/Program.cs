@@ -12,9 +12,92 @@ using ScreenshotTool.Abstractions;
 using ScreenshotTool.ScreenRecording;
 using ScreenshotTool.LongCapture;
 using ScreenshotTool.Ocr;
+using ScreenshotTool.PaddleOcr;
+using ScreenshotTool.PaddleOcr.Small;
+using ScreenshotTool.PaddleOcr.Tiny;
 using ScreenshotTool.QrCode;
 using ZXing;
 
+if (args.Length >= 3 &&
+    string.Equals(args[0], "--paddle-ocr-engine-smoke", StringComparison.Ordinal))
+{
+    var variant = Enum.Parse<PaddleOcrVariant>(args[1], ignoreCase: true);
+    using var smokeImage = new Bitmap(1080, 260);
+    using (var smokeGraphics = Graphics.FromImage(smokeImage))
+    using (var smokeFont = new Font("Microsoft YaHei UI", 48F, FontStyle.Regular))
+    {
+        smokeGraphics.Clear(Color.FromArgb(30, 34, 42));
+        smokeGraphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        smokeGraphics.DrawString(
+            "轻截 Paddle OCR 文字识别 2026",
+            smokeFont,
+            Brushes.White,
+            34F,
+            82F);
+    }
+
+    using var recognizer = new PaddleOcrRecognizer(
+        Path.GetFullPath(args[2]),
+        variant);
+    var smokeText = await recognizer.RecognizeAsync(
+        smokeImage,
+        CancellationToken.None);
+    Console.WriteLine($"PP-OCR {variant} result: {smokeText}");
+    AssertTrue(smokeText.Contains("文字", StringComparison.Ordinal), $"PP-OCR {variant} 识别中文");
+    AssertTrue(smokeText.Contains("2026", StringComparison.Ordinal), $"PP-OCR {variant} 识别数字");
+    return;
+}
+if (args.Length >= 3 &&
+    string.Equals(args[0], "--paddle-ocr-module-smoke", StringComparison.Ordinal))
+{
+    var variant = Enum.Parse<PaddleOcrVariant>(args[1], ignoreCase: true);
+    var modulesRoot = Path.GetFullPath(args[2]);
+    var commandId = variant == PaddleOcrVariant.Tiny
+        ? "screenshot-tool.paddle-ocr.tiny.recognize"
+        : "screenshot-tool.paddle-ocr.small.recognize";
+    var expectedModuleId = variant == PaddleOcrVariant.Tiny
+        ? "screenshot-tool.paddle-ocr.tiny"
+        : "screenshot-tool.paddle-ocr.small";
+
+    using var smokeImage = new Bitmap(1080, 260);
+    using (var smokeGraphics = Graphics.FromImage(smokeImage))
+    using (var smokeFont = new Font("Microsoft YaHei UI", 48F, FontStyle.Regular))
+    {
+        smokeGraphics.Clear(Color.White);
+        smokeGraphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        smokeGraphics.DrawString(
+            "轻截 PP-OCR 模块测试 2026",
+            smokeFont,
+            Brushes.Black,
+            34F,
+            82F);
+    }
+
+    using var moduleHost = new ModuleHost(modulesRoot);
+    var refresh = moduleHost.Refresh();
+    AssertEqual(0, refresh.Errors.Count, $"PP-OCR {variant} 模块加载无错误");
+    AssertEqual(1, refresh.Modules.Count, $"PP-OCR {variant} 只加载一个独立模块");
+    AssertEqual(expectedModuleId, refresh.Modules[0].Id, $"PP-OCR {variant} 模块 ID");
+    var features = moduleHost.CreateCaptureFeatures();
+    AssertEqual(1, features.Count, $"PP-OCR {variant} 创建截图功能");
+    using var feature = features[0];
+    var resultHost = new TestOcrCaptureHost(smokeImage);
+    feature.Attach(resultHost);
+
+    var packageDirectory = Directory.GetDirectories(modulesRoot).Single();
+    Directory.Delete(packageDirectory, recursive: true);
+    var removed = moduleHost.Refresh();
+    AssertEqual(0, removed.Modules.Count, $"PP-OCR {variant} 原生依赖加载前即可删除模块目录");
+
+    await ((ICaptureToolbarCommandProvider)feature).ExecuteToolbarCommandAsync(
+        commandId,
+        CancellationToken.None);
+    AssertTrue(
+        resultHost.ResultText?.Contains("2026", StringComparison.Ordinal) == true,
+        $"PP-OCR {variant} 删除源模块后仍从活动会话快照执行真实识别");
+    Console.WriteLine($"PP-OCR {variant} module result: {resultHost.ResultText}");
+    return;
+}
 if (args.Length >= 1 && string.Equals(args[0], "--ocr-engine-smoke", StringComparison.Ordinal))
 {
     using var smokeImage = new Bitmap(3600, 800);
@@ -2246,8 +2329,8 @@ using (var ocrModule = new OcrModule())
 {
     AssertEqual(new Version(1, 11, 0), OcrModule.MinimumHostVersion, "OCR 模块最低主程序版本");
     AssertEqual("screenshot-tool.ocr", ocrModule.Id, "OCR 模块 ID 保持稳定");
-    AssertEqual("OCR 文字识别", ocrModule.DisplayName, "OCR 模块显示名称");
-    AssertEqual(new Version(1, 0, 0), ocrModule.Version, "OCR 模块版本");
+    AssertEqual("本地 OCR 文字识别", ocrModule.DisplayName, "OCR 模块显示名称");
+    AssertEqual(new Version(1, 1, 0), ocrModule.Version, "OCR 模块版本");
 
     var incompatibleOcrModuleRejected = false;
     try
@@ -2268,8 +2351,62 @@ using (var ocrModule = new OcrModule())
     AssertTrue(ocrFeature is ICaptureToolbarCommandProvider, "OCR 功能提供截图工具栏入口");
     var ocrCommands = ((ICaptureToolbarCommandProvider)ocrFeature).GetToolbarCommands();
     AssertEqual(1, ocrCommands.Count, "OCR 功能只注册一个工具栏命令");
-    AssertEqual("OCR", ocrCommands[0].Text, "OCR 工具栏命令文字");
+    AssertEqual("OCR 本地", ocrCommands[0].Text, "OCR 工具栏命令文字");
 }
+
+using (var darkSmallText = new Bitmap(420, 90))
+{
+    using (var graphics = Graphics.FromImage(darkSmallText))
+    using (var font = new Font("Microsoft YaHei UI", 18F, FontStyle.Regular))
+    {
+        graphics.Clear(Color.FromArgb(28, 31, 38));
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        graphics.DrawString("轻截 OCR small 2026", font, Brushes.White, 8F, 24F);
+    }
+
+    var candidates = OcrImagePreprocessor.CreateCandidates(darkSmallText);
+    try
+    {
+        AssertEqual(4, candidates.Count, "本地 OCR 生成原图、放大、对比度和黑白四路候选");
+        AssertTrue(candidates[1].Image.Width > darkSmallText.Width, "本地 OCR 放大小字号选区");
+        AssertEqual(
+            Color.White.ToArgb(),
+            candidates[2].Image.GetPixel(0, 0).ToArgb(),
+            "本地 OCR 增强候选增加白色边距");
+    }
+    finally
+    {
+        foreach (var candidate in candidates)
+        {
+            candidate.Dispose();
+        }
+    }
+}
+
+using (var wideOcrSelection = new Bitmap(3000, 120))
+{
+    var candidates = OcrImagePreprocessor.CreateCandidates(wideOcrSelection);
+    try
+    {
+        AssertEqual(2400, candidates[1].Image.Width, "本地 OCR 预处理限制超宽选区的中间图尺寸");
+    }
+    finally
+    {
+        foreach (var candidate in candidates)
+        {
+            candidate.Dispose();
+        }
+    }
+}
+
+AssertEqual(
+    "轻截文字识别 2026",
+    OcrCandidateSelector.SelectBest(
+    [
+        new OcrWorkerResult("original", "轻截文?", 1, 1),
+        new OcrWorkerResult("contrast", "轻截文字识别 2026", 1, 2)
+    ]),
+    "本地 OCR 从多路结果中选择信息更完整的候选");
 
 AssertEqual(
     "轻截文字识别 2026\nSecond line",
@@ -2284,7 +2421,7 @@ using (var ocrFeature = new OcrFeature(new TestOcrRecognizer("第一行\nSecond 
         .ExecuteToolbarCommandAsync(OcrFeature.CommandId, CancellationToken.None)
         .GetAwaiter()
         .GetResult();
-    AssertEqual("OCR 识别结果", ocrHost.ResultTitle ?? string.Empty, "OCR 使用通用宿主打开结果窗口");
+    AssertEqual("本地 OCR 识别结果", ocrHost.ResultTitle ?? string.Empty, "OCR 使用通用宿主打开结果窗口");
     AssertEqual("第一行\nSecond line", ocrHost.ResultText ?? string.Empty, "OCR 结果保留识别换行");
     AssertTrue(ocrHost.Completed, "OCR 成功后结束冻结的截图会话");
     AssertTrue(ocrHost.SelectionCopied, "OCR 识别宿主提供的当前选区位图");
@@ -2308,6 +2445,48 @@ catch (OperationCanceledException)
     ocrDisposeCancelledRecognition = true;
 }
 AssertTrue(ocrDisposeCancelledRecognition, "OCR 功能释放时取消活动识别任务");
+
+VerifyPaddleOcrModule(
+    new PaddleOcrTinyModule(),
+    PaddleOcrVariant.Tiny,
+    "screenshot-tool.paddle-ocr.tiny",
+    "PP-OCR Tiny 文字识别",
+    "screenshot-tool.paddle-ocr.tiny.feature",
+    "screenshot-tool.paddle-ocr.tiny.recognize",
+    "OCR Tiny");
+VerifyPaddleOcrModule(
+    new PaddleOcrSmallModule(),
+    PaddleOcrVariant.Small,
+    "screenshot-tool.paddle-ocr.small",
+    "PP-OCR Small 文字识别",
+    "screenshot-tool.paddle-ocr.small.feature",
+    "screenshot-tool.paddle-ocr.small.recognize",
+    "OCR Small");
+
+using (var paddleFeature = new PaddleOcrFeature(
+           "tests.paddle-ocr.feature",
+           551,
+           "tests.paddle-ocr.recognize",
+           "OCR 测试",
+           "测试 PP-OCR",
+           "PP-OCR 测试结果",
+           new TestPaddleOcrRecognizer("第一行\nMixed 2026")))
+{
+    var paddleHost = new TestOcrCaptureHost();
+    paddleFeature.Attach(paddleHost);
+    ((ICaptureToolbarCommandProvider)paddleFeature)
+        .ExecuteToolbarCommandAsync("tests.paddle-ocr.recognize", CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual("PP-OCR 测试结果", paddleHost.ResultTitle ?? string.Empty, "PP-OCR 使用通用结果窗口");
+    AssertEqual("第一行\nMixed 2026", paddleHost.ResultText ?? string.Empty, "PP-OCR 保留中英混排结果");
+    AssertTrue(paddleHost.Completed, "PP-OCR 成功后结束截图会话");
+}
+
+var missingTinyModels = PaddleOcrModelFiles.Resolve(
+    Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")),
+    PaddleOcrVariant.Tiny).GetMissingFiles();
+AssertEqual(4, missingTinyModels.Count, "PP-OCR Tiny 检查检测、方向、识别和字典四个文件");
 
 using (var qrCodeModule = new QrCodeModule())
 {
@@ -2444,7 +2623,7 @@ try
     var removedOcrModules = ocrModuleHost.Refresh();
     AssertEqual(0, removedOcrModules.Modules.Count, "删除 OCR 模块文件夹后立即从目录卸载");
     AssertEqual(
-        "OCR",
+        "OCR 本地",
         ((ICaptureToolbarCommandProvider)loadedOcrFeature).GetToolbarCommands()[0].Text,
         "活动截图会话在 OCR 模块删除后保持延迟释放租约");
 }
@@ -2455,6 +2634,15 @@ finally
         Directory.Delete(ocrModuleTestDirectory, recursive: true);
     }
 }
+
+VerifyPaddleOcrModulePackage(
+    typeof(PaddleOcrTinyModule).Assembly.Location,
+    "PaddleOcrTiny",
+    "screenshot-tool.paddle-ocr.tiny");
+VerifyPaddleOcrModulePackage(
+    typeof(PaddleOcrSmallModule).Assembly.Location,
+    "PaddleOcrSmall",
+    "screenshot-tool.paddle-ocr.small");
 
 var qrCodeModuleTestDirectory = Path.Combine(
     Path.GetTempPath(),
@@ -3125,6 +3313,147 @@ static void RaiseButtonClick(Button button)
         .Invoke(button, [EventArgs.Empty]);
 }
 
+static void VerifyPaddleOcrModule(
+    PaddleOcrModuleBase module,
+    PaddleOcrVariant variant,
+    string expectedModuleId,
+    string expectedDisplayName,
+    string expectedFeatureId,
+    string expectedCommandId,
+    string expectedCommandText)
+{
+    var moduleDirectory = Path.Combine(
+        Path.GetTempPath(),
+        "ScreenshotTool.PaddleOcrMetadataTests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        CreatePaddleOcrModelPlaceholders(moduleDirectory, variant);
+        AssertEqual(
+            new Version(1, 11, 0),
+            PaddleOcrModuleBase.MinimumHostVersion,
+            $"{expectedDisplayName}最低主程序版本");
+        AssertEqual(expectedModuleId, module.Id, $"{expectedDisplayName}模块 ID");
+        AssertEqual(expectedDisplayName, module.DisplayName, $"{expectedDisplayName}显示名称");
+        AssertEqual(new Version(1, 0, 0), module.Version, $"{expectedDisplayName}模块版本");
+
+        var incompatibleRejected = false;
+        try
+        {
+            module.Initialize(new TestModuleContext(new Version(1, 10, 0)));
+        }
+        catch (NotSupportedException)
+        {
+            incompatibleRejected = true;
+        }
+        AssertTrue(incompatibleRejected, $"{expectedDisplayName}拒绝旧版主程序");
+
+        module.Initialize(new TestModuleContext(
+            PaddleOcrModuleBase.MinimumHostVersion,
+            moduleDirectory));
+        var features = module.CreateCaptureFeatures().ToArray();
+        AssertEqual(1, features.Length, $"{expectedDisplayName}创建独立截图功能");
+        using var feature = features[0];
+        AssertEqual(expectedFeatureId, feature.Id, $"{expectedDisplayName}功能 ID");
+        AssertTrue(
+            feature is ICaptureToolbarCommandProvider,
+            $"{expectedDisplayName}提供截图工具栏入口");
+        var commands = ((ICaptureToolbarCommandProvider)feature).GetToolbarCommands();
+        AssertEqual(1, commands.Count, $"{expectedDisplayName}只注册一个命令");
+        AssertEqual(expectedCommandId, commands[0].Id, $"{expectedDisplayName}命令 ID");
+        AssertEqual(expectedCommandText, commands[0].Text, $"{expectedDisplayName}命令文字");
+    }
+    finally
+    {
+        module.Dispose();
+        if (Directory.Exists(moduleDirectory))
+        {
+            Directory.Delete(moduleDirectory, recursive: true);
+        }
+    }
+}
+
+static void VerifyPaddleOcrModulePackage(
+    string entryAssemblyPath,
+    string packageName,
+    string expectedModuleId)
+{
+    var testDirectory = Path.Combine(
+        Path.GetTempPath(),
+        "ScreenshotTool.PaddleOcrModuleTests",
+        Guid.NewGuid().ToString("N"));
+    ModuleHost? moduleHost = null;
+    ICaptureFeature? feature = null;
+    try
+    {
+        var packageDirectory = Path.Combine(testDirectory, packageName);
+        Directory.CreateDirectory(packageDirectory);
+        var variant = packageName.EndsWith("Tiny", StringComparison.Ordinal)
+            ? PaddleOcrVariant.Tiny
+            : PaddleOcrVariant.Small;
+        CreatePaddleOcrModelPlaceholders(packageDirectory, variant);
+        var files = new[]
+        {
+            entryAssemblyPath,
+            typeof(PaddleOcrModuleBase).Assembly.Location,
+            Path.Combine(AppContext.BaseDirectory, "RapidOcrNet.dll"),
+            Path.Combine(AppContext.BaseDirectory, "Microsoft.ML.OnnxRuntime.dll"),
+            Path.Combine(AppContext.BaseDirectory, "SkiaSharp.dll"),
+            Path.Combine(AppContext.BaseDirectory, "Clipper2Lib.dll"),
+            Path.Combine(AppContext.BaseDirectory, "System.Numerics.Tensors.dll")
+        };
+        foreach (var file in files.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            AssertTrue(File.Exists(file), $"PP-OCR 测试依赖存在：{Path.GetFileName(file)}");
+            File.Copy(file, Path.Combine(packageDirectory, Path.GetFileName(file)));
+        }
+
+        moduleHost = new ModuleHost(testDirectory);
+        var loaded = moduleHost.Refresh();
+        AssertEqual(0, loaded.Errors.Count, $"{packageName}连同私有托管依赖加载");
+        AssertEqual(1, loaded.Modules.Count, $"{packageName}只发现一个模块入口");
+        AssertEqual(expectedModuleId, loaded.Modules[0].Id, $"{packageName}读取稳定模块 ID");
+        var features = moduleHost.CreateCaptureFeatures();
+        AssertEqual(1, features.Count, $"{packageName}创建截图功能实例");
+        feature = features[0];
+
+        Directory.Delete(packageDirectory, recursive: true);
+        var removed = moduleHost.Refresh();
+        AssertEqual(0, removed.Modules.Count, $"{packageName}删除后立即从目录卸载");
+        AssertEqual(
+            1,
+            ((ICaptureToolbarCommandProvider)feature).GetToolbarCommands().Count,
+            $"{packageName}活动会话保留延迟释放租约");
+    }
+    finally
+    {
+        feature?.Dispose();
+        moduleHost?.Dispose();
+        if (Directory.Exists(testDirectory))
+        {
+            Directory.Delete(testDirectory, recursive: true);
+        }
+    }
+}
+
+static void CreatePaddleOcrModelPlaceholders(
+    string moduleDirectory,
+    PaddleOcrVariant variant)
+{
+    var files = PaddleOcrModelFiles.Resolve(moduleDirectory, variant);
+    Directory.CreateDirectory(Path.GetDirectoryName(files.DetectorPath)!);
+    foreach (var path in new[]
+             {
+                 files.DetectorPath,
+                 files.ClassifierPath,
+                 files.RecognizerPath,
+                 files.DictionaryPath
+             })
+    {
+        File.WriteAllBytes(path, [0]);
+    }
+}
+
 static Bitmap CreateSolidBitmap(Size size, Color color)
 {
     var bitmap = new Bitmap(size.Width, size.Height);
@@ -3323,9 +3652,11 @@ internal sealed class TestCaptureArtifactHost : ICaptureArtifactHost
     public void CompleteCaptureSession() => Calls.Add("complete");
 }
 
-internal sealed class TestModuleContext(Version hostVersion) : IModuleContext
+internal sealed class TestModuleContext(
+    Version hostVersion,
+    string? moduleDirectory = null) : IModuleContext
 {
-    public string ModuleDirectory { get; } = AppContext.BaseDirectory;
+    public string ModuleDirectory { get; } = moduleDirectory ?? AppContext.BaseDirectory;
 
     public Version HostVersion { get; } = hostVersion;
 }
@@ -3438,6 +3769,24 @@ internal sealed class TestBlockingOcrRecognizer : IOcrRecognizer, IDisposable
     }
 
     public void Dispose() => Started.Dispose();
+}
+
+internal sealed class TestPaddleOcrRecognizer(string text) : IPaddleOcrRecognizer
+{
+    public Task<string> RecognizeAsync(Bitmap image, CancellationToken cancellationToken)
+    {
+        if (image.Width <= 0 || image.Height <= 0)
+        {
+            throw new InvalidOperationException("PP-OCR 接收有效选区位图失败。");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(text);
+    }
+
+    public void Dispose()
+    {
+    }
 }
 
 internal sealed class TestQrCodeScanner(IReadOnlyList<string> results) : IQrCodeScanner

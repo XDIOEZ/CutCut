@@ -9,6 +9,8 @@
 
 - `long-capture-addon-win-x64.zip`
 - `ocr-addon-win-x64.zip`
+- `paddle-ocr-tiny-addon-win-x64.zip`
+- `paddle-ocr-small-addon-win-x64.zip`
 - `qr-code-addon-win-x64.zip`
 - `screen-recording-addon-win-x64.zip`
 

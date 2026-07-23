@@ -557,6 +557,10 @@ internal sealed class ModuleHost : IModuleManager
                     {
                         continue;
                     }
+                    if (modules.Count == 0)
+                    {
+                        loadContext.PrepareForActiveLeases();
+                    }
                     modules.Add(module);
                     module.Initialize(new ModuleContext(Path.GetDirectoryName(assemblyPath)!));
                 }
@@ -576,6 +580,7 @@ internal sealed class ModuleHost : IModuleManager
                         Debug.WriteLine($"模块初始化失败后的释放也失败：{disposeException}");
                     }
                 }
+                loadContext.PrepareForUnload();
                 loadContext.Unload();
                 throw;
             }
@@ -658,6 +663,7 @@ internal sealed class ModuleHost : IModuleManager
                     Debug.WriteLine($"模块 {module.Id} 释放失败：{exception}");
                 }
             }
+            _loadContext.PrepareForUnload();
             _loadContext.Unload();
         }
     }

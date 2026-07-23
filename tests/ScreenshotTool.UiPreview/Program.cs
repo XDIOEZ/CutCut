@@ -1140,7 +1140,7 @@ internal static class Program
         }
         if (!navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
             shell.SelectedPageId != "screenshot-tool.screen-recording.settings" ||
-            !shell.VersionText.Equals("v1.10.0", StringComparison.Ordinal))
+            !shell.VersionText.Equals("v1.11.1", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"主界面没有正确显示录屏分页或版本号，当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");

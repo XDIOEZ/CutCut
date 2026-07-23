@@ -4,14 +4,15 @@
 
 ## 当前快照
 
-- 快照日期：2026-07-22。
-- 主程序版本：`1.11.0`。
+- 快照日期：2026-07-23。
+- 主程序版本：`1.11.1`。
 - 长截图模块版本：`1.1.0`。
 - 录屏模块版本：`1.7.0`，最低要求主程序 `1.10.0`。
-- OCR 模块版本：`1.0.0`，最低要求主程序 `1.11.0`。
+- 本地 OCR 模块版本：`1.1.0`，最低要求主程序 `1.11.0`。
+- PP-OCR Tiny 与 PP-OCR Small 模块版本：均为 `1.0.0`，最低要求主程序 `1.11.0`。
 - 二维码扫描模块版本：`1.0.0`，最低要求主程序 `1.11.0`。
 - GitHub 仓库：`XDIOEZ/CutCut`，默认分支 `main`。
-- 当前 Release：`v1.11.0`。
+- 当前 Release：`v1.11.1`。
 - 发布首页：<https://xdioez.github.io/CutCut/>。
 - 模块下载页：<https://xdioez.github.io/CutCut/modules.html>。
 
@@ -29,16 +30,17 @@
 - 设置工作台包含宿主级“插件模块”页，使用纵向单列布局。用户可以查看已安装或已禁用模块，并自主启用、禁用或永久删除。
 - 禁用只退役程序集并保留文件和跨重启标记；永久删除会删除该模块自己的一级目录。删除前必须明确提示不可恢复，并说明重新安装需要前往模块发布页下载。
 - 模块自己的设置页仍由模块契约动态加入导航；模块禁用或删除后立即移除，重新启用后恢复。
-- 完整包通常预装长截图、OCR、二维码扫描与录屏模块，但仍要保留独立模块包，供按需安装或永久删除后恢复。
-- OCR 通过稳定命令 ID `screenshot-tool.ocr.recognize` 识别当前截图选区。识别使用 Windows 自带的离线 OCR，不上传图片；成功后关闭截图遮罩，并由宿主在选区旁打开可编辑、可复制的独立文本结果窗。
+- 完整包通常预装长截图、本地 OCR、二维码扫描与录屏模块，但仍要保留独立模块包，供按需安装或永久删除后恢复。PP-OCR Tiny/Small 模型不进入完整包，只提供额外独立下载，避免破坏 5 MiB / 90 MiB 体积约束。
+- 本地 OCR 保持稳定命令 ID `screenshot-tool.ocr.recognize`，使用 Windows 自带离线 OCR；识别前对原图、高清放大、灰度增强和 Otsu 二值化候选结果分别识别并择优。PP-OCR Tiny 和 Small 是稳定 ID、独立目录、独立依赖与模型的两个模块，分别偏向体积/速度和复杂场景精度。三者都不上传图片；成功后关闭截图遮罩，并由宿主在选区旁打开可编辑、可复制的独立文本结果窗。
+- 三种 OCR 可以同时安装，但默认建议用户只启用其中一个。对应目录为 `Modules\Ocr`、`Modules\PaddleOcrTiny` 和 `Modules\PaddleOcrSmall`；任一模块的禁用、删除或替换不得影响另外两个。
 - 二维码扫描通过稳定命令 ID `screenshot-tool.qr-code.scan` 离线扫描当前截图选区，只尝试 QR Code；成功后复用宿主侧边结果窗显示原始内容，不自动打开网址或执行二维码内容。入口 DLL、私有 `zxing.dll` 与许可文本共同位于 `Modules\QrCode`。
-- 相关入口：`Infrastructure/Modules/ModuleHost.cs`、`Presentation/Pages/ModuleManagementPage.cs`、`Presentation/MainForm.cs`、`ScreenshotTool.Contracts/ModuleContracts.cs`。
+- 相关入口：`Infrastructure/Modules/ModuleHost.cs`、`Infrastructure/Modules/ModuleLoadContext.cs`、`Presentation/Pages/ModuleManagementPage.cs`、`ScreenshotTool.Ocr`、`ScreenshotTool.PaddleOcr*`、`ScreenshotTool.Contracts/ModuleContracts.cs`。
 
 ### 发布页体验
 
 - 轻量版是主下载入口，保持视觉优先级最高；它依赖目标电脑安装 .NET 8 Desktop Runtime。
 - 内置 .NET 8 的重量版是次级、小尺寸按钮，避免喧宾夺主，但必须能够一键直接下载，不能把普通用户转到 Releases 自己找文件。
-- 模块页上的长截图、OCR、二维码扫描和录屏也必须一键直接下载 ZIP。虽然独立下载使用率可能较低，但它是完整的恢复路径。
+- 模块页上的长截图、本地 OCR、PP-OCR Tiny、PP-OCR Small、二维码扫描和录屏也必须一键直接下载 ZIP。虽然独立下载使用率可能较低，但它是完整的恢复路径。
 - 页面只有在 GitHub API 暂时不可用或某个未来 Release 确实没有对应资产时才允许显示回退状态。对正式承诺提供的版本，不应只改文案或放假链接；应上传真实资产。
 - 首页与模块页都是 `site/` 下的纯静态页面，通过 GitHub API 读取最新 Release。只补充同一 Release 的资产时不需要重新部署 Pages，页面会自动识别；修改 `site/**` 并推送到 `main` 时由 `.github/workflows/pages.yml` 部署。
 - 首页用“系统负责截一下，轻截负责当场做完”解释与 Windows 自带截图的差异。表达必须客观承认系统工具零安装、偶尔截图很方便，重点突出轻截的对象级标注编辑、双向长截图、录屏实时批注和插件自由装卸，避免贬低式比较。
@@ -54,22 +56,26 @@
 | 轻量完整包 | `complete-lightweight-win-x64.zip` | 首页主下载按钮 |
 | 内置运行库重量完整包 | `complete-portable-win-x64.zip` | 首页次级直接下载按钮 |
 | 长截图独立模块 | `long-capture-addon-win-x64.zip` | 模块页长截图按钮 |
-| OCR 独立模块 | `ocr-addon-win-x64.zip` | 模块页 OCR 按钮 |
+| 本地 OCR 独立模块 | `ocr-addon-win-x64.zip` | 模块页本地 OCR 按钮 |
+| PP-OCR Tiny 独立模块 | `paddle-ocr-tiny-addon-win-x64.zip` | 模块页 PP-OCR Tiny 按钮 |
+| PP-OCR Small 独立模块 | `paddle-ocr-small-addon-win-x64.zip` | 模块页 PP-OCR Small 按钮 |
 | 二维码扫描独立模块 | `qr-code-addon-win-x64.zip` | 模块页二维码扫描按钮 |
 | 录屏独立模块 | `screen-recording-addon-win-x64.zip` | 模块页录屏按钮 |
 | 校验和 | `SHA256SUMS.txt` | Release 完整性校验 |
 
-`v1.11.0` 按表中稳定文件名提供全部七个资产。发布候选包核对结果为：
+`v1.11.1` 按表中稳定文件名提供全部九个资产。发布候选包核对结果为：
 
-- 轻量完整包约 `1.21 MiB`。
-- 重量完整包约 `59.01 MiB`。
+- 轻量完整包约 `1.24 MiB`。
+- 重量完整包约 `59.04 MiB`。
 - 长截图独立模块约 `0.06 MiB`。
-- OCR 独立模块约 `0.01 MiB`。
+- 本地 OCR 独立模块约 `0.02 MiB`。
+- PP-OCR Tiny 独立模块约 `16.64 MiB`。
+- PP-OCR Small 独立模块约 `36.57 MiB`。
 - 二维码扫描独立模块约 `0.23 MiB`。
 - 录屏独立模块约 `0.45 MiB`。
-- 两个完整包已预装长截图、OCR、二维码扫描与录屏；独立模块包保持程序旁 `Modules/<模块目录>/...` 的目录结构，解压到程序目录即可安装。
+- 两个完整包已预装长截图、本地 OCR、二维码扫描与录屏；独立模块包保持程序旁 `Modules/<模块目录>/...` 的目录结构，解压到程序目录即可安装。
 
-发布脚本 `scripts/Publish-Release.ps1` 会生成两种完整包、四个独立模块包和免解压运行目录，并检查轻量版小于 `5 MiB`、重量版小于 `90 MiB`。OCR 与二维码扫描的独立恢复资产名分别固定为 `ocr-addon-win-x64.zip` 和 `qr-code-addon-win-x64.zip`。只有用户在当前需求中明确要求打包或发布时才运行；不能因为记忆里已有 Release 就擅自发布。
+发布脚本 `scripts/Publish-Release.ps1` 会生成两种完整包、六个独立模块包和免解压运行目录，并检查轻量版小于 `5 MiB`、重量版小于 `90 MiB`。本地 OCR 与二维码扫描的独立恢复资产名分别固定为 `ocr-addon-win-x64.zip` 和 `qr-code-addon-win-x64.zip`；PP-OCR 通过 `scripts/Get-PaddleOcrModels.ps1` 下载固定版本并核对 SHA-256，再由 `scripts/Publish-PaddleOcrModule.ps1` 分别组装 Tiny/Small。只有用户在当前需求中明确要求打包或发布时才运行发布脚本；不能因为记忆里已有 Release 就擅自发布。
 
 ## 后续开发时优先保持
 

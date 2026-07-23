@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Text;
+using System.Text.Json;
 
 namespace ScreenshotTool.Ocr;
 
@@ -18,24 +19,43 @@ internal sealed class WindowsOcrRecognizer : IOcrRecognizer
 
         var tempDirectory = Path.Combine(Path.GetTempPath(), "LightShotCN", "Ocr");
         Directory.CreateDirectory(tempDirectory);
-        var imagePath = Path.Combine(tempDirectory, $"{Guid.NewGuid():N}.png");
+        var candidates = OcrImagePreprocessor.CreateCandidates(image);
+        var imagePaths = candidates
+            .Select(candidate => Path.Combine(
+                tempDirectory,
+                $"{Guid.NewGuid():N}-{candidate.Name}.png"))
+            .ToArray();
 
         try
         {
             await Task.Run(
-                () => image.Save(imagePath, ImageFormat.Png),
+                () =>
+                {
+                    for (var index = 0; index < candidates.Count; index++)
+                    {
+                        candidates[index].Image.Save(imagePaths[index], ImageFormat.Png);
+                    }
+                },
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            return await RunWorkerAsync(imagePath, cancellationToken);
+            var results = await RunWorkerAsync(imagePaths, cancellationToken);
+            return OcrCandidateSelector.SelectBest(results);
         }
         finally
         {
-            TryDelete(imagePath);
+            foreach (var candidate in candidates)
+            {
+                candidate.Dispose();
+            }
+            foreach (var imagePath in imagePaths)
+            {
+                TryDelete(imagePath);
+            }
         }
     }
 
-    private static async Task<string> RunWorkerAsync(
-        string imagePath,
+    private static async Task<IReadOnlyList<OcrWorkerResult>> RunWorkerAsync(
+        IReadOnlyList<string> imagePaths,
         CancellationToken cancellationToken)
     {
         var powerShellPath = GetWindowsPowerShellPath();
@@ -59,7 +79,9 @@ internal sealed class WindowsOcrRecognizer : IOcrRecognizer
             UseShellExecute = false,
             WindowStyle = ProcessWindowStyle.Hidden
         };
-        startInfo.Environment["LIGHTSHOT_OCR_INPUT"] = imagePath;
+        var inputJson = JsonSerializer.Serialize(imagePaths);
+        startInfo.Environment["LIGHTSHOT_OCR_INPUTS"] = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(inputJson));
 
         using var process = new Process { StartInfo = startInfo };
         if (!process.Start())
@@ -97,12 +119,20 @@ internal sealed class WindowsOcrRecognizer : IOcrRecognizer
             throw new InvalidOperationException("Windows OCR 返回了无法读取的结果。");
         }
 
-        if (!TryDecodeWorkerMessage(output, "OK:", out var result))
+        if (!TryDecodeWorkerMessage(output, "OK:", out var resultJson))
         {
             throw new InvalidOperationException("Windows OCR 返回了无法读取的结果。");
         }
 
-        return OcrTextNormalizer.Normalize(result);
+        try
+        {
+            return JsonSerializer.Deserialize<OcrWorkerResult[]>(resultJson) ??
+                   throw new JsonException("OCR 结果为空。");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException("Windows OCR 返回了无法读取的结果。", exception);
+        }
     }
 
     private static bool TryDecodeWorkerMessage(
