@@ -33,11 +33,11 @@ CaptureOverlayForm             提供受控宿主能力
 
 ## 第一方模块的构建与发布
 
-宿主项目对随完整包预装的第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将长截图和本地 OCR DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。PP-OCR Tiny/Small 不进入宿主项目依赖树或完整包，只由各自的独立发布脚本组装。
+宿主项目对随完整包预装的第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将长截图和本地 OCR DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。PP-OCR Tiny/Small 不进入宿主项目依赖树，也不进入轻量版和重量版；它们先由各自的独立发布脚本组装，再仅在发布阶段复制进全插件完全版。
 
-`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含长截图与本地 OCR 模块，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`，脚本会在压缩前确认其同时包含主程序、长截图、本地 OCR、二维码扫描、录屏模块和编码器。脚本还会生成 `long-capture-addon-win-x64.zip`、`ocr-addon-win-x64.zip`、`paddle-ocr-tiny-addon-win-x64.zip` 与 `paddle-ocr-small-addon-win-x64.zip` 等独立包，供发布页按需下载。PP-OCR 模型下载脚本固定来源、版本与 SHA-256，校验不一致时停止组包。
+`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含长截图与本地 OCR 模块，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip`、`complete-portable-win-x64.zip` 和 `complete-full-win-x64.zip`：前两者包含主程序、长截图、本地 OCR、二维码扫描、录屏模块和编码器；完全版以便携压缩版为底包，再装入 PP-OCR Tiny/Small 的入口、私有依赖和四个模型文件，并对最终 ZIP 执行 130 MiB 门槛。脚本还会生成 `long-capture-addon-win-x64.zip`、`ocr-addon-win-x64.zip`、`paddle-ocr-tiny-addon-win-x64.zip` 与 `paddle-ocr-small-addon-win-x64.zip` 等独立包，供发布页按需下载。PP-OCR 模型下载脚本固定来源、版本与 SHA-256，校验不一致时停止组包。
 
-录屏仍不进入宿主的编译依赖树。标准发布脚本会额外调用 `scripts/Publish-ScreenRecordingModule.ps1`，保留可单独下载的 `screen-recording-addon-win-x64.zip`，然后将其 `Modules` 内容复制到两种完整包中。这只是发布阶段的预安装；运行时仍通过稳定契约加载可替换、可删除的录屏模块。
+录屏仍不进入宿主的编译依赖树。标准发布脚本会额外调用 `scripts/Publish-ScreenRecordingModule.ps1`，保留可单独下载的 `screen-recording-addon-win-x64.zip`，然后将其 `Modules` 内容复制到三种完整包中。这只是发布阶段的预安装；运行时仍通过稳定契约加载可替换、可删除的录屏模块。
 
 ## 模块生命周期
 

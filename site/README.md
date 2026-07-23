@@ -4,6 +4,8 @@
 `XDIOEZ/CutCut` 的最新 GitHub Release，并自动寻找文件名以
 `complete-lightweight-win-x64.zip` 结尾的轻量完整包，以及以
 `complete-portable-win-x64.zip` 结尾、内置 .NET 8 运行库的重量完整包。
+第三个下载入口识别 `complete-full-win-x64.zip`：它同样自带运行库，并预装
+长截图、本地 OCR、PP-OCR Tiny、PP-OCR Small、二维码扫描和录屏全部插件。
 
 `modules.html` 是独立模块分页，会自动识别：
 

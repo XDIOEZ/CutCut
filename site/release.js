@@ -3,6 +3,7 @@ const releasesUrl = `https://github.com/${repository}/releases`;
 const latestReleaseApi = `https://api.github.com/repos/${repository}/releases/latest`;
 const lightweightAssetPattern = /complete-lightweight-win-x64\.zip$/i;
 const portableAssetPattern = /complete-portable-win-x64\.zip$/i;
+const fullAssetPattern = /complete-full-win-x64\.zip$/i;
 
 const versionElement = document.querySelector("#release-version");
 const sizeElement = document.querySelector("#release-size");
@@ -12,6 +13,9 @@ const downloadLabel = document.querySelector("#download-label");
 const portableDownloadButton = document.querySelector("#portable-download-button");
 const portableDownloadLabel = document.querySelector("#portable-download-label");
 const portableDownloadSize = document.querySelector("#portable-download-size");
+const fullDownloadButton = document.querySelector("#full-download-button");
+const fullDownloadLabel = document.querySelector("#full-download-label");
+const fullDownloadSize = document.querySelector("#full-download-size");
 
 function formatBytes(bytes, fallback = "< 5 MiB") {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -44,6 +48,10 @@ function showFallback(message) {
   portableDownloadButton.removeAttribute("download");
   portableDownloadLabel.textContent = "重量版";
   portableDownloadSize.textContent = "80+ MiB";
+  fullDownloadButton.href = releasesUrl;
+  fullDownloadButton.removeAttribute("download");
+  fullDownloadLabel.textContent = "完全版";
+  fullDownloadSize.textContent = "110+ MiB";
   statusElement.textContent = message;
   statusElement.dataset.state = "fallback";
 }
@@ -62,8 +70,9 @@ async function loadLatestRelease() {
     const lightweightAsset = release.assets?.find(({ name }) =>
       lightweightAssetPattern.test(name));
     const portableAsset = release.assets?.find(({ name }) => portableAssetPattern.test(name));
+    const fullAsset = release.assets?.find(({ name }) => fullAssetPattern.test(name));
 
-    if (!lightweightAsset && !portableAsset) {
+    if (!lightweightAsset && !portableAsset && !fullAsset) {
       showFallback("最新版尚未附带可下载文件，可前往 Releases 查看详情。");
       return;
     }
@@ -94,13 +103,30 @@ async function loadLatestRelease() {
       portableDownloadSize.textContent = "查看 Releases";
     }
 
-    const availableEditions = [lightweightAsset && "轻量版", portableAsset && "重量版"]
+    if (fullAsset) {
+      fullDownloadButton.href = fullAsset.browser_download_url;
+      fullDownloadButton.setAttribute("download", "");
+      fullDownloadLabel.textContent = "完全版";
+      fullDownloadSize.textContent = formatBytes(fullAsset.size, "110+ MiB");
+    } else {
+      fullDownloadButton.href = releasesUrl;
+      fullDownloadButton.removeAttribute("download");
+      fullDownloadLabel.textContent = "完全版未附带";
+      fullDownloadSize.textContent = "查看 Releases";
+    }
+
+    const availableEditions = [
+      lightweightAsset && "轻量版",
+      portableAsset && "重量版",
+      fullAsset && "完全版",
+    ]
       .filter(Boolean)
-      .join("与");
+      .join("、");
     statusElement.textContent = publishedDate
       ? `${publishedDate} 发布 · ${availableEditions}由 GitHub Releases 提供下载`
       : `${availableEditions}由 GitHub Releases 提供下载`;
-    statusElement.dataset.state = lightweightAsset || portableAsset ? "ready" : "fallback";
+    statusElement.dataset.state =
+      lightweightAsset || portableAsset || fullAsset ? "ready" : "fallback";
   } catch {
     showFallback("暂时无法读取版本信息，可前往 GitHub Releases 下载。");
   }

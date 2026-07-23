@@ -6,10 +6,18 @@ param(
     [switch]$SkipPaddleOcrTinyAddon,
     [switch]$SkipPaddleOcrSmallAddon,
     [switch]$SkipQrCodeAddon,
-    [switch]$SkipScreenRecordingAddon
+    [switch]$SkipScreenRecordingAddon,
+    [switch]$SkipFullPackage
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $SkipFullPackage -and (
+        $SkipPaddleOcrTinyAddon -or
+        $SkipPaddleOcrSmallAddon -or
+        $SkipScreenRecordingAddon)) {
+    throw "The full package requires PP-OCR Tiny, PP-OCR Small, and screen recording. Use -SkipFullPackage when skipping any of those add-ons."
+}
+
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $outputRootPath = if ([System.IO.Path]::IsPathRooted($OutputRoot)) {
     [System.IO.Path]::GetFullPath($OutputRoot)
@@ -29,6 +37,22 @@ $moduleRelativePath = "Modules\LongCapture\ScreenshotTool.LongCapture.dll"
 $ocrModuleRelativePath = "Modules\Ocr\ScreenshotTool.Ocr.dll"
 $qrCodeModuleRelativePath = "Modules\QrCode\ScreenshotTool.QrCode.dll"
 $qrCodeDecoderRelativePath = "Modules\QrCode\zxing.dll"
+$paddleOcrTinyRequiredRelativePaths = @(
+    "Modules\PaddleOcrTiny\ScreenshotTool.PaddleOcr.Tiny.dll",
+    "Modules\PaddleOcrTiny\ScreenshotTool.PaddleOcr.dll",
+    "Modules\PaddleOcrTiny\Models\ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx",
+    "Modules\PaddleOcrTiny\Models\PP-OCRv6_det_tiny.onnx",
+    "Modules\PaddleOcrTiny\Models\PP-OCRv6_rec_tiny.onnx",
+    "Modules\PaddleOcrTiny\Models\ppocrv6_tiny_dict.txt"
+)
+$paddleOcrSmallRequiredRelativePaths = @(
+    "Modules\PaddleOcrSmall\ScreenshotTool.PaddleOcr.Small.dll",
+    "Modules\PaddleOcrSmall\ScreenshotTool.PaddleOcr.dll",
+    "Modules\PaddleOcrSmall\Models\ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx",
+    "Modules\PaddleOcrSmall\Models\PP-OCRv6_det_small.onnx",
+    "Modules\PaddleOcrSmall\Models\PP-OCRv6_rec_small.onnx",
+    "Modules\PaddleOcrSmall\Models\ppocrv6_dict.txt"
+)
 
 function Get-FileSha256WithRetry {
     param(
@@ -164,6 +188,10 @@ if (-not $SkipScreenRecordingAddon) {
 
     $addonDirectory = Join-Path $outputRootPath "screen-recording-addon-win-x64"
     $addonModulesDirectory = Join-Path $addonDirectory "Modules"
+    $paddleOcrTinyModulesDirectory = Join-Path $outputRootPath (
+        "paddle-ocr-tiny-addon-win-x64\Modules")
+    $paddleOcrSmallModulesDirectory = Join-Path $outputRootPath (
+        "paddle-ocr-small-addon-win-x64\Modules")
     $recordingModuleRelativePath = "Modules\ScreenRecording\ScreenshotTool.ScreenRecording.dll"
     $recorderRelativePath = "Modules\ScreenRecording\Recorder\ScreenshotTool.ScreenRecording.Recorder.exe"
     $recorderLibraryRelativePath = "Modules\ScreenRecording\Recorder\ScreenRecorderLib.dll"
@@ -174,6 +202,15 @@ if (-not $SkipScreenRecordingAddon) {
     if (-not (Test-Path -LiteralPath $addonModulesDirectory -PathType Container)) {
         throw "Screen recording add-on modules were not published: $addonModulesDirectory"
     }
+    if (-not $SkipFullPackage) {
+        foreach ($requiredModulesDirectory in @(
+                $paddleOcrTinyModulesDirectory,
+                $paddleOcrSmallModulesDirectory)) {
+            if (-not (Test-Path -LiteralPath $requiredModulesDirectory -PathType Container)) {
+                throw "Full package modules were not published: $requiredModulesDirectory"
+            }
+        }
+    }
 
     function New-CompletePackage {
         param(
@@ -182,7 +219,11 @@ if (-not $SkipScreenRecordingAddon) {
             [Parameter(Mandatory = $true)]
             [string]$BaseDirectory,
             [Parameter(Mandatory = $true)]
-            [long]$MaximumBytes
+            [long]$MaximumBytes,
+            [Parameter(Mandatory = $true)]
+            [string[]]$ModuleSourceDirectories,
+            [string[]]$AdditionalRequiredRelativePaths = @(),
+            [long]$MaximumZipBytes = [long]::MaxValue
         )
 
         $packageDirectory = [System.IO.Path]::GetFullPath((Join-Path $outputRootPath $Name))
@@ -209,11 +250,28 @@ if (-not $SkipScreenRecordingAddon) {
 
         $completeModulesDirectory = Join-Path $packageDirectory "Modules"
         New-Item -ItemType Directory -Path $completeModulesDirectory -Force | Out-Null
-        foreach ($item in Get-ChildItem -LiteralPath $addonModulesDirectory -Force) {
-            Copy-Item -LiteralPath $item.FullName -Destination $completeModulesDirectory -Recurse -Force
-        }
-        foreach ($documentationFile in Get-ChildItem -LiteralPath $addonDirectory -File -Force) {
-            Copy-Item -LiteralPath $documentationFile.FullName -Destination $packageDirectory -Force
+        foreach ($moduleSourceDirectory in $ModuleSourceDirectories) {
+            if (-not (Test-Path -LiteralPath $moduleSourceDirectory -PathType Container)) {
+                throw "Complete package module source is missing: $moduleSourceDirectory"
+            }
+            foreach ($item in Get-ChildItem -LiteralPath $moduleSourceDirectory -Force) {
+                Copy-Item `
+                    -LiteralPath $item.FullName `
+                    -Destination $completeModulesDirectory `
+                    -Recurse `
+                    -Force
+            }
+
+            $sourcePackageDirectory = Split-Path -Path $moduleSourceDirectory -Parent
+            foreach ($documentationFile in Get-ChildItem `
+                    -LiteralPath $sourcePackageDirectory `
+                    -File `
+                    -Force) {
+                Copy-Item `
+                    -LiteralPath $documentationFile.FullName `
+                    -Destination $packageDirectory `
+                    -Force
+            }
         }
 
         $entryPoint = Join-Path $packageDirectory "ScreenshotTool.exe"
@@ -224,7 +282,7 @@ if (-not $SkipScreenRecordingAddon) {
         $recordingModule = Join-Path $packageDirectory $recordingModuleRelativePath
         $recorder = Join-Path $packageDirectory $recorderRelativePath
         $recorderLibrary = Join-Path $packageDirectory $recorderLibraryRelativePath
-        foreach ($requiredFile in @(
+        $requiredFiles = @(
                 $entryPoint,
                 $longCaptureModule,
                 $ocrModule,
@@ -232,7 +290,11 @@ if (-not $SkipScreenRecordingAddon) {
                 $qrCodeDecoder,
                 $recordingModule,
                 $recorder,
-                $recorderLibrary)) {
+                $recorderLibrary)
+        $requiredFiles += $AdditionalRequiredRelativePaths | ForEach-Object {
+            Join-Path $packageDirectory $_
+        }
+        foreach ($requiredFile in $requiredFiles) {
             if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
                 throw "Complete package is missing a required file: $requiredFile"
             }
@@ -248,6 +310,10 @@ if (-not $SkipScreenRecordingAddon) {
         }
 
         Compress-Archive -Path (Join-Path $packageDirectory "*") -DestinationPath $zipPath
+        $zipBytes = (Get-Item -LiteralPath $zipPath).Length
+        if ($zipBytes -gt $MaximumZipBytes) {
+            throw "Complete package archive $Name size $([math]::Round($zipBytes / 1MB, 2)) MiB exceeds $([math]::Round($MaximumZipBytes / 1MB, 2)) MiB."
+        }
 
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
@@ -264,6 +330,9 @@ if (-not $SkipScreenRecordingAddon) {
                 $recordingModuleRelativePath.Replace("\", "/"),
                 $recorderRelativePath.Replace("\", "/"),
                 $recorderLibraryRelativePath.Replace("\", "/"))
+            $requiredEntries += $AdditionalRequiredRelativePaths | ForEach-Object {
+                $_.Replace("\", "/")
+            }
             $missingEntries = @($requiredEntries | Where-Object { $_ -notin $zipEntries })
             if ($missingEntries.Count -gt 0) {
                 throw "Complete package archive is missing required entries: $($missingEntries -join ', ')"
@@ -275,6 +344,7 @@ if (-not $SkipScreenRecordingAddon) {
         [pscustomobject]@{
             Package = $Name
             SizeMiB = [math]::Round($packageBytes / 1MB, 2)
+            ZipSizeMiB = [math]::Round($zipBytes / 1MB, 2)
             FileCount = $files.Count
             Path = $packageDirectory
             ZipPath = $zipPath
@@ -289,13 +359,40 @@ if (-not $SkipScreenRecordingAddon) {
         New-CompletePackage `
             -Name "complete-lightweight-win-x64" `
             -BaseDirectory $lightOutput `
-            -MaximumBytes 5MB
+            -MaximumBytes 5MB `
+            -ModuleSourceDirectories @($addonModulesDirectory)
         New-CompletePackage `
             -Name "complete-portable-win-x64" `
             -BaseDirectory $portableOutput `
-            -MaximumBytes 90MB
+            -MaximumBytes 90MB `
+            -ModuleSourceDirectories @($addonModulesDirectory)
     )
+    if (-not $SkipFullPackage) {
+        $fullModuleSourceDirectories = @(
+            $addonModulesDirectory,
+            $paddleOcrTinyModulesDirectory,
+            $paddleOcrSmallModulesDirectory
+        )
+        $fullRequiredRelativePaths = @(
+            $paddleOcrTinyRequiredRelativePaths +
+            $paddleOcrSmallRequiredRelativePaths
+        )
+        $completeResults += New-CompletePackage `
+            -Name "complete-full-win-x64" `
+            -BaseDirectory $portableOutput `
+            -MaximumBytes 180MB `
+            -MaximumZipBytes 130MB `
+            -ModuleSourceDirectories $fullModuleSourceDirectories `
+            -AdditionalRequiredRelativePaths $fullRequiredRelativePaths
+    }
     $completeResults | Format-Table -AutoSize
+
+    $portableCompleteResult = $completeResults |
+        Where-Object { $_.Package -eq "complete-portable-win-x64" } |
+        Select-Object -First 1
+    if ($null -eq $portableCompleteResult) {
+        throw "Portable complete package result was not generated."
+    }
 
     $readyToRunName = "LightShotCN-v$releaseVersion-ready-to-run"
     $readyToRunDirectory = [System.IO.Path]::GetFullPath(
@@ -309,7 +406,7 @@ if (-not $SkipScreenRecordingAddon) {
         Remove-Item -LiteralPath $readyToRunDirectory -Recurse -Force
     }
     New-Item -ItemType Directory -Path $readyToRunDirectory -Force | Out-Null
-    foreach ($item in Get-ChildItem -LiteralPath $completeResults[1].Path -Force) {
+    foreach ($item in Get-ChildItem -LiteralPath $portableCompleteResult.Path -Force) {
         Copy-Item -LiteralPath $item.FullName -Destination $readyToRunDirectory -Recurse -Force
     }
 
@@ -337,3 +434,58 @@ if (-not $SkipScreenRecordingAddon) {
         EntryPointSha256 = Get-FileSha256WithRetry -Path $readyEntryPoint
     } | Format-Table -AutoSize
 }
+
+$releaseArchiveNames = @()
+if (-not $SkipScreenRecordingAddon) {
+    $releaseArchiveNames += @(
+        "complete-lightweight-win-x64.zip",
+        "complete-portable-win-x64.zip",
+        "screen-recording-addon-win-x64.zip"
+    )
+    if (-not $SkipFullPackage) {
+        $releaseArchiveNames += "complete-full-win-x64.zip"
+    }
+}
+if (-not $SkipLongCaptureAddon) {
+    $releaseArchiveNames += "long-capture-addon-win-x64.zip"
+}
+if (-not $SkipOcrAddon) {
+    $releaseArchiveNames += "ocr-addon-win-x64.zip"
+}
+if (-not $SkipPaddleOcrTinyAddon) {
+    $releaseArchiveNames += "paddle-ocr-tiny-addon-win-x64.zip"
+}
+if (-not $SkipPaddleOcrSmallAddon) {
+    $releaseArchiveNames += "paddle-ocr-small-addon-win-x64.zip"
+}
+if (-not $SkipQrCodeAddon) {
+    $releaseArchiveNames += "qr-code-addon-win-x64.zip"
+}
+
+if ($releaseArchiveNames.Count -eq 0) {
+    throw "No release archives were generated, so SHA256SUMS.txt cannot be created."
+}
+
+$checksumLines = foreach ($archiveName in $releaseArchiveNames | Sort-Object) {
+    $archivePath = Join-Path $outputRootPath $archiveName
+    if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+        throw "Release archive was not generated: $archivePath"
+    }
+
+    $hash = (Get-FileSha256WithRetry -Path $archivePath).ToLowerInvariant()
+    "$hash  $archiveName"
+}
+
+$checksumPath = Join-Path $outputRootPath "SHA256SUMS.txt"
+$utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllLines(
+    $checksumPath,
+    [string[]]$checksumLines,
+    $utf8WithoutBom)
+
+[pscustomobject]@{
+    Package = "SHA256SUMS"
+    FileCount = $checksumLines.Count
+    Path = $checksumPath
+    Sha256 = Get-FileSha256WithRetry -Path $checksumPath
+} | Format-Table -AutoSize
