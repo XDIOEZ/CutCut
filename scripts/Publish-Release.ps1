@@ -6,6 +6,7 @@ param(
     [switch]$SkipPaddleOcrTinyAddon,
     [switch]$SkipPaddleOcrSmallAddon,
     [switch]$SkipQrCodeAddon,
+    [switch]$SkipPinnedImageAddon,
     [switch]$SkipScreenRecordingAddon,
     [switch]$SkipFullPackage
 )
@@ -33,10 +34,12 @@ if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.Node.In
 $releaseVersion = $versionNode.Node.InnerText.Trim()
 $lightOutput = Join-Path $outputRootPath "lightweight-win-x64"
 $portableOutput = Join-Path $outputRootPath "portable-compressed-win-x64"
+$dotnetArtifactsRoot = Join-Path $outputRootPath ".dotnet-artifacts"
 $moduleRelativePath = "Modules\LongCapture\ScreenshotTool.LongCapture.dll"
 $ocrModuleRelativePath = "Modules\Ocr\ScreenshotTool.Ocr.dll"
 $qrCodeModuleRelativePath = "Modules\QrCode\ScreenshotTool.QrCode.dll"
 $qrCodeDecoderRelativePath = "Modules\QrCode\zxing.dll"
+$pinnedImageModuleRelativePath = "Modules\PinnedImage\ScreenshotTool.PinnedImage.dll"
 $paddleOcrTinyRequiredRelativePaths = @(
     "Modules\PaddleOcrTiny\ScreenshotTool.PaddleOcr.Tiny.dll",
     "Modules\PaddleOcrTiny\ScreenshotTool.PaddleOcr.dll",
@@ -73,12 +76,18 @@ function Get-FileSha256WithRetry {
     }
 }
 
-& dotnet publish $project -p:PublishProfile=LightweightWinX64 -o $lightOutput
+& dotnet publish $project `
+    -p:PublishProfile=LightweightWinX64 `
+    -o $lightOutput `
+    --artifacts-path (Join-Path $dotnetArtifactsRoot "lightweight")
 if ($LASTEXITCODE -ne 0) {
     throw "Lightweight publish failed with exit code $LASTEXITCODE."
 }
 
-& dotnet publish $project -p:PublishProfile=PortableCompressedWinX64 -o $portableOutput
+& dotnet publish $project `
+    -p:PublishProfile=PortableCompressedWinX64 `
+    -o $portableOutput `
+    --artifacts-path (Join-Path $dotnetArtifactsRoot "portable")
 if ($LASTEXITCODE -ne 0) {
     throw "Portable compressed publish failed with exit code $LASTEXITCODE."
 }
@@ -102,6 +111,7 @@ $results = foreach ($package in $packages) {
     $ocrModule = Join-Path $package.Directory $ocrModuleRelativePath
     $qrCodeModule = Join-Path $package.Directory $qrCodeModuleRelativePath
     $qrCodeDecoder = Join-Path $package.Directory $qrCodeDecoderRelativePath
+    $pinnedImageModule = Join-Path $package.Directory $pinnedImageModuleRelativePath
     if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
         throw "$($package.Name) entry point was not published: $entryPoint"
     }
@@ -116,6 +126,9 @@ $results = foreach ($package in $packages) {
     }
     if (-not (Test-Path -LiteralPath $qrCodeDecoder -PathType Leaf)) {
         throw "$($package.Name) QR code decoder was not published: $qrCodeDecoder"
+    }
+    if (-not (Test-Path -LiteralPath $pinnedImageModule -PathType Leaf)) {
+        throw "$($package.Name) pinned image module was not published: $pinnedImageModule"
     }
 
     $files = @(Get-ChildItem -LiteralPath $package.Directory -File -Recurse)
@@ -136,6 +149,7 @@ $results = foreach ($package in $packages) {
         ModuleSha256 = Get-FileSha256WithRetry -Path $module
         OcrModuleSha256 = Get-FileSha256WithRetry -Path $ocrModule
         QrCodeModuleSha256 = Get-FileSha256WithRetry -Path $qrCodeModule
+        PinnedImageModuleSha256 = Get-FileSha256WithRetry -Path $pinnedImageModule
     }
 }
 
@@ -158,7 +172,8 @@ if (-not $SkipOcrAddon) {
 if (-not $SkipPaddleOcrTinyAddon) {
     & (Join-Path $PSScriptRoot "Publish-PaddleOcrModule.ps1") `
         -OutputRoot $outputRootPath `
-        -Variant Tiny
+        -Variant Tiny `
+        -BuildArtifactsRoot (Join-Path $dotnetArtifactsRoot "paddle-ocr-tiny")
     if ($LASTEXITCODE -ne 0) {
         throw "PP-OCR Tiny add-on publish failed with exit code $LASTEXITCODE."
     }
@@ -167,7 +182,8 @@ if (-not $SkipPaddleOcrTinyAddon) {
 if (-not $SkipPaddleOcrSmallAddon) {
     & (Join-Path $PSScriptRoot "Publish-PaddleOcrModule.ps1") `
         -OutputRoot $outputRootPath `
-        -Variant Small
+        -Variant Small `
+        -BuildArtifactsRoot (Join-Path $dotnetArtifactsRoot "paddle-ocr-small")
     if ($LASTEXITCODE -ne 0) {
         throw "PP-OCR Small add-on publish failed with exit code $LASTEXITCODE."
     }
@@ -180,8 +196,17 @@ if (-not $SkipQrCodeAddon) {
     }
 }
 
+if (-not $SkipPinnedImageAddon) {
+    & (Join-Path $PSScriptRoot "Publish-PinnedImageModule.ps1") -OutputRoot $outputRootPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Pinned image add-on publish failed with exit code $LASTEXITCODE."
+    }
+}
+
 if (-not $SkipScreenRecordingAddon) {
-    & (Join-Path $PSScriptRoot "Publish-ScreenRecordingModule.ps1") -OutputRoot $outputRootPath
+    & (Join-Path $PSScriptRoot "Publish-ScreenRecordingModule.ps1") `
+        -OutputRoot $outputRootPath `
+        -BuildArtifactsRoot (Join-Path $dotnetArtifactsRoot "screen-recording")
     if ($LASTEXITCODE -ne 0) {
         throw "Screen recording add-on publish failed with exit code $LASTEXITCODE."
     }
@@ -279,6 +304,7 @@ if (-not $SkipScreenRecordingAddon) {
         $ocrModule = Join-Path $packageDirectory $ocrModuleRelativePath
         $qrCodeModule = Join-Path $packageDirectory $qrCodeModuleRelativePath
         $qrCodeDecoder = Join-Path $packageDirectory $qrCodeDecoderRelativePath
+        $pinnedImageModule = Join-Path $packageDirectory $pinnedImageModuleRelativePath
         $recordingModule = Join-Path $packageDirectory $recordingModuleRelativePath
         $recorder = Join-Path $packageDirectory $recorderRelativePath
         $recorderLibrary = Join-Path $packageDirectory $recorderLibraryRelativePath
@@ -288,6 +314,7 @@ if (-not $SkipScreenRecordingAddon) {
                 $ocrModule,
                 $qrCodeModule,
                 $qrCodeDecoder,
+                $pinnedImageModule,
                 $recordingModule,
                 $recorder,
                 $recorderLibrary)
@@ -327,6 +354,7 @@ if (-not $SkipScreenRecordingAddon) {
                 $ocrModuleRelativePath.Replace("\", "/"),
                 $qrCodeModuleRelativePath.Replace("\", "/"),
                 $qrCodeDecoderRelativePath.Replace("\", "/"),
+                $pinnedImageModuleRelativePath.Replace("\", "/"),
                 $recordingModuleRelativePath.Replace("\", "/"),
                 $recorderRelativePath.Replace("\", "/"),
                 $recorderLibraryRelativePath.Replace("\", "/"))
@@ -352,6 +380,7 @@ if (-not $SkipScreenRecordingAddon) {
             RecordingModuleSha256 = Get-FileSha256WithRetry -Path $recordingModule
             OcrModuleSha256 = Get-FileSha256WithRetry -Path $ocrModule
             QrCodeModuleSha256 = Get-FileSha256WithRetry -Path $qrCodeModule
+            PinnedImageModuleSha256 = Get-FileSha256WithRetry -Path $pinnedImageModule
         }
     }
 
@@ -422,12 +451,14 @@ if (-not $SkipScreenRecordingAddon) {
     $readyOcrModule = Join-Path $readyToRunDirectory $ocrModuleRelativePath
     $readyQrCodeModule = Join-Path $readyToRunDirectory $qrCodeModuleRelativePath
     $readyQrCodeDecoder = Join-Path $readyToRunDirectory $qrCodeDecoderRelativePath
+    $readyPinnedImageModule = Join-Path $readyToRunDirectory $pinnedImageModuleRelativePath
     foreach ($requiredFile in @(
             $readyEntryPoint,
             $readyRecordingModule,
             $readyOcrModule,
             $readyQrCodeModule,
-            $readyQrCodeDecoder)) {
+            $readyQrCodeDecoder,
+            $readyPinnedImageModule)) {
         if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
             throw "Ready-to-run package is missing a required file: $requiredFile"
         }
@@ -470,6 +501,9 @@ if (-not $SkipPaddleOcrSmallAddon) {
 }
 if (-not $SkipQrCodeAddon) {
     $releaseArchiveNames += "qr-code-addon-win-x64.zip"
+}
+if (-not $SkipPinnedImageAddon) {
+    $releaseArchiveNames += "pinned-image-addon-win-x64.zip"
 }
 
 if ($releaseArchiveNames.Count -eq 0) {

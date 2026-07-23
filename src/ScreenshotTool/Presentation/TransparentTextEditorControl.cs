@@ -321,9 +321,10 @@ internal sealed class TransparentTextEditorControl : Control
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left && IsAltPressed() && IsMoveBorder(e.Location))
+        if (TextEditorInteraction.ShouldBeginMove(e.Button, IsAltPressed()))
         {
             Focus();
+            _isSelectingText = false;
             _isMoving = true;
             _movePointerOrigin = Cursor.Position;
             _moveBoundsOrigin = Bounds;
@@ -370,7 +371,7 @@ internal sealed class TransparentTextEditorControl : Control
             return;
         }
 
-        Cursor = IsAltPressed() && IsMoveBorder(e.Location) ? Cursors.SizeAll : Cursors.IBeam;
+        Cursor = IsAltPressed() ? Cursors.SizeAll : Cursors.IBeam;
         base.OnMouseMove(e);
     }
 
@@ -380,7 +381,7 @@ internal sealed class TransparentTextEditorControl : Control
         {
             _isMoving = false;
             Capture = false;
-            Cursor = IsAltPressed() && IsMoveBorder(e.Location) ? Cursors.SizeAll : Cursors.IBeam;
+            Cursor = IsAltPressed() ? Cursors.SizeAll : Cursors.IBeam;
             return;
         }
 
@@ -732,11 +733,6 @@ internal sealed class TransparentTextEditorControl : Control
             _movementBounds);
     }
 
-    private bool IsMoveBorder(Point point) => TextEditorInteraction.IsMoveBorder(
-        ClientSize,
-        point,
-        Math.Max(5, DeviceDpi * 5 / 96));
-
     private static bool IsAltPressed() => (ModifierKeys & Keys.Alt) == Keys.Alt;
 
     private static bool IsAltKey(Keys keyCode) => keyCode is Keys.Menu or Keys.LMenu or Keys.RMenu;
@@ -744,7 +740,7 @@ internal sealed class TransparentTextEditorControl : Control
     private void UpdatePointerCursor(bool altPressed)
     {
         var pointer = PointToClient(Cursor.Position);
-        Cursor = altPressed && ClientRectangle.Contains(pointer) && IsMoveBorder(pointer)
+        Cursor = altPressed && ClientRectangle.Contains(pointer)
             ? Cursors.SizeAll
             : Cursors.IBeam;
     }

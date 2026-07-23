@@ -4,7 +4,13 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateSet("Tiny", "Small")]
-    [string]$Variant
+    [string]$Variant,
+
+    [string]$ModelCacheDirectory,
+
+    [string]$BuildArtifactsRoot,
+
+    [switch]$SkipArchive
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,13 +49,29 @@ foreach ($directory in @($packageDirectory, $buildDirectory)) {
 
 $moduleProject = Join-Path $repoRoot (
     "src\ScreenshotTool.PaddleOcr.$Variant\ScreenshotTool.PaddleOcr.$Variant.csproj")
-& dotnet publish $moduleProject `
-    -c Release `
-    -r win-x64 `
-    --self-contained false `
-    -p:DebugSymbols=false `
-    -p:DebugType=None `
-    -o $buildDirectory
+$publishArguments = @(
+    "publish",
+    $moduleProject,
+    "-c",
+    "Release",
+    "-r",
+    "win-x64",
+    "--self-contained",
+    "false",
+    "-p:DebugSymbols=false",
+    "-p:DebugType=None",
+    "-o",
+    $buildDirectory
+)
+if (-not [string]::IsNullOrWhiteSpace($BuildArtifactsRoot)) {
+    $buildArtifactsPath = if ([System.IO.Path]::IsPathRooted($BuildArtifactsRoot)) {
+        [System.IO.Path]::GetFullPath($BuildArtifactsRoot)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $repoRoot $BuildArtifactsRoot))
+    }
+    $publishArguments += @("--artifacts-path", $buildArtifactsPath)
+}
+& dotnet @publishArguments
 if ($LASTEXITCODE -ne 0) {
     throw "PP-OCR $Variant module publish failed with exit code $LASTEXITCODE."
 }
@@ -69,11 +91,31 @@ foreach ($file in $buildFiles) {
     Copy-Item -LiteralPath $file.FullName -Destination $moduleDirectory
 }
 
+$modelSourceDirectory = $modelDirectory
+if (-not [string]::IsNullOrWhiteSpace($ModelCacheDirectory)) {
+    $modelSourceDirectory = if ([System.IO.Path]::IsPathRooted($ModelCacheDirectory)) {
+        [System.IO.Path]::GetFullPath($ModelCacheDirectory)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $repoRoot $ModelCacheDirectory))
+    }
+}
+
 & (Join-Path $PSScriptRoot "Get-PaddleOcrModels.ps1") `
     -Variant $Variant `
-    -Destination $modelDirectory
+    -Destination $modelSourceDirectory
 if ($LASTEXITCODE -ne 0) {
     throw "PP-OCR $Variant model download failed with exit code $LASTEXITCODE."
+}
+
+if (-not [string]::Equals(
+        $modelSourceDirectory,
+        $modelDirectory,
+        [System.StringComparison]::OrdinalIgnoreCase)) {
+    New-Item -ItemType Directory -Path $modelDirectory -Force | Out-Null
+    Copy-Item -Path (Join-Path $modelSourceDirectory "*") `
+        -Destination $modelDirectory `
+        -Recurse `
+        -Force
 }
 
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs\paddle-ocr-addon.md") `
@@ -95,11 +137,14 @@ foreach ($requiredPath in @(
     }
 }
 
-$zipPath = "$packageDirectory.zip"
-if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force
+$zipPath = $null
+if (-not $SkipArchive) {
+    $zipPath = "$packageDirectory.zip"
+    if (Test-Path -LiteralPath $zipPath) {
+        Remove-Item -LiteralPath $zipPath -Force
+    }
+    Compress-Archive -Path (Join-Path $packageDirectory "*") -DestinationPath $zipPath
 }
-Compress-Archive -Path (Join-Path $packageDirectory "*") -DestinationPath $zipPath
 
 $files = @(Get-ChildItem -LiteralPath $packageDirectory -File -Recurse)
 $packageBytes = ($files | Measure-Object -Property Length -Sum).Sum

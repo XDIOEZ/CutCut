@@ -16,6 +16,7 @@ using ScreenshotTool.PaddleOcr;
 using ScreenshotTool.PaddleOcr.Small;
 using ScreenshotTool.PaddleOcr.Tiny;
 using ScreenshotTool.QrCode;
+using ScreenshotTool.PinnedImage;
 using ZXing;
 using System.IO.Compression;
 using System.Net;
@@ -519,6 +520,87 @@ finally
     Directory.Delete(outsideScreenshotTestRoot, recursive: true);
 }
 
+var galleryOldestTime = new DateTime(2026, 7, 21, 9, 0, 0, DateTimeKind.Utc);
+var galleryMiddleTime = galleryOldestTime.AddDays(1);
+var galleryNewestTime = galleryOldestTime.AddDays(2);
+ScreenshotGalleryEntry[] galleryEntries =
+[
+    new(
+        @"C:\Screenshots\alpha-old.png",
+        "alpha-old.png",
+        galleryOldestTime.ToLocalTime(),
+        galleryOldestTime,
+        1_024),
+    new(
+        @"C:\Screenshots\Bravo.png",
+        "Bravo.png",
+        galleryNewestTime.ToLocalTime(),
+        galleryNewestTime,
+        2_048),
+    new(
+        @"C:\Screenshots\alpha-new.png",
+        "alpha-new.png",
+        galleryMiddleTime.ToLocalTime(),
+        galleryMiddleTime,
+        3_072)
+];
+var galleryNewestFirst = ScreenshotGalleryQuery.Apply(
+    galleryEntries,
+    searchText: null,
+    ScreenshotGallerySortMode.SavedTimeDescending,
+    maximumCount: 60);
+AssertEqual(
+    "Bravo.png,alpha-new.png,alpha-old.png",
+    string.Join(',', galleryNewestFirst.Entries.Select(entry => entry.Name)),
+    "查看截图默认按保存时间从新到旧排序");
+AssertEqual(
+    "alpha-old.png,alpha-new.png,Bravo.png",
+    string.Join(
+        ',',
+        ScreenshotGalleryQuery.Apply(
+                galleryEntries,
+                searchText: string.Empty,
+                ScreenshotGallerySortMode.SavedTimeAscending,
+                maximumCount: 60)
+            .Entries
+            .Select(entry => entry.Name)),
+    "查看截图支持按保存时间从旧到新排序");
+AssertEqual(
+    "alpha-new.png,alpha-old.png,Bravo.png",
+    string.Join(
+        ',',
+        ScreenshotGalleryQuery.Apply(
+                galleryEntries,
+                searchText: string.Empty,
+                ScreenshotGallerySortMode.NameAscending,
+                maximumCount: 60)
+            .Entries
+            .Select(entry => entry.Name)),
+    "查看截图支持按名称正序排序");
+AssertEqual(
+    "Bravo.png,alpha-old.png,alpha-new.png",
+    string.Join(
+        ',',
+        ScreenshotGalleryQuery.Apply(
+                galleryEntries,
+                searchText: string.Empty,
+                ScreenshotGallerySortMode.NameDescending,
+                maximumCount: 60)
+            .Entries
+            .Select(entry => entry.Name)),
+    "查看截图支持按名称倒序排序");
+var gallerySearchResult = ScreenshotGalleryQuery.Apply(
+    galleryEntries,
+    searchText: " ALPHA ",
+    ScreenshotGallerySortMode.SavedTimeDescending,
+    maximumCount: 1);
+AssertEqual(2, gallerySearchResult.MatchCount, "查看截图按文件名忽略大小写并去除首尾空格搜索");
+AssertEqual(1, gallerySearchResult.Entries.Count, "查看截图搜索结果仍遵守最大缩略图数量");
+AssertEqual(
+    "alpha-new.png",
+    gallerySearchResult.Entries[0].Name,
+    "查看截图先筛选再应用当前排序");
+
 var wideEditSelection = CaptureOverlayForm.CalculateInitialEditSelection(
     new Rectangle(0, 0, 1000, 700),
     new Size(1600, 900));
@@ -875,9 +957,15 @@ using (var explicitLineBreakGraphics = Graphics.FromImage(explicitLineBreakSourc
         "Ctrl+回车产生的显式换行仍会渲染第二行");
 }
 
-AssertTrue(TextEditorInteraction.IsMoveBorder(new Size(180, 80), new Point(2, 40), 5), "文字编辑框左边界进入移动区域");
-AssertTrue(TextEditorInteraction.IsMoveBorder(new Size(180, 80), new Point(90, 77), 5), "文字编辑框下边界进入移动区域");
-AssertTrue(!TextEditorInteraction.IsMoveBorder(new Size(180, 80), new Point(90, 40), 5), "文字编辑框正文区域保持输入操作");
+AssertTrue(
+    TextEditorInteraction.ShouldBeginMove(MouseButtons.Left, altPressed: true),
+    "文字输入模式下按住 Alt 可从输入框任意位置开始拖动");
+AssertTrue(
+    !TextEditorInteraction.ShouldBeginMove(MouseButtons.Left, altPressed: false),
+    "未按 Alt 时左键仍用于文字光标与选区操作");
+AssertTrue(
+    !TextEditorInteraction.ShouldBeginMove(MouseButtons.Right, altPressed: true),
+    "Alt 拖动只响应左键，不影响文字右键菜单");
 AssertEqual(
     new Rectangle(220, 140, 140, 80),
     TextEditorInteraction.Move(
@@ -1296,7 +1384,74 @@ AssertEqual(new Rectangle(100, 100, 40, 20), StickerLayout.CreateInitialBounds(n
 AssertEqual(new Rectangle(400, 350, 100, 50), StickerLayout.Move(new Rectangle(200, 200, 100, 50), new Point(500, 500), selection), "贴纸移动限制在选区内");
 AssertEqual(StickerHitTarget.TopLeft, StickerLayout.HitTest(largeSticker, largeSticker.Location, 10), "贴纸左上缩放手柄命中");
 var eightHandles = StickerLayout.GetHandles(new Rectangle(200, 200, 100, 80), 10);
-AssertEqual(8, eightHandles.Count, "编辑元素显示四角和四边中点共八个缩放手柄");
+AssertEqual(8, eightHandles.Count, "通用编辑元素显示四角和四边中点共八个缩放手柄");
+using (var arrowHandleEditor = new CaptureAnnotationEditor())
+using (var arrowHandlePreview = CreateSolidBitmap(new Size(220, 160), Color.Black))
+using (var arrowHandleGraphics = Graphics.FromImage(arrowHandlePreview))
+{
+    var arrow = arrowHandleEditor.AddAndSelect(new ArrowAnnotation(
+        new Point(40, 120),
+        new Point(180, 30),
+        Color.Red,
+        4F));
+    var arrowHandles = AnnotationHandleLayout.GetHandles(arrow, 10);
+    AssertEqual(2, arrowHandles.Count, "箭头只显示箭尾和箭头两个端点手柄");
+    AssertEqual(StickerHitTarget.BottomLeft, arrowHandles[0].Target, "箭尾手柄映射到起点边角");
+    AssertEqual(StickerHitTarget.TopRight, arrowHandles[1].Target, "箭头手柄映射到终点边角");
+    AssertTrue(arrowHandles[0].Bounds.Contains(arrow.Start), "箭尾手柄以箭头起点为中心");
+    AssertTrue(arrowHandles[1].Bounds.Contains(arrow.End), "箭头手柄以箭头终点为中心");
+    AssertEqual(
+        StickerHitTarget.BottomLeft,
+        AnnotationHandleLayout.HitTest(arrow, arrow.Start, 10, 6),
+        "箭尾端点手柄可命中");
+    AssertEqual(
+        StickerHitTarget.TopRight,
+        AnnotationHandleLayout.HitTest(arrow, arrow.End, 10, 6),
+        "箭头端点手柄可命中");
+    AssertEqual(
+        StickerHitTarget.Move,
+        AnnotationHandleLayout.HitTest(arrow, new Point(110, 30), 10, 6),
+        "箭头边框中点不再保留隐藏的缩放手柄");
+    AssertEqual(
+        StickerHitTarget.Move,
+        AnnotationHandleLayout.HitTest(arrow, new Point(40, 30), 10, 6),
+        "箭头非端点边角不再保留隐藏的缩放手柄");
+
+    arrowHandleEditor.DrawSelection(arrowHandleGraphics, 10);
+    AssertEqual(Color.White.ToArgb(), arrowHandlePreview.GetPixel(40, 120).ToArgb(), "箭尾端点手柄实际绘制");
+    AssertEqual(Color.White.ToArgb(), arrowHandlePreview.GetPixel(180, 30).ToArgb(), "箭头端点手柄实际绘制");
+    AssertEqual(Color.Black.ToArgb(), arrowHandlePreview.GetPixel(110, 27).ToArgb(), "箭头顶部中间手柄已隐藏");
+    AssertEqual(Color.Black.ToArgb(), arrowHandlePreview.GetPixel(40, 27).ToArgb(), "箭头非端点边角手柄已隐藏");
+
+    var resizedBounds = AnnotationResizeLayout.Resize(
+        arrow.Bounds,
+        arrowHandles[0].Target,
+        new Point(20, 141),
+        new Rectangle(0, 0, 220, 160));
+    arrow.SetBounds(resizedBounds);
+    AssertEqual(new Point(20, 140), arrow.Start, "拖动箭尾手柄只更新箭头起点");
+    AssertEqual(new Point(180, 30), arrow.End, "拖动箭尾手柄保持箭头终点不变");
+
+    using var horizontalArrow = new ArrowAnnotation(
+        new Point(30, 60),
+        new Point(170, 60),
+        Color.Red,
+        4F);
+    var horizontalHandles = AnnotationHandleLayout.GetHandles(horizontalArrow, 10);
+    AssertEqual(2, horizontalHandles.Count, "水平箭头同样只保留两个端点手柄");
+    AssertTrue(horizontalHandles[0].Bounds.Contains(horizontalArrow.Start), "水平箭尾手柄位于起点");
+    AssertTrue(horizontalHandles[1].Bounds.Contains(horizontalArrow.End), "水平箭头手柄位于终点");
+
+    using var verticalArrow = new ArrowAnnotation(
+        new Point(80, 140),
+        new Point(80, 20),
+        Color.Red,
+        4F);
+    var verticalHandles = AnnotationHandleLayout.GetHandles(verticalArrow, 10);
+    AssertEqual(2, verticalHandles.Count, "垂直箭头同样只保留两个端点手柄");
+    AssertTrue(verticalHandles[0].Bounds.Contains(verticalArrow.Start), "垂直箭尾手柄位于起点");
+    AssertTrue(verticalHandles[1].Bounds.Contains(verticalArrow.End), "垂直箭头手柄位于终点");
+}
 AssertEqual(
     StickerHitTarget.Top,
     StickerLayout.HitTest(new Rectangle(200, 200, 100, 80), new Point(250, 200), 10),
@@ -1899,7 +2054,7 @@ using (var drawingMoveDocument = new AnnotationDocument())
     AssertTrue(ReferenceEquals(freehand, drawingMoveDocument.FindTopMovableAt(new Point(320, 260), 6)), "画笔线条可在不移动时正常选中");
     foreach (var annotation in new MovableAnnotation[] { rectangle, ellipse, arrow, freehand })
     {
-        AssertTrue(annotation.SupportsResize, $"{annotation.GetType().Name} 显示四角缩放手柄");
+        AssertTrue(annotation.SupportsResize, $"{annotation.GetType().Name} 支持缩放手柄");
         AssertTrue(!annotation.PreserveAspectRatioWhenResizing, $"{annotation.GetType().Name} 可独立调整宽度和高度");
         AssertTrue(!annotation.CanMove(altPressed: false), $"{annotation.GetType().Name} 拒绝只用鼠标左键移动");
         AssertTrue(annotation.CanMove(altPressed: true), $"{annotation.GetType().Name} 支持 Alt 加鼠标左键移动");
@@ -2696,6 +2851,147 @@ using (var transparentTextDocument = new AnnotationDocument())
     AssertTrue(ContainsPixelDifferentFrom(source, new Rectangle(10, 10, 70, 35), Color.CornflowerBlue), "最终导出包含文字笔画");
 }
 
+AssertEqual(
+    PinnedImageResizeEdges.Left | PinnedImageResizeEdges.Top,
+    PinnedImageWindowLayout.HitTestEdges(new Size(400, 200), new Point(2, 3), 6),
+    "贴图悬浮窗左上角同时命中两条缩放边");
+AssertEqual(
+    PinnedImageResizeEdges.Right,
+    PinnedImageWindowLayout.HitTestEdges(new Size(400, 200), new Point(398, 100), 6),
+    "贴图悬浮窗右边缘显示横向缩放手势");
+AssertEqual(
+    PinnedImageResizeEdges.None,
+    PinnedImageWindowLayout.HitTestEdges(new Size(400, 200), new Point(200, 100), 6),
+    "贴图悬浮窗内部用于整体移动");
+AssertTrue(
+    ReferenceEquals(
+        Cursors.SizeNWSE,
+        PinnedImageWindowLayout.GetCursor(
+            PinnedImageResizeEdges.Left | PinnedImageResizeEdges.Top)),
+    "贴图悬浮窗角落使用双向斜箭头");
+AssertEqual(
+    new Rectangle(80, 105, 300, 150),
+    PinnedImageWindowLayout.Resize(
+        new Rectangle(80, 80, 400, 200),
+        PinnedImageResizeEdges.Right,
+        new Point(-100, 0),
+        preserveAspectRatio: true),
+    "贴图悬浮窗默认沿单边等比缩小并保持中心");
+AssertEqual(
+    new Rectangle(80, 80, 300, 200),
+    PinnedImageWindowLayout.Resize(
+        new Rectangle(80, 80, 400, 200),
+        PinnedImageResizeEdges.Right,
+        new Point(-100, 0),
+        preserveAspectRatio: false),
+    "按住 Shift 缩放贴图时允许不保持原比例");
+AssertEqual(
+    new Rectangle(130, 105, 300, 150),
+    PinnedImageWindowLayout.Resize(
+        new Rectangle(30, 80, 400, 200),
+        PinnedImageResizeEdges.Left,
+        new Point(100, 0),
+        preserveAspectRatio: true),
+    "从贴图左边缘等比缩小时固定右侧并保持垂直中心");
+AssertEqual(
+    new Rectangle(145, 105, 300, 150),
+    PinnedImageWindowLayout.Resize(
+        new Rectangle(45, 55, 400, 200),
+        PinnedImageResizeEdges.Left | PinnedImageResizeEdges.Top,
+        new Point(100, 50),
+        preserveAspectRatio: true),
+    "从贴图角落等比缩放时固定相对角");
+AssertEqual(
+    new Rectangle(120, 95, 400, 200),
+    PinnedImageWindowLayout.Move(
+        new Rectangle(80, 80, 400, 200),
+        new Point(40, 15)),
+    "拖动贴图内部移动整个悬浮窗");
+AssertEqual(
+    new Rectangle(600, 300, 400, 200),
+    PinnedImageWindowLayout.CreateInitialBounds(
+        new Size(800, 400),
+        new Rectangle(900, 500, 400, 200),
+        new Rectangle(0, 0, 1000, 500)),
+    "贴图初始位置按工作区缩放并限制在屏幕内");
+
+var pinnedImageHost = new TestModuleImageHost();
+using (var pinnedImageForm = new PinnedImageForm(
+           new Bitmap(120, 80),
+           new Rectangle(100, 100, 120, 80),
+           pinnedImageHost))
+{
+    AssertTrue(pinnedImageForm.TopMost, "贴图悬浮窗保持置顶");
+    AssertEqual(FormBorderStyle.None, pinnedImageForm.FormBorderStyle, "贴图悬浮窗不显示系统边框");
+    AssertTrue(!pinnedImageForm.ShowInTaskbar, "贴图悬浮窗不占用任务栏");
+    AssertEqual(
+        "删除,复制,保存,编辑",
+        string.Join(',', pinnedImageForm.ContextMenuStrip!.Items.Cast<ToolStripItem>().Select(item => item.Text)),
+        "贴图右键菜单提供删除、复制、保存和编辑");
+    pinnedImageForm.ContextMenuStrip.Items["CopyPinnedImageMenuItem"]!.PerformClick();
+    pinnedImageForm.ContextMenuStrip.Items["SavePinnedImageMenuItem"]!.PerformClick();
+    AssertEqual(1, pinnedImageHost.CopyCount, "贴图右键复制调用宿主剪贴板能力");
+    AssertEqual(1, pinnedImageHost.SaveCount, "贴图右键保存调用宿主保存能力");
+}
+using (var editPinnedImageForm = new PinnedImageForm(
+           new Bitmap(120, 80),
+           new Rectangle(100, 100, 120, 80),
+           pinnedImageHost))
+{
+    editPinnedImageForm.ContextMenuStrip!.Items["EditPinnedImageMenuItem"]!.PerformClick();
+    AssertEqual(1, pinnedImageHost.EditCount, "贴图右键编辑回到宿主截图编辑窗口");
+}
+
+var pinnedImageWindowFactory = new TestPinnedImageWindowFactory();
+using (var pinnedImageModule = new PinnedImageModule(pinnedImageWindowFactory))
+{
+    AssertEqual("screenshot-tool.pinned-image", pinnedImageModule.Id, "贴图模块 ID 保持稳定");
+    AssertEqual(new Version(1, 0, 0), pinnedImageModule.Version, "贴图模块初始版本");
+    pinnedImageModule.Initialize(
+        new TestModuleContext(
+            new Version(1, 11, 0),
+            imageHost: pinnedImageHost));
+    var pinnedImageFeatures = pinnedImageModule.CreateCaptureFeatures().ToArray();
+    AssertEqual(1, pinnedImageFeatures.Length, "贴图模块为每次截图创建功能实例");
+    using var pinnedImageFeature = pinnedImageFeatures[0];
+    AssertTrue(
+        pinnedImageFeature is ICaptureToolbarCommandProvider,
+        "贴图模块提供截图工具栏入口");
+    var pinnedImageCommand =
+        ((ICaptureToolbarCommandProvider)pinnedImageFeature).GetToolbarCommands().Single();
+    AssertEqual("贴图", pinnedImageCommand.Text, "贴图模块工具栏按钮文字");
+    var pinnedImageCaptureHost = new TestPinnedImageCaptureHost();
+    pinnedImageFeature.Attach(pinnedImageCaptureHost);
+    ((ICaptureToolbarCommandProvider)pinnedImageFeature)
+        .ExecuteToolbarCommandAsync(pinnedImageCommand.Id, CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual(1, pinnedImageCaptureHost.RenderCount, "贴图使用包含全部批注元素的最终选区位图");
+    AssertEqual(1, pinnedImageCaptureHost.CompleteCount, "创建贴图后关闭原截图编辑会话");
+    AssertEqual(1, pinnedImageWindowFactory.Windows.Count, "创建一个贴图悬浮窗");
+    AssertEqual(1, pinnedImageModule.WindowCount, "模块跟踪活动贴图悬浮窗");
+    AssertEqual(
+        pinnedImageCaptureHost.SelectionScreenBounds,
+        pinnedImageWindowFactory.Windows[0].SuggestedBounds,
+        "贴图悬浮窗从原选区屏幕位置出现");
+    AssertEqual(
+        Color.Magenta.ToArgb(),
+        pinnedImageWindowFactory.Windows[0].Image.GetPixel(5, 5).ToArgb(),
+        "贴图窗口接收最终渲染位图而不是未编辑桌面像素");
+    pinnedImageWindowFactory.Windows[0].Close();
+    AssertEqual(0, pinnedImageModule.WindowCount, "用户关闭贴图后模块立即释放活动窗口记录");
+
+    ((ICaptureToolbarCommandProvider)pinnedImageFeature)
+        .ExecuteToolbarCommandAsync(pinnedImageCommand.Id, CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    var remainingPinnedImageWindow = pinnedImageWindowFactory.Windows[1];
+    pinnedImageModule.Dispose();
+    AssertTrue(
+        remainingPinnedImageWindow.CloseCount == 1 && remainingPinnedImageWindow.IsDisposed,
+        "禁用或卸载贴图模块时关闭并释放所有悬浮窗");
+}
+
 using (var ocrModule = new OcrModule())
 {
     AssertEqual(new Version(1, 11, 0), OcrModule.MinimumHostVersion, "OCR 模块最低主程序版本");
@@ -3063,6 +3359,54 @@ finally
     if (Directory.Exists(qrCodeModuleTestDirectory))
     {
         Directory.Delete(qrCodeModuleTestDirectory, recursive: true);
+    }
+}
+
+var pinnedImageModuleTestDirectory = Path.Combine(
+    Path.GetTempPath(),
+    "ScreenshotTool.PinnedImageModuleTests",
+    Guid.NewGuid().ToString("N"));
+try
+{
+    var pinnedImageModulePackageDirectory = Path.Combine(
+        pinnedImageModuleTestDirectory,
+        "PinnedImage");
+    Directory.CreateDirectory(pinnedImageModulePackageDirectory);
+    File.Copy(
+        typeof(PinnedImageModule).Assembly.Location,
+        Path.Combine(
+            pinnedImageModulePackageDirectory,
+            "ScreenshotTool.PinnedImage.dll"));
+    using var pinnedImageModuleHost = new ModuleHost(
+        pinnedImageModuleTestDirectory,
+        new TestModuleImageHost());
+    var loadedPinnedImageModules = pinnedImageModuleHost.Refresh();
+    AssertEqual(0, loadedPinnedImageModules.Errors.Count, "贴图模块以独立单 DLL 包加载");
+    AssertEqual(1, loadedPinnedImageModules.Modules.Count, "发现并加载贴图悬浮窗模块");
+    AssertEqual(
+        "screenshot-tool.pinned-image",
+        loadedPinnedImageModules.Modules[0].Id,
+        "读取贴图模块稳定 ID");
+    var loadedPinnedImageFeatures = pinnedImageModuleHost.CreateCaptureFeatures();
+    AssertEqual(1, loadedPinnedImageFeatures.Count, "贴图模块为截图会话创建功能实例");
+    using var loadedPinnedImageFeature = loadedPinnedImageFeatures[0];
+    AssertTrue(
+        loadedPinnedImageFeature is ICaptureToolbarCommandProvider,
+        "加载后的贴图功能转发工具栏命令");
+    Directory.Delete(pinnedImageModulePackageDirectory, recursive: true);
+    var removedPinnedImageModules = pinnedImageModuleHost.Refresh();
+    AssertEqual(0, removedPinnedImageModules.Modules.Count, "删除贴图模块文件夹后立即从目录卸载");
+    AssertEqual(
+        "贴图",
+        ((ICaptureToolbarCommandProvider)loadedPinnedImageFeature)
+            .GetToolbarCommands()[0].Text,
+        "活动截图会话在贴图模块删除后保持延迟释放租约");
+}
+finally
+{
+    if (Directory.Exists(pinnedImageModuleTestDirectory))
+    {
+        Directory.Delete(pinnedImageModuleTestDirectory, recursive: true);
     }
 }
 
@@ -3615,7 +3959,7 @@ LongCapturePreparationTests.Run();
 BidirectionalLongCaptureTests.Run();
 LongCaptureWindowTests.Run();
 
-Console.WriteLine("首次与更新启动工作台、GitHub 软件更新、OCR 离线识别模块、二维码扫描模块、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、八手柄单边缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
+Console.WriteLine("首次与更新启动工作台、GitHub 软件更新、截图搜索排序、贴图悬浮窗、OCR 离线识别模块、二维码扫描模块、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、普通元素八手柄与箭头端点缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
 return;
 
 SelectionResizeEdges Hit(int x, int y) =>
@@ -3959,6 +4303,94 @@ static Bitmap RenderDocumentSelection(AnnotationDocument document, Bitmap source
     return result;
 }
 
+internal sealed class TestPinnedImageCaptureHost : ICaptureArtifactHost
+{
+    public bool HasSelection => true;
+    public Rectangle Selection => new(0, 0, 80, 50);
+    public Rectangle SelectionScreenBounds => new(240, 160, 80, 50);
+    public Point CursorClientPosition => new(40, 25);
+    public int Dpi => 96;
+    public string OutputFolder => Path.GetTempPath();
+    public int RenderCount { get; private set; }
+    public int CompleteCount { get; private set; }
+
+    public bool GetBooleanPreference(string id, bool defaultValue) => defaultValue;
+    public int GetIntegerPreference(string id, int defaultValue) => defaultValue;
+    public void InvalidateAll() { }
+    public void Invalidate(Rectangle bounds) { }
+    public void SetCursor(Cursor cursor) { }
+    public void SetMouseCapture(bool capture) { }
+    public Bitmap CopyDesktopSelection() => new(Selection.Width, Selection.Height);
+
+    public Bitmap RenderSelection()
+    {
+        RenderCount++;
+        var image = new Bitmap(Selection.Width, Selection.Height);
+        using var graphics = Graphics.FromImage(image);
+        graphics.Clear(Color.Magenta);
+        return image;
+    }
+
+    public void NotifyArtifactSaved(string path) { }
+
+    public void CompleteCaptureSession() => CompleteCount++;
+}
+
+internal sealed class TestPinnedImageWindowFactory : IPinnedImageWindowFactory
+{
+    public List<TestPinnedImageWindow> Windows { get; } = [];
+
+    public IPinnedImageWindow Create(
+        Bitmap image,
+        Rectangle suggestedBounds,
+        IModuleImageHost imageHost)
+    {
+        var window = new TestPinnedImageWindow(image, suggestedBounds);
+        Windows.Add(window);
+        return window;
+    }
+}
+
+internal sealed class TestPinnedImageWindow(
+    Bitmap image,
+    Rectangle suggestedBounds) : IPinnedImageWindow
+{
+    private bool _disposed;
+
+    public event EventHandler? WindowClosed;
+
+    public Bitmap Image { get; } = image;
+    public Rectangle SuggestedBounds { get; } = suggestedBounds;
+    public int ShowCount { get; private set; }
+    public int CloseCount { get; private set; }
+    public bool IsDisposed => _disposed;
+
+    public void Show() => ShowCount++;
+
+    public void Close()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        CloseCount++;
+        WindowClosed?.Invoke(this, EventArgs.Empty);
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        Image.Dispose();
+    }
+}
+
 internal sealed class TestCaptureFeatureHost(
     bool longCaptureSafetyChecksEnabled = false,
     bool captureSystemAudio = ScreenRecordingPreferences.DefaultCaptureSystemAudio,
@@ -4009,6 +4441,7 @@ internal sealed class TestCaptureArtifactHost : ICaptureArtifactHost
     public string OutputFolder => "C:\\截图目录";
     public bool HasSelection => true;
     public Rectangle Selection => new(0, 0, 40, 40);
+    public Rectangle SelectionScreenBounds => new(100, 120, 40, 40);
     public Point CursorClientPosition => new(20, 20);
     public int Dpi => 96;
     public bool GetBooleanPreference(string id, bool defaultValue) => defaultValue;
@@ -4018,6 +4451,11 @@ internal sealed class TestCaptureArtifactHost : ICaptureArtifactHost
     public void SetCursor(Cursor cursor) { }
     public void SetMouseCapture(bool capture) { }
     public Bitmap CopyDesktopSelection() => new(Selection.Width, Selection.Height);
+    public Bitmap RenderSelection()
+    {
+        Calls.Add("render");
+        return new Bitmap(Selection.Width, Selection.Height);
+    }
     public void NotifyArtifactSaved(string path) =>
         Calls.Add($"notify:{Path.GetFileName(path)}");
     public void CompleteCaptureSession() => Calls.Add("complete");
@@ -4025,11 +4463,31 @@ internal sealed class TestCaptureArtifactHost : ICaptureArtifactHost
 
 internal sealed class TestModuleContext(
     Version hostVersion,
-    string? moduleDirectory = null) : IModuleContext
+    string? moduleDirectory = null,
+    IModuleImageHost? imageHost = null) : IModuleContext
 {
     public string ModuleDirectory { get; } = moduleDirectory ?? AppContext.BaseDirectory;
 
     public Version HostVersion { get; } = hostVersion;
+
+    public IModuleImageHost ImageHost { get; } = imageHost ?? new TestModuleImageHost();
+}
+
+internal sealed class TestModuleImageHost : IModuleImageHost
+{
+    public int CopyCount { get; private set; }
+    public int SaveCount { get; private set; }
+    public int EditCount { get; private set; }
+
+    public void CopyImage(Bitmap image) => CopyCount++;
+
+    public string SaveImage(Bitmap image)
+    {
+        SaveCount++;
+        return Path.Combine(Path.GetTempPath(), "pinned-image.png");
+    }
+
+    public void EditImage(Bitmap image) => EditCount++;
 }
 
 internal sealed class TestModuleSettingsHost : IModuleSettingsHost
@@ -4205,6 +4663,7 @@ internal sealed class TestOcrCaptureHost(Bitmap? selectionImage = null) :
         0,
         selectionImage?.Width ?? 320,
         selectionImage?.Height ?? 120);
+    public Rectangle SelectionScreenBounds => Selection;
     public Point CursorClientPosition => Point.Empty;
     public int Dpi => 96;
     public string OutputFolder => Path.GetTempPath();
@@ -4222,6 +4681,8 @@ internal sealed class TestOcrCaptureHost(Bitmap? selectionImage = null) :
             ? new Bitmap(Selection.Width, Selection.Height)
             : new Bitmap(selectionImage);
     }
+
+    public Bitmap RenderSelection() => CopyDesktopSelection();
 
     public void ShowTextResult(string title, string text)
     {

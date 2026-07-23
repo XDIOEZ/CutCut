@@ -1,6 +1,10 @@
 [CmdletBinding()]
 param(
-    [string]$OutputRoot = "artifacts"
+    [string]$OutputRoot = "artifacts",
+
+    [string]$BuildArtifactsRoot,
+
+    [switch]$SkipArchive
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,13 +38,53 @@ $modulesDirectory = Join-Path $packageDirectory "Modules"
 $moduleDirectory = Join-Path $modulesDirectory "ScreenRecording"
 $helperDirectory = Join-Path $moduleDirectory "Recorder"
 
-& dotnet publish $moduleProject -c Release -p:DebugSymbols=false -p:DebugType=None -o $moduleBuild
+$modulePublishArguments = @(
+    "publish",
+    $moduleProject,
+    "-c",
+    "Release",
+    "-p:DebugSymbols=false",
+    "-p:DebugType=None",
+    "-o",
+    $moduleBuild
+)
+$helperPublishArguments = @(
+    "publish",
+    $helperProject,
+    "-c",
+    "Release",
+    "-p:Platform=x64",
+    "-r",
+    "win-x64",
+    "--self-contained",
+    "false",
+    "-p:DebugSymbols=false",
+    "-p:DebugType=None",
+    "-o",
+    $helperBuild
+)
+if (-not [string]::IsNullOrWhiteSpace($BuildArtifactsRoot)) {
+    $buildArtifactsPath = if ([System.IO.Path]::IsPathRooted($BuildArtifactsRoot)) {
+        [System.IO.Path]::GetFullPath($BuildArtifactsRoot)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $repoRoot $BuildArtifactsRoot))
+    }
+    $modulePublishArguments += @(
+        "--artifacts-path",
+        (Join-Path $buildArtifactsPath "module")
+    )
+    $helperPublishArguments += @(
+        "--artifacts-path",
+        (Join-Path $buildArtifactsPath "helper")
+    )
+}
+
+& dotnet @modulePublishArguments
 if ($LASTEXITCODE -ne 0) {
     throw "Screen recording module publish failed with exit code $LASTEXITCODE."
 }
 
-& dotnet publish $helperProject -c Release -p:Platform=x64 -r win-x64 --self-contained false `
-    -p:DebugSymbols=false -p:DebugType=None -o $helperBuild
+& dotnet @helperPublishArguments
 if ($LASTEXITCODE -ne 0) {
     throw "Screen recording helper publish failed with exit code $LASTEXITCODE."
 }
@@ -69,11 +113,14 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "docs\screen-recording-addon.md") `
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs\third-party\ScreenRecorderLib-LICENSE.txt") `
     -Destination (Join-Path $packageDirectory "ScreenRecorderLib-LICENSE.txt")
 
-$zipPath = "$packageDirectory.zip"
-if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force
+$zipPath = $null
+if (-not $SkipArchive) {
+    $zipPath = "$packageDirectory.zip"
+    if (Test-Path -LiteralPath $zipPath) {
+        Remove-Item -LiteralPath $zipPath -Force
+    }
+    Compress-Archive -Path (Join-Path $packageDirectory "*") -DestinationPath $zipPath
 }
-Compress-Archive -Path (Join-Path $packageDirectory "*") -DestinationPath $zipPath
 
 $files = @(Get-ChildItem -LiteralPath $packageDirectory -File -Recurse)
 $packageBytes = ($files | Measure-Object -Property Length -Sum).Sum

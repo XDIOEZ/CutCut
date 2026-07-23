@@ -44,7 +44,10 @@ internal sealed class CompositionRoot : IDisposable
         var startupRegistrationService = new StartupRegistrationService(
             new WindowsRunStartupEntryStore(),
             Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath);
-        var moduleHost = new ModuleHost(Path.Combine(AppContext.BaseDirectory, "Modules"));
+        var moduleImageHost = new ModuleImageHostProxy();
+        var moduleHost = new ModuleHost(
+            Path.Combine(AppContext.BaseDirectory, "Modules"),
+            moduleImageHost);
         var applicationUpdateService = new GitHubReleaseApplicationUpdateService(
             currentVersion,
             AppContext.BaseDirectory,
@@ -66,6 +69,7 @@ internal sealed class CompositionRoot : IDisposable
             initialSettings: startupWorkspace.Settings,
             startupWorkspaceReason: startupWorkspace.Reason,
             startInBackground: startInBackground);
+        moduleImageHost.Attach(mainForm);
         return new CompositionRoot(
             mainForm,
             hotkeyService,

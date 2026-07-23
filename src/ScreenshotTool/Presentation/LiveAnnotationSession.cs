@@ -1637,14 +1637,11 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
     }
 
     private StickerHitTarget HitTestMovable(MovableAnnotation annotation, Point point) =>
-        annotation.SupportsResize
-            ? StickerLayout.HitTest(
-                annotation.Bounds,
-                annotation.ToUnrotatedPoint(point),
-                GetHandleSize())
-            : annotation.HitTest(point, GetHitTolerance())
-                ? StickerHitTarget.Move
-                : StickerHitTarget.None;
+        AnnotationHandleLayout.HitTest(
+            annotation,
+            point,
+            GetHandleSize(),
+            GetHitTolerance());
 
     private MovableAnnotation? FindSelectedMovableHit(Point point)
     {

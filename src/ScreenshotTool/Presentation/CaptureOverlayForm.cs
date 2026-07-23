@@ -187,6 +187,11 @@ internal sealed class CaptureOverlayForm : Form,
 
     string ICaptureArtifactHost.OutputFolder => _outputFolder;
 
+    Rectangle ICaptureArtifactHost.SelectionScreenBounds =>
+        new(PointToScreen(_selection.Location), _selection.Size);
+
+    Bitmap ICaptureArtifactHost.RenderSelection() => RenderSelection();
+
     void ICaptureArtifactHost.NotifyArtifactSaved(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -1609,14 +1614,11 @@ internal sealed class CaptureOverlayForm : Form,
         keyCode is Keys.ControlKey or Keys.LControlKey or Keys.RControlKey;
 
     private StickerHitTarget HitTestMovable(MovableAnnotation annotation, Point point) =>
-        annotation.SupportsResize
-            ? StickerLayout.HitTest(
-                annotation.Bounds,
-                annotation.ToUnrotatedPoint(point),
-                GetStickerHandleSize())
-            : annotation.HitTest(point, GetMovableHitTolerance())
-                ? StickerHitTarget.Move
-                : StickerHitTarget.None;
+        AnnotationHandleLayout.HitTest(
+            annotation,
+            point,
+            GetStickerHandleSize(),
+            GetMovableHitTolerance());
 
     private MovableAnnotation? FindSelectedMovableHit(Point point)
     {

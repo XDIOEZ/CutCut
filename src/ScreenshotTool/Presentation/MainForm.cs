@@ -10,7 +10,7 @@ using ScreenshotTool.Presentation.Theme;
 
 namespace ScreenshotTool.Presentation;
 
-internal sealed class MainForm : Form
+internal sealed class MainForm : Form, IModuleImageHost
 {
     private const string GalleryPageId = "gallery";
     private const string ScreenshotSettingsPageId = "screenshot-settings";
@@ -595,10 +595,41 @@ internal sealed class MainForm : Form
         ScreenshotEditRequestedEventArgs e) =>
         BeginCaptureCore(e.Path);
 
-    private async void BeginCaptureCore(string? savedScreenshotPath)
+    void IModuleImageHost.CopyImage(Bitmap image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        _clipboardService.SetImage(image);
+        _shell.ShowStatus("贴图已复制到剪贴板", AppTheme.Success);
+    }
+
+    string IModuleImageHost.SaveImage(Bitmap image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        var path = _imageSaveService.SavePng(
+            image,
+            _settings.OutputFolder,
+            _settings.Preferences.ScreenshotFileNameMode);
+        HandleArtifactSaved(path);
+        return path;
+    }
+
+    void IModuleImageHost.EditImage(Bitmap image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        BeginCaptureCore(
+            savedScreenshotPath: null,
+            suppliedEditImage: new Bitmap(image),
+            operationName: "编辑贴图");
+    }
+
+    private async void BeginCaptureCore(
+        string? savedScreenshotPath,
+        Bitmap? suppliedEditImage = null,
+        string? operationName = null)
     {
         if (_isCapturing || IsDisposed)
         {
+            suppliedEditImage?.Dispose();
             return;
         }
 
@@ -612,7 +643,7 @@ internal sealed class MainForm : Form
         var originalOpacity = Opacity;
         var originalWindowState = WindowState;
         var captureProtectionApplied = false;
-        Bitmap? initialEditImage = null;
+        Bitmap? initialEditImage = suppliedEditImage;
         if (hideMainWindow)
         {
             captureProtectionApplied = WindowCaptureProtection.TryExclude(this);
@@ -627,7 +658,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            if (savedScreenshotPath is not null)
+            if (savedScreenshotPath is not null && initialEditImage is null)
             {
                 initialEditImage = _savedScreenshotService.LoadForEditing(
                     _settings.OutputFolder,
@@ -670,21 +701,14 @@ internal sealed class MainForm : Form
                 _settings.Preferences.AnnotationSnapThresholdPixels,
                 _settings.Preferences.CtrlDragStepPixels,
                 initialEditImage);
-            overlay.ArtifactSaved += (_, path) =>
-            {
-                _shell.ShowStatus($"已保存：{Path.GetFileName(path)}", AppTheme.Success);
-                ShowSavedArtifactNotification(path);
-                if (_shell.SelectedPageId == GalleryPageId)
-                {
-                    _galleryPage.RefreshScreenshots();
-                }
-            };
+            overlay.ArtifactSaved += (_, path) => HandleArtifactSaved(path);
             overlay.ShowDialog();
             SaveLastToolWidth(toolWidthController.Current);
         }
         catch (Exception exception)
         {
-            var action = savedScreenshotPath is null ? "截图" : "编辑截图";
+            var action = operationName ??
+                         (savedScreenshotPath is null ? "截图" : "编辑截图");
             MessageBox.Show($"{action}失败：{exception.Message}", $"{action}失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
@@ -720,6 +744,16 @@ internal sealed class MainForm : Form
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             _shell.ShowStatus($"粗细参数保存失败：{exception.Message}", AppTheme.Danger);
+        }
+    }
+
+    private void HandleArtifactSaved(string path)
+    {
+        _shell.ShowStatus($"已保存：{Path.GetFileName(path)}", AppTheme.Success);
+        ShowSavedArtifactNotification(path);
+        if (_shell.SelectedPageId == GalleryPageId)
+        {
+            _galleryPage.RefreshScreenshots();
         }
     }
 

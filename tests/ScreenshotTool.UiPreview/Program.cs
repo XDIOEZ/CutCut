@@ -900,15 +900,19 @@ internal static class Program
         Directory.CreateDirectory(galleryFolder);
         try
         {
+            var firstGalleryImagePath = Path.Combine(galleryFolder, "第一张截图.png");
+            var newestGalleryImagePath = Path.Combine(galleryFolder, "准备编辑的截图.png");
             CreateGallerySmokeImage(
-                Path.Combine(galleryFolder, "第一张截图.png"),
+                firstGalleryImagePath,
                 Color.FromArgb(36, 99, 235),
                 "第一张截图");
-            Thread.Sleep(20);
             CreateGallerySmokeImage(
-                Path.Combine(galleryFolder, "准备编辑的截图.png"),
+                newestGalleryImagePath,
                 Color.FromArgb(22, 163, 74),
                 "右键编辑");
+            var galleryBaseTime = new DateTime(2026, 7, 23, 10, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(firstGalleryImagePath, galleryBaseTime);
+            File.SetLastWriteTimeUtc(newestGalleryImagePath, galleryBaseTime.AddMinutes(1));
 
             using var page = new ScreenshotGalleryPage(
                 galleryFolder,
@@ -940,11 +944,65 @@ internal static class Program
                     System.Reflection.BindingFlags.Instance |
                     System.Reflection.BindingFlags.NonPublic)!
                 .GetValue(page)!;
+            var searchInput = (TextBox)typeof(ScreenshotGalleryPage).GetField(
+                    "_searchInput",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(page)!;
+            var sortButton = (Button)typeof(ScreenshotGalleryPage).GetField(
+                    "_sortButton",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(page)!;
+            var sortMenu = (ContextMenuStrip)typeof(ScreenshotGalleryPage).GetField(
+                    "_sortMenu",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(page)!;
             if (listView.Items.Count != 2)
             {
                 throw new InvalidOperationException(
                     $"截图画廊没有加载两张验证图片，实际为 {listView.Items.Count} 张。");
             }
+            if (searchInput.PlaceholderText != "按文件名搜索" ||
+                sortButton.Text != "时间：新→旧")
+            {
+                throw new InvalidOperationException("截图画廊搜索框或默认排序按钮文案不正确。");
+            }
+            var sortItems = sortMenu.Items.OfType<ToolStripMenuItem>().ToArray();
+            if (sortItems.Length != 4 ||
+                !sortItems[0].Checked ||
+                string.Join(',', sortItems.Select(item => item.Text)) !=
+                "保存时间（最新优先）,保存时间（最早优先）,名称（A → Z）,名称（Z → A）")
+            {
+                throw new InvalidOperationException("截图画廊排序菜单没有提供完整的四种排序模式。");
+            }
+
+            searchInput.Text = "第一张";
+            Thread.Sleep(220);
+            System.Windows.Forms.Application.DoEvents();
+            if (listView.Items.Count != 1 || listView.Items[0].Text != "第一张截图.png")
+            {
+                throw new InvalidOperationException("截图画廊没有按文件名实时筛选。");
+            }
+            searchInput.Clear();
+            Thread.Sleep(220);
+            System.Windows.Forms.Application.DoEvents();
+
+            var oldestFirstItem = sortMenu.Items
+                .OfType<ToolStripMenuItem>()
+                .Single(item => item.Text == "保存时间（最早优先）");
+            oldestFirstItem.PerformClick();
+            if (listView.Items.Count != 2 ||
+                listView.Items[0].Text != "第一张截图.png" ||
+                sortButton.Text != "时间：旧→新")
+            {
+                throw new InvalidOperationException("截图画廊没有按保存时间正序排列。");
+            }
+            sortMenu.Items
+                .OfType<ToolStripMenuItem>()
+                .Single(item => item.Text == "保存时间（最新优先）")
+                .PerformClick();
 
             var selectedItem = listView.Items[0];
             selectedItem.Selected = true;
@@ -1381,7 +1439,7 @@ internal static class Program
         }
         if (!navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
             shell.SelectedPageId != "screenshot-tool.screen-recording.settings" ||
-            !shell.VersionText.Equals("v1.11.4", StringComparison.Ordinal))
+            !shell.VersionText.Equals("v1.11.5", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"主界面没有正确显示录屏分页或版本号，当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");
