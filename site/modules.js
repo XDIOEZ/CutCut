@@ -4,6 +4,12 @@ const latestReleaseApi = `https://api.github.com/repos/${repository}/releases/la
 
 const modules = [
   {
+    pattern: /pinned-image-addon-win-x64\.zip$/i,
+    status: document.querySelector("#pinned-image-status"),
+    meta: document.querySelector("#pinned-image-meta"),
+    button: document.querySelector("#pinned-image-download"),
+  },
+  {
     pattern: /long-capture-addon-win-x64\.zip$/i,
     status: document.querySelector("#long-capture-status"),
     meta: document.querySelector("#long-capture-meta"),

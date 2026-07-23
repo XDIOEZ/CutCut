@@ -37,6 +37,17 @@ public interface IModuleContext
     string ModuleDirectory { get; }
 
     Version HostVersion { get; }
+
+    IModuleImageHost ImageHost { get; }
+}
+
+public interface IModuleImageHost
+{
+    void CopyImage(Bitmap image);
+
+    string SaveImage(Bitmap image);
+
+    void EditImage(Bitmap image);
 }
 
 public interface IModuleSettingsPageProvider
@@ -176,6 +187,10 @@ public interface ILiveCaptureFeatureHost : ICaptureFeatureHost
 public interface ICaptureArtifactHost : ICaptureFeatureHost
 {
     string OutputFolder { get; }
+
+    Rectangle SelectionScreenBounds { get; }
+
+    Bitmap RenderSelection();
 
     void NotifyArtifactSaved(string path);
 

@@ -7,11 +7,12 @@
 第三个下载入口识别 `complete-lightweight-full-win-x64.zip`：它依赖电脑已安装
 .NET 8 Desktop Runtime，并预装全部插件。第四个下载入口识别
 `complete-full-win-x64.zip`：它自带运行库，并预装
-长截图、本地 OCR、PP-OCR Tiny、PP-OCR Small、二维码扫描和录屏全部插件。
+贴图悬浮窗、长截图、本地 OCR、PP-OCR Tiny、PP-OCR Small、二维码扫描和录屏全部插件。
 
 `modules.html` 是独立模块分页，会自动识别：
 
 - `long-capture-addon-win-x64.zip`
+- `pinned-image-addon-win-x64.zip`
 - `ocr-addon-win-x64.zip`
 - `paddle-ocr-tiny-addon-win-x64.zip`
 - `paddle-ocr-small-addon-win-x64.zip`

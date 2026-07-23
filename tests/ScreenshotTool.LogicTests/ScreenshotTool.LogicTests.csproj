@@ -18,5 +18,6 @@
     <ProjectReference Include="..\..\src\ScreenshotTool.PaddleOcr.Tiny\ScreenshotTool.PaddleOcr.Tiny.csproj" />
     <ProjectReference Include="..\..\src\ScreenshotTool.PaddleOcr.Small\ScreenshotTool.PaddleOcr.Small.csproj" />
     <ProjectReference Include="..\..\src\ScreenshotTool.QrCode\ScreenshotTool.QrCode.csproj" />
+    <ProjectReference Include="..\..\src\ScreenshotTool.PinnedImage\ScreenshotTool.PinnedImage.csproj" />
   </ItemGroup>
 </Project>

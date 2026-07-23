@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.PaddleOcr.Ti
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.PaddleOcr.Small", "src\ScreenshotTool.PaddleOcr.Small\ScreenshotTool.PaddleOcr.Small.csproj", "{3ED40897-DF67-4C92-8FA0-ECE151DA9163}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.PinnedImage", "src\ScreenshotTool.PinnedImage\ScreenshotTool.PinnedImage.csproj", "{D1E1E0AC-ACB1-4D76-9E8F-1AC6A60D1642}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,5 +89,9 @@ Global
 		{3ED40897-DF67-4C92-8FA0-ECE151DA9163}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3ED40897-DF67-4C92-8FA0-ECE151DA9163}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3ED40897-DF67-4C92-8FA0-ECE151DA9163}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D1E1E0AC-ACB1-4D76-9E8F-1AC6A60D1642}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D1E1E0AC-ACB1-4D76-9E8F-1AC6A60D1642}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D1E1E0AC-ACB1-4D76-9E8F-1AC6A60D1642}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D1E1E0AC-ACB1-4D76-9E8F-1AC6A60D1642}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

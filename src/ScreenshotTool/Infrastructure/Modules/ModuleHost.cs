@@ -20,12 +20,14 @@ internal sealed class ModuleHost : IModuleManager
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PackageStamp> _nonModulePackages =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly IModuleImageHost _imageHost;
     private string? _packageDirectoryState;
     private bool _disposed;
 
-    public ModuleHost(string modulesDirectory)
+    public ModuleHost(string modulesDirectory, IModuleImageHost? imageHost = null)
     {
         ModulesDirectory = Path.GetFullPath(modulesDirectory);
+        _imageHost = imageHost ?? UnavailableModuleImageHost.Instance;
     }
 
     public string ModulesDirectory { get; }
@@ -113,7 +115,10 @@ internal sealed class ModuleHost : IModuleManager
 
             try
             {
-                var loaded = LoadedModuleAssembly.LoadPackage(package.Key, package.Value);
+                var loaded = LoadedModuleAssembly.LoadPackage(
+                    package.Key,
+                    package.Value,
+                    _imageHost);
                 if (loaded is null)
                 {
                     _nonModulePackages[package.Key] = package.Value;
@@ -486,7 +491,8 @@ internal sealed class ModuleHost : IModuleManager
 
         public static LoadedModuleAssembly? LoadPackage(
             string packageDirectory,
-            PackageStamp stamp)
+            PackageStamp stamp,
+            IModuleImageHost imageHost)
         {
             LoadedModuleAssembly? package = null;
             var loadErrors = new List<Exception>();
@@ -497,7 +503,7 @@ internal sealed class ModuleHost : IModuleManager
                 LoadedModuleAssembly candidate;
                 try
                 {
-                    candidate = LoadAssembly(assemblyPath, stamp);
+                    candidate = LoadAssembly(assemblyPath, stamp, imageHost);
                 }
                 catch (BadImageFormatException)
                 {
@@ -540,7 +546,8 @@ internal sealed class ModuleHost : IModuleManager
 
         private static LoadedModuleAssembly LoadAssembly(
             string assemblyPath,
-            PackageStamp stamp)
+            PackageStamp stamp,
+            IModuleImageHost imageHost)
         {
             var loadContext = new ModuleLoadContext(Path.GetDirectoryName(assemblyPath)!);
             var modules = new List<IScreenshotToolModule>();
@@ -562,7 +569,9 @@ internal sealed class ModuleHost : IModuleManager
                         loadContext.PrepareForActiveLeases();
                     }
                     modules.Add(module);
-                    module.Initialize(new ModuleContext(Path.GetDirectoryName(assemblyPath)!));
+                    module.Initialize(new ModuleContext(
+                        Path.GetDirectoryName(assemblyPath)!,
+                        imageHost));
                 }
 
                 return new LoadedModuleAssembly(assemblyPath, stamp, loadContext, modules);
@@ -668,10 +677,31 @@ internal sealed class ModuleHost : IModuleManager
         }
     }
 
-    private sealed class ModuleContext(string moduleDirectory) : IModuleContext
+    private sealed class ModuleContext(
+        string moduleDirectory,
+        IModuleImageHost imageHost) : IModuleContext
     {
         public string ModuleDirectory { get; } = moduleDirectory;
         public Version HostVersion { get; } = typeof(ModuleHost).Assembly.GetName().Version ?? new Version(1, 0);
+        public IModuleImageHost ImageHost { get; } = imageHost;
+    }
+
+    private sealed class UnavailableModuleImageHost : IModuleImageHost
+    {
+        public static UnavailableModuleImageHost Instance { get; } = new();
+
+        public void CopyImage(Bitmap image) => ThrowUnavailable();
+
+        public string SaveImage(Bitmap image)
+        {
+            ThrowUnavailable();
+            return string.Empty;
+        }
+
+        public void EditImage(Bitmap image) => ThrowUnavailable();
+
+        private static void ThrowUnavailable() =>
+            throw new InvalidOperationException("当前宿主没有提供模块图片服务。");
     }
 
     private sealed class CaptureFeatureLease(ICaptureFeature inner, Action release) :

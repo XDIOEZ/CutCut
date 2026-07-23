@@ -28,7 +28,7 @@ every producer and consumer:
 - `complete-portable-win-x64.zip`
 - `complete-lightweight-full-win-x64.zip`
 - `complete-full-win-x64.zip`
-- six `*-addon-win-x64.zip` module packages
+- seven `*-addon-win-x64.zip` module packages
 - `SHA256SUMS.txt`
 
 Keep software auto-update selection limited to the lightweight and portable packages. The two
@@ -91,7 +91,7 @@ with local files, then publishes. If it stops with a partial draft, inspect it a
 ## 6. Verify production
 
 1. Confirm the tag commit equals remote `main`, the Release is public and not a prerelease, and
-   all eleven assets have GitHub `sha256:` digests matching local files.
+   all twelve assets have GitHub `sha256:` digests matching local files.
 2. Re-download at least `SHA256SUMS.txt`, the lightweight package, and the portable package;
    compare sizes and SHA-256. Prefer all assets when bandwidth permits.
 3. Wait for `.github/workflows/pages.yml`, then inspect the deployed page. Verify version text,

@@ -7,12 +7,18 @@ internal sealed class ScreenshotGalleryPage : UserControl
 {
     private readonly IFileLocationService _fileLocationService;
     private readonly ISavedScreenshotService _savedScreenshotService;
-    private readonly FlowLayoutPanel _toolbar;
+    private readonly TableLayoutPanel _toolbar;
     private readonly ListView _listView;
     private readonly ImageList _images;
     private readonly ContextMenuStrip _itemMenu;
+    private readonly ContextMenuStrip _sortMenu;
+    private readonly TextBox _searchInput;
+    private readonly Button _sortButton;
+    private readonly System.Windows.Forms.Timer _searchTimer;
     private readonly Label _countLabel;
     private readonly Label _emptyLabel;
+    private ScreenshotGallerySortMode _sortMode =
+        ScreenshotGallerySortMode.SavedTimeDescending;
     private string _folderPath;
 
     public ScreenshotGalleryPage(
@@ -25,31 +31,110 @@ internal sealed class ScreenshotGalleryPage : UserControl
         _savedScreenshotService = savedScreenshotService;
         BackColor = AppTheme.Canvas;
 
-        _toolbar = new FlowLayoutPanel
+        _toolbar = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 52,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
+            Height = 78,
+            ColumnCount = 5,
+            RowCount = 2,
             BackColor = AppTheme.Canvas,
             Padding = new Padding(0, 0, 0, 8)
         };
+        _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88F));
+        _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140F));
+        _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 218F));
+        _toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132F));
+        _toolbar.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+        _toolbar.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+
         var refreshButton = AppTheme.CreateButton("刷新");
-        refreshButton.Size = new Size(82, 36);
+        refreshButton.Dock = DockStyle.Fill;
+        refreshButton.Margin = new Padding(0, 0, 6, 4);
         refreshButton.Click += (_, _) => RefreshScreenshots();
         var openFolderButton = AppTheme.CreateButton("打开保存目录");
-        openFolderButton.Size = new Size(126, 36);
+        openFolderButton.Dock = DockStyle.Fill;
+        openFolderButton.Margin = new Padding(0, 0, 6, 4);
         openFolderButton.Click += (_, _) => OpenFolder();
+
+        var searchContainer = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = AppTheme.Surface,
+            BorderStyle = BorderStyle.FixedSingle,
+            Padding = new Padding(9, 7, 9, 5),
+            Margin = new Padding(6, 0, 6, 4)
+        };
+        _searchInput = new TextBox
+        {
+            Name = "ScreenshotSearchInput",
+            Dock = DockStyle.Fill,
+            BorderStyle = BorderStyle.None,
+            BackColor = AppTheme.Surface,
+            ForeColor = AppTheme.Text,
+            Font = AppTheme.CreateFont(9F),
+            PlaceholderText = "按文件名搜索"
+        };
+        searchContainer.Controls.Add(_searchInput);
+        var searchLabel = new Label
+        {
+            Dock = DockStyle.Left,
+            Width = 42,
+            Text = "搜索",
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = AppTheme.Surface,
+            ForeColor = AppTheme.MutedText,
+            Font = AppTheme.CreateFont(8.5F)
+        };
+        searchContainer.Controls.Add(searchLabel);
+
+        _sortButton = AppTheme.CreateButton("时间：新→旧");
+        _sortButton.Name = "ScreenshotSortButton";
+        _sortButton.Dock = DockStyle.Fill;
+        _sortButton.Margin = new Padding(0, 0, 0, 4);
+        _sortMenu = CreateSortMenu();
+        _sortButton.Click += (_, _) =>
+            _sortMenu.Show(_sortButton, new Point(0, _sortButton.Height));
+
+        _searchTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 180
+        };
+        _searchTimer.Tick += (_, _) =>
+        {
+            _searchTimer.Stop();
+            RefreshScreenshots();
+        };
+        _searchInput.TextChanged += (_, _) =>
+        {
+            _searchTimer.Stop();
+            _searchTimer.Start();
+        };
+        _searchInput.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Escape || _searchInput.TextLength == 0)
+            {
+                return;
+            }
+
+            _searchInput.Clear();
+            e.SuppressKeyPress = true;
+        };
+
         _countLabel = new Label
         {
-            AutoSize = false,
-            Size = new Size(240, 36),
+            Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = AppTheme.CreateFont(8.5F),
             ForeColor = AppTheme.MutedText,
-            Margin = new Padding(12, 0, 0, 0)
+            Margin = new Padding(0, 2, 0, 0)
         };
-        _toolbar.Controls.AddRange([refreshButton, openFolderButton, _countLabel]);
+        _toolbar.Controls.Add(refreshButton, 0, 0);
+        _toolbar.Controls.Add(openFolderButton, 1, 0);
+        _toolbar.Controls.Add(searchContainer, 3, 0);
+        _toolbar.Controls.Add(_sortButton, 4, 0);
+        _toolbar.Controls.Add(_countLabel, 0, 1);
+        _toolbar.SetColumnSpan(_countLabel, 5);
         Controls.Add(_toolbar);
 
         _images = new ImageList
@@ -126,6 +211,7 @@ internal sealed class ScreenshotGalleryPage : UserControl
 
     public void RefreshScreenshots()
     {
+        _searchTimer.Stop();
         _listView.BeginUpdate();
         try
         {
@@ -133,19 +219,28 @@ internal sealed class ScreenshotGalleryPage : UserControl
             _images.Images.Clear();
             if (!Directory.Exists(_folderPath))
             {
-                ShowEmpty();
+                ShowEmpty("保存目录中还没有截图");
                 return;
             }
 
-            var files = Directory.EnumerateFiles(_folderPath)
+            var entries = Directory.EnumerateFiles(_folderPath)
                 .Where(_savedScreenshotService.IsSupportedImage)
                 .Select(path => new FileInfo(path))
-                .OrderByDescending(file => file.LastWriteTimeUtc)
-                .Take(60)
+                .Select(file => new ScreenshotGalleryEntry(
+                    file.FullName,
+                    file.Name,
+                    file.LastWriteTime,
+                    file.LastWriteTimeUtc,
+                    file.Length))
                 .ToArray();
-            foreach (var file in files)
+            var result = ScreenshotGalleryQuery.Apply(
+                entries,
+                _searchInput.Text,
+                _sortMode,
+                maximumCount: 60);
+            foreach (var entry in result.Entries)
             {
-                var thumbnail = TryCreateThumbnail(file.FullName);
+                var thumbnail = TryCreateThumbnail(entry.FullName);
                 if (thumbnail is null)
                 {
                     continue;
@@ -153,18 +248,24 @@ internal sealed class ScreenshotGalleryPage : UserControl
 
                 var imageIndex = _images.Images.Count;
                 _images.Images.Add(thumbnail);
-                var item = new ListViewItem(file.Name, imageIndex)
+                var item = new ListViewItem(entry.Name, imageIndex)
                 {
-                    Tag = file.FullName,
-                    ToolTipText = $"{file.LastWriteTime:g}  ·  {Math.Max(1, file.Length / 1024)} KB"
+                    Tag = entry.FullName,
+                    ToolTipText =
+                        $"{entry.LastWriteTime:g}  ·  {Math.Max(1, entry.Length / 1024)} KB"
                 };
                 _listView.Items.Add(item);
             }
 
-            _countLabel.Text = _listView.Items.Count == 0
-                ? "暂无截图"
-                : $"最近 {_listView.Items.Count} 张截图 · 双击查看 · 右键编辑或删除";
+            _countLabel.Text = CreateCountText(
+                result.MatchCount,
+                _listView.Items.Count,
+                entries.Length,
+                _searchInput.Text);
             _emptyLabel.Visible = _listView.Items.Count == 0;
+            _emptyLabel.Text = entries.Length == 0
+                ? "保存目录中还没有截图"
+                : "没有找到匹配的截图";
             if (!_emptyLabel.Visible)
             {
                 _listView.BringToFront();
@@ -172,8 +273,8 @@ internal sealed class ScreenshotGalleryPage : UserControl
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
+            ShowEmpty("无法读取截图");
             _countLabel.Text = $"读取失败：{exception.Message}";
-            ShowEmpty();
         }
         finally
         {
@@ -181,11 +282,100 @@ internal sealed class ScreenshotGalleryPage : UserControl
         }
     }
 
-    private void ShowEmpty()
+    private void ShowEmpty(string message)
     {
         _countLabel.Text = "暂无截图";
+        _emptyLabel.Text = message;
         _emptyLabel.Visible = true;
         _emptyLabel.BringToFront();
+    }
+
+    private ContextMenuStrip CreateSortMenu()
+    {
+        var menu = new ContextMenuStrip
+        {
+            Font = AppTheme.CreateFont(9F),
+            ShowImageMargin = false,
+            ShowCheckMargin = true
+        };
+        AddSortMenuItem(
+            menu,
+            "保存时间（最新优先）",
+            ScreenshotGallerySortMode.SavedTimeDescending);
+        AddSortMenuItem(
+            menu,
+            "保存时间（最早优先）",
+            ScreenshotGallerySortMode.SavedTimeAscending);
+        menu.Items.Add(new ToolStripSeparator());
+        AddSortMenuItem(
+            menu,
+            "名称（A → Z）",
+            ScreenshotGallerySortMode.NameAscending);
+        AddSortMenuItem(
+            menu,
+            "名称（Z → A）",
+            ScreenshotGallerySortMode.NameDescending);
+        UpdateSortMenuChecks(menu);
+        return menu;
+    }
+
+    private void AddSortMenuItem(
+        ContextMenuStrip menu,
+        string text,
+        ScreenshotGallerySortMode sortMode)
+    {
+        var item = new ToolStripMenuItem(text)
+        {
+            Tag = sortMode
+        };
+        item.Click += (_, _) => ApplySort(sortMode);
+        menu.Items.Add(item);
+    }
+
+    private void ApplySort(ScreenshotGallerySortMode sortMode)
+    {
+        _sortMode = sortMode;
+        _sortButton.Text = sortMode switch
+        {
+            ScreenshotGallerySortMode.SavedTimeAscending => "时间：旧→新",
+            ScreenshotGallerySortMode.NameAscending => "名称：A→Z",
+            ScreenshotGallerySortMode.NameDescending => "名称：Z→A",
+            _ => "时间：新→旧"
+        };
+        UpdateSortMenuChecks(_sortMenu);
+        RefreshScreenshots();
+    }
+
+    private void UpdateSortMenuChecks(ContextMenuStrip menu)
+    {
+        foreach (var item in menu.Items.OfType<ToolStripMenuItem>())
+        {
+            item.Checked =
+                item.Tag is ScreenshotGallerySortMode sortMode &&
+                sortMode == _sortMode;
+        }
+    }
+
+    private static string CreateCountText(
+        int matchCount,
+        int visibleCount,
+        int totalCount,
+        string searchText)
+    {
+        const string hint = "双击查看 · 右键编辑或删除";
+        if (totalCount == 0)
+        {
+            return "暂无截图";
+        }
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            return matchCount == 0
+                ? $"未找到匹配截图 · {hint}"
+                : $"找到 {matchCount} 张，显示 {visibleCount} 张 · {hint}";
+        }
+        return totalCount > visibleCount
+            ? $"共 {totalCount} 张，显示前 {visibleCount} 张 · {hint}"
+            : $"共 {visibleCount} 张截图 · {hint}";
     }
 
     private void OpenFolder()
@@ -324,6 +514,8 @@ internal sealed class ScreenshotGalleryPage : UserControl
     {
         if (disposing)
         {
+            _searchTimer.Dispose();
+            _sortMenu.Dispose();
             _itemMenu.Dispose();
             _images.Dispose();
         }

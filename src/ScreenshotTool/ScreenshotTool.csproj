@@ -11,7 +11,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Assets\LightShotIcon.ico</ApplicationIcon>
-    <Version>1.11.4</Version>
+    <Version>1.11.5</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,6 +28,9 @@
     <ProjectReference Include="..\ScreenshotTool.QrCode\ScreenshotTool.QrCode.csproj"
                       ReferenceOutputAssembly="false"
                       OutputItemType="FirstPartyQrCodeModule" />
+    <ProjectReference Include="..\ScreenshotTool.PinnedImage\ScreenshotTool.PinnedImage.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="FirstPartyPinnedImageModule" />
     <Content Include="..\..\modules\README.md"
              Link="Modules\README.md"
              CopyToOutputDirectory="PreserveNewest"
@@ -44,6 +47,18 @@
           SkipUnchangedFiles="true" />
     <ItemGroup>
       <FileWrites Include="@(FirstPartyModule->'$(OutDir)Modules\LongCapture\%(Filename)%(Extension)')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CopyFirstPartyPinnedImageModuleToOutput"
+          AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'@(FirstPartyPinnedImageModule)' != ''">
+    <MakeDir Directories="$(OutDir)Modules\PinnedImage" />
+    <Copy SourceFiles="@(FirstPartyPinnedImageModule)"
+          DestinationFolder="$(OutDir)Modules\PinnedImage"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <FileWrites Include="@(FirstPartyPinnedImageModule->'$(OutDir)Modules\PinnedImage\%(Filename)%(Extension)')" />
     </ItemGroup>
   </Target>
 
@@ -112,6 +127,19 @@
       <FirstPartyQrCodePackageFile Include="@(FirstPartyQrCodeModule->'%(RootDir)%(Directory)LICENSE-ZXING.NET.txt')" />
       <ResolvedFileToPublish Include="@(FirstPartyQrCodePackageFile)">
         <RelativePath>Modules\QrCode\%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="IncludeFirstPartyPinnedImageModuleInPublish"
+          BeforeTargets="ComputeFilesToPublish"
+          DependsOnTargets="ResolveProjectReferences"
+          Condition="'@(FirstPartyPinnedImageModule)' != ''">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(FirstPartyPinnedImageModule)">
+        <RelativePath>Modules\PinnedImage\%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>

@@ -2,19 +2,8 @@ namespace ScreenshotTool.Presentation;
 
 internal static class TextEditorInteraction
 {
-    public static bool IsMoveBorder(Size editorSize, Point point, int tolerance)
-    {
-        if (editorSize.Width <= 0 || editorSize.Height <= 0 || tolerance <= 0 ||
-            point.X < 0 || point.Y < 0 || point.X >= editorSize.Width || point.Y >= editorSize.Height)
-        {
-            return false;
-        }
-
-        return point.X < tolerance ||
-               point.Y < tolerance ||
-               point.X >= editorSize.Width - tolerance ||
-               point.Y >= editorSize.Height - tolerance;
-    }
+    public static bool ShouldBeginMove(MouseButtons button, bool altPressed) =>
+        button == MouseButtons.Left && altPressed;
 
     public static Rectangle Move(Rectangle original, Point pointerOffset, Rectangle limits)
     {

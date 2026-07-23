@@ -243,7 +243,7 @@ internal sealed class CaptureAnnotationEditor : IDisposable
         try
         {
             primary.ApplyRotationTransform(graphics);
-            foreach (var (_, handle) in StickerLayout.GetHandles(primary.Bounds, handleSize))
+            foreach (var (_, handle) in AnnotationHandleLayout.GetHandles(primary, handleSize))
             {
                 graphics.FillRectangle(fill, handle);
                 graphics.DrawRectangle(outline, handle);
