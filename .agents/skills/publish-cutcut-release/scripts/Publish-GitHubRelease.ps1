@@ -116,8 +116,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "GitHub CLI is not authenticated."
 }
 
-$existingJson = & gh release view $tag --repo $Repository --json isDraft,assets,url 2>$null
-$releaseExists = $LASTEXITCODE -eq 0
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "SilentlyContinue"
+    $existingJson = & gh release view $tag --repo $Repository --json isDraft,assets,url 2>$null
+    $releaseViewExitCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
+$releaseExists = $releaseViewExitCode -eq 0
 if ($releaseExists) {
     $existingRelease = $existingJson | ConvertFrom-Json
     if (-not $existingRelease.isDraft) {
