@@ -15,7 +15,7 @@ if (-not $SkipFullPackage -and (
         $SkipPaddleOcrTinyAddon -or
         $SkipPaddleOcrSmallAddon -or
         $SkipScreenRecordingAddon)) {
-    throw "The full package requires PP-OCR Tiny, PP-OCR Small, and screen recording. Use -SkipFullPackage when skipping any of those add-ons."
+    throw "The full packages require PP-OCR Tiny, PP-OCR Small, and screen recording. Use -SkipFullPackage when skipping any of those add-ons."
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
@@ -378,6 +378,13 @@ if (-not $SkipScreenRecordingAddon) {
             $paddleOcrSmallRequiredRelativePaths
         )
         $completeResults += New-CompletePackage `
+            -Name "complete-lightweight-full-win-x64" `
+            -BaseDirectory $lightOutput `
+            -MaximumBytes 110MB `
+            -MaximumZipBytes 80MB `
+            -ModuleSourceDirectories $fullModuleSourceDirectories `
+            -AdditionalRequiredRelativePaths $fullRequiredRelativePaths
+        $completeResults += New-CompletePackage `
             -Name "complete-full-win-x64" `
             -BaseDirectory $portableOutput `
             -MaximumBytes 180MB `
@@ -443,7 +450,10 @@ if (-not $SkipScreenRecordingAddon) {
         "screen-recording-addon-win-x64.zip"
     )
     if (-not $SkipFullPackage) {
-        $releaseArchiveNames += "complete-full-win-x64.zip"
+        $releaseArchiveNames += @(
+            "complete-lightweight-full-win-x64.zip",
+            "complete-full-win-x64.zip"
+        )
     }
 }
 if (-not $SkipLongCaptureAddon) {

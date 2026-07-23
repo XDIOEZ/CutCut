@@ -3,6 +3,7 @@ const releasesUrl = `https://github.com/${repository}/releases`;
 const latestReleaseApi = `https://api.github.com/repos/${repository}/releases/latest`;
 const lightweightAssetPattern = /complete-lightweight-win-x64\.zip$/i;
 const portableAssetPattern = /complete-portable-win-x64\.zip$/i;
+const lightweightFullAssetPattern = /complete-lightweight-full-win-x64\.zip$/i;
 const fullAssetPattern = /complete-full-win-x64\.zip$/i;
 
 const versionElement = document.querySelector("#release-version");
@@ -13,6 +14,9 @@ const downloadLabel = document.querySelector("#download-label");
 const portableDownloadButton = document.querySelector("#portable-download-button");
 const portableDownloadLabel = document.querySelector("#portable-download-label");
 const portableDownloadSize = document.querySelector("#portable-download-size");
+const lightweightFullDownloadButton = document.querySelector("#lightweight-full-download-button");
+const lightweightFullDownloadLabel = document.querySelector("#lightweight-full-download-label");
+const lightweightFullDownloadSize = document.querySelector("#lightweight-full-download-size");
 const fullDownloadButton = document.querySelector("#full-download-button");
 const fullDownloadLabel = document.querySelector("#full-download-label");
 const fullDownloadSize = document.querySelector("#full-download-size");
@@ -48,6 +52,10 @@ function showFallback(message) {
   portableDownloadButton.removeAttribute("download");
   portableDownloadLabel.textContent = "重量版";
   portableDownloadSize.textContent = "80+ MiB";
+  lightweightFullDownloadButton.href = releasesUrl;
+  lightweightFullDownloadButton.removeAttribute("download");
+  lightweightFullDownloadLabel.textContent = "轻量完全版";
+  lightweightFullDownloadSize.textContent = "55+ MiB";
   fullDownloadButton.href = releasesUrl;
   fullDownloadButton.removeAttribute("download");
   fullDownloadLabel.textContent = "完全版";
@@ -70,9 +78,11 @@ async function loadLatestRelease() {
     const lightweightAsset = release.assets?.find(({ name }) =>
       lightweightAssetPattern.test(name));
     const portableAsset = release.assets?.find(({ name }) => portableAssetPattern.test(name));
+    const lightweightFullAsset = release.assets?.find(({ name }) =>
+      lightweightFullAssetPattern.test(name));
     const fullAsset = release.assets?.find(({ name }) => fullAssetPattern.test(name));
 
-    if (!lightweightAsset && !portableAsset && !fullAsset) {
+    if (!lightweightAsset && !portableAsset && !lightweightFullAsset && !fullAsset) {
       showFallback("最新版尚未附带可下载文件，可前往 Releases 查看详情。");
       return;
     }
@@ -103,6 +113,20 @@ async function loadLatestRelease() {
       portableDownloadSize.textContent = "查看 Releases";
     }
 
+    if (lightweightFullAsset) {
+      lightweightFullDownloadButton.href = lightweightFullAsset.browser_download_url;
+      lightweightFullDownloadButton.setAttribute("download", "");
+      lightweightFullDownloadLabel.textContent = "轻量完全版";
+      lightweightFullDownloadSize.textContent = formatBytes(
+        lightweightFullAsset.size,
+        "55+ MiB");
+    } else {
+      lightweightFullDownloadButton.href = releasesUrl;
+      lightweightFullDownloadButton.removeAttribute("download");
+      lightweightFullDownloadLabel.textContent = "轻量完全版未附带";
+      lightweightFullDownloadSize.textContent = "查看 Releases";
+    }
+
     if (fullAsset) {
       fullDownloadButton.href = fullAsset.browser_download_url;
       fullDownloadButton.setAttribute("download", "");
@@ -118,6 +142,7 @@ async function loadLatestRelease() {
     const availableEditions = [
       lightweightAsset && "轻量版",
       portableAsset && "重量版",
+      lightweightFullAsset && "轻量完全版",
       fullAsset && "完全版",
     ]
       .filter(Boolean)
@@ -126,7 +151,9 @@ async function loadLatestRelease() {
       ? `${publishedDate} 发布 · ${availableEditions}由 GitHub Releases 提供下载`
       : `${availableEditions}由 GitHub Releases 提供下载`;
     statusElement.dataset.state =
-      lightweightAsset || portableAsset || fullAsset ? "ready" : "fallback";
+      lightweightAsset || portableAsset || lightweightFullAsset || fullAsset
+        ? "ready"
+        : "fallback";
   } catch {
     showFallback("暂时无法读取版本信息，可前往 GitHub Releases 下载。");
   }
