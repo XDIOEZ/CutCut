@@ -8,9 +8,9 @@ public sealed class OcrModule : ScreenshotToolModuleBase
 
     public override string Id => "screenshot-tool.ocr";
 
-    public override string DisplayName => "OCR 文字识别";
+    public override string DisplayName => "本地 OCR 文字识别";
 
-    public override Version Version => new(1, 0, 0);
+    public override Version Version => new(1, 1, 0);
 
     public override void Initialize(IModuleContext context)
     {

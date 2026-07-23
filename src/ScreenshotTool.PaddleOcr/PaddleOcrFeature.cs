@@ -1,45 +1,55 @@
 using ScreenshotTool.Contracts;
 
-namespace ScreenshotTool.Ocr;
+namespace ScreenshotTool.PaddleOcr;
 
-internal sealed class OcrFeature : CaptureFeatureBase, ICaptureToolbarCommandProvider
+internal sealed class PaddleOcrFeature : CaptureFeatureBase, ICaptureToolbarCommandProvider
 {
-    internal const string CommandId = "screenshot-tool.ocr.recognize";
-    private static readonly IReadOnlyList<CaptureToolbarCommand> Commands =
-        Array.AsReadOnly(
-        [
-            new CaptureToolbarCommand(
-                CommandId,
-                "OCR 本地",
-                "使用 Windows 本地 OCR 多路预处理识别当前选区",
-                68)
-        ]);
-
-    private readonly IOcrRecognizer _recognizer;
+    private readonly IPaddleOcrRecognizer _recognizer;
+    private readonly IReadOnlyList<CaptureToolbarCommand> _commands;
+    private readonly string _commandId;
+    private readonly string _resultTitle;
     private readonly object _lifecycleLock = new();
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private CancellationTokenSource? _activeRecognitionCancellation;
     private bool _disposed;
 
-    public OcrFeature(IOcrRecognizer recognizer)
+    public PaddleOcrFeature(
+        string featureId,
+        int order,
+        string commandId,
+        string commandText,
+        string commandToolTip,
+        string resultTitle,
+        IPaddleOcrRecognizer recognizer)
     {
-        ArgumentNullException.ThrowIfNull(recognizer);
+        Id = featureId;
+        Order = order;
+        _commandId = commandId;
+        _resultTitle = resultTitle;
         _recognizer = recognizer;
+        _commands = Array.AsReadOnly(
+        [
+            new CaptureToolbarCommand(
+                commandId,
+                commandText,
+                commandToolTip,
+                Math.Max(68, commandText.Length * 12))
+        ]);
     }
 
-    public override string Id => "screenshot-tool.ocr.feature";
+    public override string Id { get; }
 
-    public override int Order => 550;
+    public override int Order { get; }
 
-    public IReadOnlyList<CaptureToolbarCommand> GetToolbarCommands() => Commands;
+    public IReadOnlyList<CaptureToolbarCommand> GetToolbarCommands() => _commands;
 
     public async Task ExecuteToolbarCommandAsync(
         string commandId,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(commandId, CommandId, StringComparison.Ordinal))
+        if (!string.Equals(commandId, _commandId, StringComparison.Ordinal))
         {
-            throw new ArgumentException("未知的 OCR 命令。", nameof(commandId));
+            throw new ArgumentException("未知的 PP-OCR 命令。", nameof(commandId));
         }
 
         CancellationTokenSource activeCancellation;
@@ -91,6 +101,7 @@ internal sealed class OcrFeature : CaptureFeatureBase, ICaptureToolbarCommandPro
 
         _lifetimeCancellation.Cancel();
         activeCancellation?.Cancel();
+        _recognizer.Dispose();
         _lifetimeCancellation.Dispose();
     }
 
@@ -101,7 +112,7 @@ internal sealed class OcrFeature : CaptureFeatureBase, ICaptureToolbarCommandPro
         {
             ShowMessage(
                 "当前轻截版本不支持 OCR 结果窗口，请更新基础程序后重试。",
-                "OCR 不可用",
+                "PP-OCR 不可用",
                 MessageBoxIcon.Warning);
             return;
         }
@@ -110,7 +121,7 @@ internal sealed class OcrFeature : CaptureFeatureBase, ICaptureToolbarCommandPro
         {
             ShowMessage(
                 "请先框选需要识别文字的区域。",
-                "OCR 文字识别",
+                _resultTitle,
                 MessageBoxIcon.Information);
             return;
         }
@@ -118,17 +129,16 @@ internal sealed class OcrFeature : CaptureFeatureBase, ICaptureToolbarCommandPro
         using var image = Host.CopyDesktopSelection();
         var text = await _recognizer.RecognizeAsync(image, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-
         if (string.IsNullOrWhiteSpace(text))
         {
             ShowMessage(
-                "当前选区中没有识别到文字。可以缩小选区、提高文字清晰度后重试。",
+                "当前选区中没有识别到文字。可以缩小选区或提高文字清晰度后重试。",
                 "没有识别到文字",
                 MessageBoxIcon.Information);
             return;
         }
 
-        resultHost.ShowTextResult("本地 OCR 识别结果", text);
+        resultHost.ShowTextResult(_resultTitle, text);
         artifactHost.CompleteCaptureSession();
     }
 

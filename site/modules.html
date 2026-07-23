@@ -59,8 +59,8 @@
         </div>
         <h1>只装你需要的<span>模块。</span></h1>
         <p>
-          长截图、OCR、二维码扫描、录屏等能力都可以独立下载。多数用户仍建议直接选择已经整合好的轻量完整包，
-          解压后即可一次拥有常用功能。
+          长截图、三种 OCR、二维码扫描、录屏等能力都可以独立下载。多数用户可直接选择已经整合好的轻量完整包；
+          需要更高文字识别率时，再按机器性能选装 PP-OCR Tiny 或 Small。
         </p>
       </section>
 
@@ -68,7 +68,7 @@
         <div>
           <span class="recommendation-label">推荐给大多数用户</span>
           <h2>下载已经整合模块的轻量完整包</h2>
-          <p>无需逐个安装，常用模块已放入正确目录，仍保持小于 5 MiB。</p>
+          <p>无需逐个安装，已包含多路预处理的本地 OCR 和其他常用模块，仍保持小于 5 MiB。</p>
         </div>
         <a class="button button--primary" href="index.html#download">下载完整包</a>
       </aside>
@@ -103,15 +103,53 @@
             <div class="module-mark module-mark--emerald" aria-hidden="true">文</div>
             <div class="module-download-copy">
               <div class="module-title-row">
-                <h3>OCR 文字识别</h3>
+                <h3>本地 OCR 文字识别</h3>
                 <span class="module-availability" id="ocr-status">正在检查最新版…</span>
               </div>
-              <p>离线识别截图选区中的中英文文字，并在侧边小窗中继续编辑或复制。</p>
+              <p>零模型下载，使用 Windows OCR 对原图、放大、增强和二值化结果择优识别。</p>
               <small id="ocr-meta">独立模块 · Windows x64</small>
             </div>
             <a
               class="button button--module"
               id="ocr-download"
+              href="https://github.com/XDIOEZ/CutCut/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+            >查看 Releases</a>
+          </article>
+
+          <article class="module-download-card">
+            <div class="module-mark module-mark--cyan" aria-hidden="true">T</div>
+            <div class="module-download-copy">
+              <div class="module-title-row">
+                <h3>PP-OCR Tiny</h3>
+                <span class="module-availability" id="paddle-ocr-tiny-status">正在检查最新版…</span>
+              </div>
+              <p>独立本机 ONNX 模型，体积和速度更均衡，适合常见小字、界面文字与中英混排。</p>
+              <small id="paddle-ocr-tiny-meta">独立模块 · Windows x64</small>
+            </div>
+            <a
+              class="button button--module"
+              id="paddle-ocr-tiny-download"
+              href="https://github.com/XDIOEZ/CutCut/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+            >查看 Releases</a>
+          </article>
+
+          <article class="module-download-card">
+            <div class="module-mark module-mark--violet" aria-hidden="true">S</div>
+            <div class="module-download-copy">
+              <div class="module-title-row">
+                <h3>PP-OCR Small</h3>
+                <span class="module-availability" id="paddle-ocr-small-status">正在检查最新版…</span>
+              </div>
+              <p>更大的独立本机 ONNX 模型，优先识别精度，适合复杂背景、密集小字与低质量截图。</p>
+              <small id="paddle-ocr-small-meta">独立模块 · Windows x64</small>
+            </div>
+            <a
+              class="button button--module"
+              id="paddle-ocr-small-download"
               href="https://github.com/XDIOEZ/CutCut/releases"
               target="_blank"
               rel="noopener noreferrer"

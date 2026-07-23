@@ -3,6 +3,8 @@ param(
     [string]$OutputRoot = "artifacts",
     [switch]$SkipLongCaptureAddon,
     [switch]$SkipOcrAddon,
+    [switch]$SkipPaddleOcrTinyAddon,
+    [switch]$SkipPaddleOcrSmallAddon,
     [switch]$SkipQrCodeAddon,
     [switch]$SkipScreenRecordingAddon
 )
@@ -126,6 +128,24 @@ if (-not $SkipOcrAddon) {
     & (Join-Path $PSScriptRoot "Publish-OcrModule.ps1") -OutputRoot $outputRootPath
     if ($LASTEXITCODE -ne 0) {
         throw "OCR add-on publish failed with exit code $LASTEXITCODE."
+    }
+}
+
+if (-not $SkipPaddleOcrTinyAddon) {
+    & (Join-Path $PSScriptRoot "Publish-PaddleOcrModule.ps1") `
+        -OutputRoot $outputRootPath `
+        -Variant Tiny
+    if ($LASTEXITCODE -ne 0) {
+        throw "PP-OCR Tiny add-on publish failed with exit code $LASTEXITCODE."
+    }
+}
+
+if (-not $SkipPaddleOcrSmallAddon) {
+    & (Join-Path $PSScriptRoot "Publish-PaddleOcrModule.ps1") `
+        -OutputRoot $outputRootPath `
+        -Variant Small
+    if ($LASTEXITCODE -ne 0) {
+        throw "PP-OCR Small add-on publish failed with exit code $LASTEXITCODE."
     }
 }
 

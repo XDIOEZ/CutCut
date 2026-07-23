@@ -16,6 +16,18 @@ const modules = [
     button: document.querySelector("#ocr-download"),
   },
   {
+    pattern: /paddle-ocr-tiny-addon-win-x64\.zip$/i,
+    status: document.querySelector("#paddle-ocr-tiny-status"),
+    meta: document.querySelector("#paddle-ocr-tiny-meta"),
+    button: document.querySelector("#paddle-ocr-tiny-download"),
+  },
+  {
+    pattern: /paddle-ocr-small-addon-win-x64\.zip$/i,
+    status: document.querySelector("#paddle-ocr-small-status"),
+    meta: document.querySelector("#paddle-ocr-small-meta"),
+    button: document.querySelector("#paddle-ocr-small-download"),
+  },
+  {
     pattern: /qr-code-addon-win-x64\.zip$/i,
     status: document.querySelector("#qr-code-status"),
     meta: document.querySelector("#qr-code-meta"),

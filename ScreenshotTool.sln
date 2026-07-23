@@ -23,6 +23,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.Ocr", "src\S
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.QrCode", "src\ScreenshotTool.QrCode\ScreenshotTool.QrCode.csproj", "{8F8A0949-D1B3-4C5F-8E27-A63C1E9C5C22}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.PaddleOcr", "src\ScreenshotTool.PaddleOcr\ScreenshotTool.PaddleOcr.csproj", "{827D0F42-0D89-43AA-BA30-0FB84A9164D4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.PaddleOcr.Tiny", "src\ScreenshotTool.PaddleOcr.Tiny\ScreenshotTool.PaddleOcr.Tiny.csproj", "{CDBAD80F-A52E-4DA3-81C7-96D6BD84DF02}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScreenshotTool.PaddleOcr.Small", "src\ScreenshotTool.PaddleOcr.Small\ScreenshotTool.PaddleOcr.Small.csproj", "{3ED40897-DF67-4C92-8FA0-ECE151DA9163}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -69,5 +75,17 @@ Global
 		{8F8A0949-D1B3-4C5F-8E27-A63C1E9C5C22}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8F8A0949-D1B3-4C5F-8E27-A63C1E9C5C22}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8F8A0949-D1B3-4C5F-8E27-A63C1E9C5C22}.Release|Any CPU.Build.0 = Release|Any CPU
+		{827D0F42-0D89-43AA-BA30-0FB84A9164D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{827D0F42-0D89-43AA-BA30-0FB84A9164D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{827D0F42-0D89-43AA-BA30-0FB84A9164D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{827D0F42-0D89-43AA-BA30-0FB84A9164D4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CDBAD80F-A52E-4DA3-81C7-96D6BD84DF02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CDBAD80F-A52E-4DA3-81C7-96D6BD84DF02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CDBAD80F-A52E-4DA3-81C7-96D6BD84DF02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CDBAD80F-A52E-4DA3-81C7-96D6BD84DF02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3ED40897-DF67-4C92-8FA0-ECE151DA9163}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3ED40897-DF67-4C92-8FA0-ECE151DA9163}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3ED40897-DF67-4C92-8FA0-ECE151DA9163}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3ED40897-DF67-4C92-8FA0-ECE151DA9163}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
