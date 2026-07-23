@@ -40,6 +40,7 @@ internal sealed class CompositionRoot : IDisposable
         var clipboardService = new WindowsClipboardService();
         var windowLocator = new NativeWindowLocator();
         var fileLocationService = new ExplorerFileLocationService();
+        var savedScreenshotService = new SavedScreenshotService();
         var startupRegistrationService = new StartupRegistrationService(
             new WindowsRunStartupEntryStore(),
             Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath);
@@ -57,6 +58,7 @@ internal sealed class CompositionRoot : IDisposable
             clipboardService,
             windowLocator,
             fileLocationService,
+            savedScreenshotService,
             moduleHost,
             startupRegistrationService,
             applicationUpdateService,
