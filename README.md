@@ -70,13 +70,13 @@ dotnet publish .\src\ScreenshotTool\ScreenshotTool.csproj -p:PublishProfile=Port
 
 WinForms 对程序集裁剪并不安全，本项目不使用 `PublishTrimmed` 冒险换取体积；轻量版与便携版执行完全相同的业务代码。
 
-也可以运行下面的命令一次生成两种版本；`Bypass` 只对这一次 PowerShell 进程生效，不会修改系统执行策略：
+也可以运行下面的命令一次生成三种版本；`Bypass` 只对这一次 PowerShell 进程生效，不会修改系统执行策略：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Publish-Release.ps1
 ```
 
-脚本会检查轻量版不超过 5 MiB、便携压缩版不超过 90 MiB，防止包体意外回退。默认面向用户交付 `complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip`：两者都已把长截图、本地 OCR、二维码扫描、录屏 DLL、编码器和依赖安装到 `Modules`，但不会把体积较大的 PP-OCR 模型塞进完整包。脚本还会在压缩包旁自动生成 `LightShotCN-v<版本>-ready-to-run` 免解压运行目录，可直接启动其中的 `ScreenshotTool.exe`。脚本同时生成 `long-capture-addon-win-x64.zip`、`ocr-addon-win-x64.zip`、`paddle-ocr-tiny-addon-win-x64.zip`、`paddle-ocr-small-addon-win-x64.zip`、`qr-code-addon-win-x64.zip` 和 `screen-recording-addon-win-x64.zip`，便于用户从发布页按需组合或在永久删除后重新安装模块。本地 OCR 1.1.0、PP-OCR Tiny/Small 1.0.0 与二维码扫描模块 1.0.0 均需要轻截 1.11.0 或更高版本；录屏模块 1.7.0 需要轻截 1.10.0 或更高版本。
+脚本会检查轻量版不超过 5 MiB、便携压缩版不超过 90 MiB，并把全插件完全版的压缩包限制在 130 MiB 内，防止包体意外回退。`complete-lightweight-win-x64.zip` 和 `complete-portable-win-x64.zip` 都已把长截图、本地 OCR、二维码扫描、录屏 DLL、编码器和依赖安装到 `Modules`，但不会携带体积较大的 PP-OCR 模型；新增的 `complete-full-win-x64.zip` 以自带 .NET 运行库的重量版为底包，并额外预装 PP-OCR Tiny、PP-OCR Small 及其模型，因此包含当前全部插件。脚本还会在压缩包旁自动生成 `LightShotCN-v<版本>-ready-to-run` 免解压运行目录，可直接启动其中的 `ScreenshotTool.exe`。脚本同时生成 `long-capture-addon-win-x64.zip`、`ocr-addon-win-x64.zip`、`paddle-ocr-tiny-addon-win-x64.zip`、`paddle-ocr-small-addon-win-x64.zip`、`qr-code-addon-win-x64.zip` 和 `screen-recording-addon-win-x64.zip`，便于用户从发布页按需组合或在永久删除后重新安装模块。本地 OCR 1.1.0、PP-OCR Tiny/Small 1.0.0 与二维码扫描模块 1.0.0 均需要轻截 1.11.0 或更高版本；录屏模块 1.7.0 需要轻截 1.10.0 或更高版本。
 
 软件内更新依赖同一正式 Release 中的固定完整包文件名，以及 GitHub API 返回的 `sha256:` digest。发布新版本时必须同时上传轻量完整包和便携完整包；只改标签或发布说明而缺少完整包时，软件会明确停止安装。用户需要先运行一次包含“软件更新”页的版本，之后的正式版即可在软件内完成更新。
 

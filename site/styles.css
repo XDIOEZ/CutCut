@@ -1217,6 +1217,7 @@ kbd {
 }
 
 .button--download {
+  grid-column: 1 / -1;
   justify-content: space-between;
   width: 100%;
   min-height: 68px;
@@ -1230,7 +1231,7 @@ kbd {
 
 .download-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 126px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   align-items: center;
 }
@@ -1256,7 +1257,8 @@ kbd {
   height: 23px;
 }
 
-.button--portable {
+.button--portable,
+.button--full {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -1269,26 +1271,40 @@ kbd {
   box-shadow: none;
 }
 
-.button--portable:hover {
+.button--full {
+  color: #c9e8ff;
+  background: linear-gradient(135deg, rgba(31, 135, 255, 0.11), rgba(107, 72, 255, 0.1));
+  border-color: rgba(97, 180, 255, 0.24);
+}
+
+.button--portable:hover,
+.button--full:hover {
   color: #eaf3ff;
   background: rgba(255, 255, 255, 0.065);
   border-color: rgba(151, 184, 236, 0.3);
 }
 
-.button--portable small {
+.button--portable small,
+.button--full small {
   color: #7f96b6;
   font-size: 8px;
   font-weight: 600;
 }
 
-.button--portable strong {
+.button--portable strong,
+.button--full strong {
   font-size: 12px;
 }
 
-.button--portable span {
+.button--portable span,
+.button--full span {
   color: #7187a7;
   font-size: 8px;
   font-weight: 600;
+}
+
+.button--full small {
+  color: #8cbfee;
 }
 
 .release-status {
@@ -1724,10 +1740,11 @@ footer > a:hover {
   }
 
   .download-actions {
-    grid-template-columns: minmax(0, 1fr) 112px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .button--portable {
+  .button--portable,
+  .button--full {
     padding-right: 7px;
     padding-left: 7px;
   }
