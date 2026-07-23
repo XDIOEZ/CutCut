@@ -146,14 +146,29 @@ if ($releaseExists) {
     }
 }
 
-$uploadArguments = @("release", "upload", $tag, "--repo", $Repository)
-$uploadArguments += @($assetRows | Select-Object -ExpandProperty Path)
-if ($ResumeDraft) {
-    $uploadArguments += "--clobber"
+$temporaryUploadRoot = Join-Path `
+    ([System.IO.Path]::GetTempPath()) `
+    "cutcut-release-$tag-$([Guid]::NewGuid().ToString('N'))"
+[System.IO.Directory]::CreateDirectory($temporaryUploadRoot) | Out-Null
+try {
+    $uploadArguments = @("release", "upload", $tag, "--repo", $Repository)
+    foreach ($asset in $assetRows) {
+        $temporaryAssetPath = Join-Path $temporaryUploadRoot $asset.Name
+        [System.IO.File]::Copy($asset.Path, $temporaryAssetPath, $true)
+        $uploadArguments += $temporaryAssetPath
+    }
+    if ($ResumeDraft) {
+        $uploadArguments += "--clobber"
+    }
+    & gh $uploadArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Uploading release assets failed. The release remains a draft."
+    }
 }
-& gh $uploadArguments
-if ($LASTEXITCODE -ne 0) {
-    throw "Uploading release assets failed. The release remains a draft."
+finally {
+    if ([System.IO.Directory]::Exists($temporaryUploadRoot)) {
+        [System.IO.Directory]::Delete($temporaryUploadRoot, $true)
+    }
 }
 
 $uploadedJson = & gh release view $tag `
