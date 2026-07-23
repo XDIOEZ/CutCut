@@ -17,6 +17,10 @@ using ScreenshotTool.PaddleOcr.Small;
 using ScreenshotTool.PaddleOcr.Tiny;
 using ScreenshotTool.QrCode;
 using ZXing;
+using System.IO.Compression;
+using System.Net;
+using System.Text;
+using System.Text.Json;
 
 if (args.Length >= 3 &&
     string.Equals(args[0], "--paddle-ocr-engine-smoke", StringComparison.Ordinal))
@@ -151,6 +155,273 @@ AssertTrue(
 AssertTrue(
     !ApplicationLaunchOptions.Parse(["--unknown"]).StartInBackground,
     "普通启动参数不会误判为后台启动");
+AssertTrue(
+    GitHubReleaseVersion.TryParse("v1.12.3", out var parsedReleaseVersion) &&
+    parsedReleaseVersion == new Version(1, 12, 3),
+    "GitHub Release 标签可解析为三段产品版本");
+AssertTrue(
+    !GitHubReleaseVersion.TryParse("nightly-2026-07-23", out _),
+    "非正式版本标签不会被误判为可安装更新");
+AssertTrue(
+    GitHubAssetDigest.TryParseSha256(
+        $"sha256:{new string('A', 64)}",
+        out var normalizedReleaseDigest) &&
+    normalizedReleaseDigest == new string('a', 64),
+    "GitHub 资产 SHA-256 摘要会验证格式并统一大小写");
+AssertTrue(
+    !GitHubAssetDigest.TryParseSha256("sha256:not-a-digest", out _),
+    "无效 GitHub 资产摘要会阻止更新");
+
+const string updateReleaseJson = """
+    {
+      "tag_name": "v1.12.0",
+      "name": "轻截 v1.12.0",
+      "html_url": "https://github.com/XDIOEZ/CutCut/releases/tag/v1.12.0",
+      "published_at": "2026-07-23T02:00:00Z",
+      "assets": [
+        {
+          "name": "complete-lightweight-win-x64.zip",
+          "browser_download_url": "https://github.com/XDIOEZ/CutCut/releases/download/v1.12.0/complete-lightweight-win-x64.zip",
+          "size": 1250000,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "name": "complete-portable-win-x64.zip",
+          "browser_download_url": "https://github.com/XDIOEZ/CutCut/releases/download/v1.12.0/complete-portable-win-x64.zip",
+          "size": 62000000,
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ]
+    }
+    """;
+using (var lightweightClient = new HttpClient(
+           new StaticJsonHttpMessageHandler(updateReleaseJson)))
+using (var lightweightUpdateService = new GitHubReleaseApplicationUpdateService(
+           new Version(1, 11, 0),
+           Path.GetTempPath(),
+           Path.Combine(Path.GetTempPath(), "ScreenshotTool.exe"),
+           lightweightClient,
+           desktopRuntimeAvailable: () => true))
+{
+    var updateCheck = await lightweightUpdateService.CheckForUpdatesAsync(
+        CancellationToken.None);
+    AssertEqual(new Version(1, 12, 0), updateCheck.LatestVersion,
+        "更新检查读取最新正式版本");
+    AssertTrue(updateCheck.AvailableUpdate is not null,
+        "GitHub 版本高于当前版本时提供更新");
+    AssertEqual(
+        ApplicationUpdatePackageKind.Lightweight,
+        updateCheck.AvailableUpdate!.PackageKind,
+        "已安装桌面运行库时选择轻量更新包");
+    AssertEqual(
+        new string('a', 64),
+        updateCheck.AvailableUpdate.PackageSha256,
+        "更新检查使用 GitHub 提供的轻量包 SHA-256");
+}
+using (var portableClient = new HttpClient(
+           new StaticJsonHttpMessageHandler(updateReleaseJson)))
+using (var portableUpdateService = new GitHubReleaseApplicationUpdateService(
+           new Version(1, 11, 0),
+           Path.GetTempPath(),
+           Path.Combine(Path.GetTempPath(), "ScreenshotTool.exe"),
+           portableClient,
+           desktopRuntimeAvailable: () => false))
+{
+    var updateCheck = await portableUpdateService.CheckForUpdatesAsync(
+        CancellationToken.None);
+    AssertEqual(
+        ApplicationUpdatePackageKind.Portable,
+        updateCheck.AvailableUpdate!.PackageKind,
+        "未安装桌面运行库时选择自带运行库的便携更新包");
+    AssertEqual(62_000_000L, updateCheck.AvailableUpdate.PackageSize,
+        "便携更新包使用 Release 中的真实文件大小");
+}
+
+var updateArchiveTestRoot = Path.Combine(
+    Path.GetTempPath(),
+    $"LightShotUpdateArchiveTests-{Guid.NewGuid():N}");
+Directory.CreateDirectory(updateArchiveTestRoot);
+try
+{
+    var validArchivePath = Path.Combine(updateArchiveTestRoot, "valid.zip");
+    using (var archive = ZipFile.Open(validArchivePath, ZipArchiveMode.Create))
+    {
+        var executableEntry = archive.CreateEntry("ScreenshotTool.exe");
+        await using (var writer = new StreamWriter(
+                         executableEntry.Open(),
+                         new UTF8Encoding(false),
+                         leaveOpen: false))
+        {
+            await writer.WriteAsync("test executable");
+        }
+        var moduleEntry = archive.CreateEntry(
+            "Modules/LongCapture/ScreenshotTool.LongCapture.dll");
+        await using (var writer = new StreamWriter(
+                         moduleEntry.Open(),
+                         new UTF8Encoding(false),
+                         leaveOpen: false))
+        {
+            await writer.WriteAsync("test module");
+        }
+    }
+
+    var extractedDirectory = Path.Combine(updateArchiveTestRoot, "valid-payload");
+    await UpdateArchiveExtractor.ExtractAsync(
+        validArchivePath,
+        extractedDirectory,
+        maximumEntries: 20,
+        maximumExtractedBytes: 1024 * 1024,
+        CancellationToken.None);
+    AssertTrue(
+        File.Exists(Path.Combine(extractedDirectory, "ScreenshotTool.exe")),
+        "更新压缩包会解压根目录程序");
+    AssertTrue(
+        File.Exists(Path.Combine(
+            extractedDirectory,
+            "Modules",
+            "LongCapture",
+            "ScreenshotTool.LongCapture.dll")),
+        "更新压缩包会保持模块目录结构");
+
+    var traversalArchivePath = Path.Combine(updateArchiveTestRoot, "traversal.zip");
+    using (var archive = ZipFile.Open(traversalArchivePath, ZipArchiveMode.Create))
+    {
+        var traversalEntry = archive.CreateEntry("../escaped.txt");
+        await using var writer = new StreamWriter(
+            traversalEntry.Open(),
+            new UTF8Encoding(false),
+            leaveOpen: false);
+        await writer.WriteAsync("must not escape");
+    }
+
+    var traversalRejected = false;
+    try
+    {
+        await UpdateArchiveExtractor.ExtractAsync(
+            traversalArchivePath,
+            Path.Combine(updateArchiveTestRoot, "traversal-payload"),
+            maximumEntries: 20,
+            maximumExtractedBytes: 1024 * 1024,
+            CancellationToken.None);
+    }
+    catch (ApplicationUpdateException)
+    {
+        traversalRejected = true;
+    }
+    AssertTrue(traversalRejected, "更新压缩包目录穿越路径会被拒绝");
+    AssertTrue(
+        !File.Exists(Path.Combine(updateArchiveTestRoot, "escaped.txt")),
+        "恶意更新压缩包不能写出暂存目录");
+
+    var prunePayload = Path.Combine(updateArchiveTestRoot, "prune-payload");
+    var installedApplication = Path.Combine(updateArchiveTestRoot, "installed");
+    Directory.CreateDirectory(Path.Combine(prunePayload, "Modules", "Ocr"));
+    Directory.CreateDirectory(Path.Combine(prunePayload, "Modules", "QrCode"));
+    Directory.CreateDirectory(Path.Combine(installedApplication, "Modules", "Ocr"));
+    UpdatePayloadPruner.PreserveMissingModuleChoices(prunePayload, installedApplication);
+    AssertTrue(
+        Directory.Exists(Path.Combine(prunePayload, "Modules", "Ocr")),
+        "更新会保留并升级仍然安装的插件");
+    AssertTrue(
+        !Directory.Exists(Path.Combine(prunePayload, "Modules", "QrCode")),
+        "更新不会重新安装用户已永久删除的插件");
+
+    var applyRoot = Path.Combine(updateArchiveTestRoot, "apply");
+    var applySource = Path.Combine(applyRoot, "payload");
+    var applyTarget = Path.Combine(applyRoot, "installed");
+    var applyResultPath = Path.Combine(applyRoot, "result.json");
+    var applyScriptPath = Path.Combine(applyRoot, "ApplyUpdate.ps1");
+    Directory.CreateDirectory(applySource);
+    Directory.CreateDirectory(applyTarget);
+    await File.WriteAllTextAsync(
+        Path.Combine(applySource, "existing.txt"),
+        "new version",
+        Encoding.UTF8);
+    await File.WriteAllTextAsync(
+        Path.Combine(applySource, "created.txt"),
+        "created by update",
+        Encoding.UTF8);
+    await File.WriteAllTextAsync(
+        Path.Combine(applyTarget, "existing.txt"),
+        "old version",
+        Encoding.UTF8);
+    var restartExecutablePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.System),
+        "whoami.exe");
+    await File.WriteAllTextAsync(
+        applyScriptPath,
+        PowerShellUpdateScript.Content,
+        new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+    var powershellPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.System),
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe");
+    var applyStartInfo = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = powershellPath,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardError = true,
+        RedirectStandardOutput = true
+    };
+    foreach (var argument in new[]
+             {
+                 "-NoProfile",
+                 "-NonInteractive",
+                 "-ExecutionPolicy",
+                 "Bypass",
+                 "-File",
+                 applyScriptPath,
+                 "-ProcessId",
+                 int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                 "-SourceDirectory",
+                 applySource,
+                 "-TargetDirectory",
+                 applyTarget,
+                 "-ExecutablePath",
+                 restartExecutablePath,
+                 "-ResultPath",
+                 applyResultPath,
+                 "-Version",
+                 "1.12.0"
+             })
+    {
+        applyStartInfo.ArgumentList.Add(argument);
+    }
+    using (var applyProcess = System.Diagnostics.Process.Start(applyStartInfo) ??
+                              throw new InvalidOperationException("更新脚本测试进程未启动"))
+    {
+        using var applyTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await applyProcess.WaitForExitAsync(applyTimeout.Token);
+        var applyError = await applyProcess.StandardError.ReadToEndAsync(
+            applyTimeout.Token);
+        AssertEqual(
+            0,
+            applyProcess.ExitCode,
+            $"退出后更新脚本可执行（{applyError.Trim()}）");
+    }
+
+    AssertEqual(
+        "new version",
+        await File.ReadAllTextAsync(Path.Combine(applyTarget, "existing.txt")),
+        "退出后更新脚本会覆盖已有程序文件");
+    AssertTrue(
+        File.Exists(Path.Combine(applyTarget, "created.txt")),
+        "退出后更新脚本会安装新增程序文件");
+    using (var applyResultDocument = JsonDocument.Parse(
+               await File.ReadAllTextAsync(applyResultPath)))
+    {
+        AssertTrue(
+            applyResultDocument.RootElement.GetProperty("succeeded").GetBoolean(),
+            "退出后更新脚本会启动目标程序并记录成功结果供界面显示");
+    }
+}
+finally
+{
+    Directory.Delete(updateArchiveTestRoot, recursive: true);
+}
 var runEntryStore = new TestStartupEntryStore();
 var startupRegistration = new StartupRegistrationService(
     runEntryStore,
@@ -3244,7 +3515,7 @@ LongCapturePreparationTests.Run();
 BidirectionalLongCaptureTests.Run();
 LongCaptureWindowTests.Run();
 
-Console.WriteLine("首次与更新启动工作台、OCR 离线识别模块、二维码扫描模块、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、八手柄单边缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
+Console.WriteLine("首次与更新启动工作台、GitHub 软件更新、OCR 离线识别模块、二维码扫描模块、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、八手柄单边缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
 return;
 
 SelectionResizeEdges Hit(int x, int y) =>
@@ -3861,4 +4132,16 @@ internal sealed class TestOcrCaptureHost(Bitmap? selectionImage = null) :
     public void NotifyArtifactSaved(string path) { }
 
     public void CompleteCaptureSession() => Completed = true;
+}
+
+internal sealed class StaticJsonHttpMessageHandler(string json) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        });
 }

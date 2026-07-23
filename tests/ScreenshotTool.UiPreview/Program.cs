@@ -102,6 +102,11 @@ internal static class Program
             RunModuleManagementPageSmoke(moduleManagementOutputPath);
             return 0;
         }
+        if (args is ["--application-update-page-smoke", var updatePageOutputPath])
+        {
+            RunApplicationUpdatePageSmoke(updatePageOutputPath);
+            return 0;
+        }
 
         var previewFolder = Path.Combine(Path.GetTempPath(), "LightShotUiPreview");
         var form = new MainForm(
@@ -1133,6 +1138,7 @@ internal static class Program
         }
         if (!navigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
             !navigationTexts.Contains("插件模块", StringComparer.Ordinal) ||
+            !navigationTexts.Contains("软件更新", StringComparer.Ordinal) ||
             navigationTexts.Contains("快捷键设置", StringComparer.Ordinal) ||
             navigationTexts.Contains("图片复制", StringComparer.Ordinal))
         {
@@ -1187,6 +1193,7 @@ internal static class Program
         }
         if (!emptyNavigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
             !emptyNavigationTexts.Contains("插件模块", StringComparer.Ordinal) ||
+            !emptyNavigationTexts.Contains("软件更新", StringComparer.Ordinal) ||
             emptyNavigationTexts.Contains("快捷键设置", StringComparer.Ordinal) ||
             emptyNavigationTexts.Contains("图片复制", StringComparer.Ordinal))
         {
@@ -1247,6 +1254,65 @@ internal static class Program
             {
                 throw new InvalidOperationException($"插件模块页面缺少操作：{expectedText}");
             }
+        }
+
+        using var captured = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(captured, new Rectangle(Point.Empty, form.Size));
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+        captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+        form.Close();
+        System.Windows.Forms.Application.DoEvents();
+    }
+
+    private static void RunApplicationUpdatePageSmoke(string outputPath)
+    {
+        using var form = new Form
+        {
+            Text = "轻截 - 软件更新",
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(80, 80),
+            ClientSize = new Size(760, 620),
+            BackColor = Color.FromArgb(244, 247, 252),
+            ShowInTaskbar = false,
+            TopMost = true
+        };
+        using var updateService = new PreviewApplicationUpdateService();
+        using var page = new ApplicationUpdatePage(
+            new Version(1, 11, 0),
+            updateService)
+        {
+            Location = new Point(18, 18),
+            Size = new Size(724, 584)
+        };
+        form.Controls.Add(page);
+        form.Show();
+        form.Activate();
+        System.Windows.Forms.Application.DoEvents();
+
+        var checkMethod = typeof(ApplicationUpdatePage).GetMethod(
+            "CheckForUpdatesAsync",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic)!;
+        ((Task)checkMethod.Invoke(page, null)!).GetAwaiter().GetResult();
+        System.Windows.Forms.Application.DoEvents();
+
+        var rows = GetControlTree(page)
+            .OfType<Panel>()
+            .Where(panel => string.Equals(
+                panel.Tag as string,
+                "SettingRow",
+                StringComparison.Ordinal))
+            .OrderBy(panel => panel.Top)
+            .ToArray();
+        if (rows.Length != 3 ||
+            rows.Any(row => row.Controls.OfType<Button>().Count() > 1))
+        {
+            throw new InvalidOperationException("软件更新页没有使用三行纵向单列设置项。");
+        }
+        if (!page.StateText.Contains("v1.12.0", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("软件更新页没有显示可安装的新版本。");
         }
 
         using var captured = new Bitmap(form.Width, form.Height);
@@ -1645,6 +1711,49 @@ internal sealed class PreviewStartupRegistrationService : IStartupRegistrationSe
     public bool IsEnabled { get; private set; } = true;
 
     public void SetEnabled(bool enabled) => IsEnabled = enabled;
+}
+
+internal sealed class PreviewApplicationUpdateService : IApplicationUpdateService
+{
+    public Version CurrentVersion => new(1, 11, 0);
+
+    public Task<ApplicationUpdateCheckResult> CheckForUpdatesAsync(
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var update = new ApplicationUpdateInfo(
+            new Version(1, 12, 0),
+            "轻截 v1.12.0",
+            new DateTimeOffset(2026, 7, 23, 10, 0, 0, TimeSpan.FromHours(8)),
+            new Uri("https://github.com/XDIOEZ/CutCut/releases/tag/v1.12.0"),
+            new Uri(
+                "https://github.com/XDIOEZ/CutCut/releases/download/v1.12.0/" +
+                "complete-lightweight-win-x64.zip"),
+            1_350_000,
+            new string('a', 64),
+            ApplicationUpdatePackageKind.Lightweight);
+        return Task.FromResult(new ApplicationUpdateCheckResult(
+            update.Version,
+            update.ReleaseName,
+            update.PublishedAt,
+            update.ReleasePageUri,
+            update));
+    }
+
+    public Task<PreparedApplicationUpdate> DownloadAndPrepareAsync(
+        ApplicationUpdateInfo update,
+        IProgress<ApplicationUpdateProgress>? progress,
+        CancellationToken cancellationToken) =>
+        throw new NotSupportedException("界面预览不下载更新。");
+
+    public void StartApplying(PreparedApplicationUpdate update, int processId) =>
+        throw new NotSupportedException("界面预览不安装更新。");
+
+    public ApplicationUpdateApplyResult? TakePendingApplyResult() => null;
+
+    public void Dispose()
+    {
+    }
 }
 
 internal sealed class PreviewModuleManager(bool includeScreenRecording = true) : IModuleManager

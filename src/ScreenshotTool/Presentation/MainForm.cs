@@ -34,11 +34,13 @@ internal sealed class MainForm : Form
     private readonly ScreenshotSettingsPage _screenshotSettingsPage;
     private readonly SavePathSettingsPage _savePathPage;
     private readonly ModuleManagementPage _moduleManagementPage;
+    private readonly ApplicationUpdatePage _applicationUpdatePage;
     private readonly ScreenshotGalleryPage _galleryPage;
     private readonly Dictionary<string, IModuleSettingsPage> _moduleSettingsPages =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _backgroundIntegrationEnabled;
     private readonly bool _startInBackground;
+    private readonly ApplicationUpdateApplyResult? _pendingUpdateResult;
     private AppSettings _settings;
     private bool _isCapturing;
     private bool _isExiting;
@@ -56,6 +58,8 @@ internal sealed class MainForm : Form
         IFileLocationService fileLocationService,
         IModuleManager moduleManager,
         IStartupRegistrationService startupRegistrationService,
+        IApplicationUpdateService? applicationUpdateService = null,
+        ApplicationUpdateApplyResult? pendingUpdateResult = null,
         bool enableBackgroundIntegration = true,
         AppSettings? initialSettings = null,
         StartupWorkspaceReason startupWorkspaceReason = StartupWorkspaceReason.None,
@@ -72,6 +76,7 @@ internal sealed class MainForm : Form
         _startupRegistrationService = startupRegistrationService;
         _backgroundIntegrationEnabled = enableBackgroundIntegration;
         _startInBackground = startInBackground;
+        _pendingUpdateResult = pendingUpdateResult;
         _settings = initialSettings ?? settingsStore.Load();
         _startupWorkspaceReason = startupWorkspaceReason;
 
@@ -107,6 +112,9 @@ internal sealed class MainForm : Form
             _settings.OutputFolder,
             _settings.Preferences.ScreenshotFileNameMode);
         _moduleManagementPage = new ModuleManagementPage(_moduleManager, _fileLocationService);
+        _applicationUpdatePage = new ApplicationUpdatePage(
+            typeof(MainForm).Assembly.GetName().Version ?? new Version(1, 0, 0),
+            applicationUpdateService);
         _galleryPage = new ScreenshotGalleryPage(_settings.OutputFolder, _fileLocationService);
         ComposePages();
         WirePageEvents();
@@ -174,6 +182,13 @@ internal sealed class MainForm : Form
             800));
 
         _shell.AddPage(new AppPage(
+            "application-update",
+            "软件更新",
+            "通过 GitHub Releases 检查、校验并直接安装正式版",
+            _applicationUpdatePage,
+            850));
+
+        _shell.AddPage(new AppPage(
             GalleryPageId,
             "查看截图",
             "浏览保存目录中的最近截图，双击即可查看",
@@ -211,6 +226,7 @@ internal sealed class MainForm : Form
         _savePathPage.BrowseRequested += BrowseFolder;
         _savePathPage.OpenRequested += OpenOutputFolder;
         _moduleManagementPage.OperationCompleted += HandleModuleOperationCompleted;
+        _applicationUpdatePage.ExitRequested += (_, _) => ExitApplication();
     }
 
     private NotifyIcon BuildTrayIcon(bool visible)
@@ -700,6 +716,22 @@ internal sealed class MainForm : Form
                     : "轻截已更新，请检查本版本的设置",
                 AppTheme.Accent);
             Activate();
+        }
+
+        if (_pendingUpdateResult is not null)
+        {
+            _shell.ShowStatus(
+                _pendingUpdateResult.Message,
+                _pendingUpdateResult.Succeeded ? AppTheme.Success : AppTheme.Danger);
+            if (!_pendingUpdateResult.Succeeded)
+            {
+                MessageBox.Show(
+                    this,
+                    _pendingUpdateResult.Message,
+                    "软件更新未完成",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         if (_pendingHotkeyError is not null)

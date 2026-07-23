@@ -1,3 +1,4 @@
+using ScreenshotTool.Abstractions;
 using ScreenshotTool.Infrastructure;
 using ScreenshotTool.Infrastructure.Modules;
 using ScreenshotTool.Presentation;
@@ -8,12 +9,18 @@ internal sealed class CompositionRoot : IDisposable
 {
     private readonly GlobalHotkeyService _hotkeyService;
     private readonly ModuleHost _moduleHost;
+    private readonly IApplicationUpdateService _applicationUpdateService;
 
-    private CompositionRoot(MainForm mainForm, GlobalHotkeyService hotkeyService, ModuleHost moduleHost)
+    private CompositionRoot(
+        MainForm mainForm,
+        GlobalHotkeyService hotkeyService,
+        ModuleHost moduleHost,
+        IApplicationUpdateService applicationUpdateService)
     {
         MainForm = mainForm;
         _hotkeyService = hotkeyService;
         _moduleHost = moduleHost;
+        _applicationUpdateService = applicationUpdateService;
     }
 
     public MainForm MainForm { get; }
@@ -21,9 +28,11 @@ internal sealed class CompositionRoot : IDisposable
     public static CompositionRoot Create(bool startInBackground = false)
     {
         var settingsStore = new JsonSettingsStore();
+        var currentVersion =
+            typeof(CompositionRoot).Assembly.GetName().Version ?? new Version(1, 0, 0);
         var startupWorkspace = new StartupWorkspaceService(
             settingsStore,
-            typeof(CompositionRoot).Assembly.GetName().Version ?? new Version(1, 0, 0))
+            currentVersion)
             .PrepareLaunch();
         var hotkeyService = new GlobalHotkeyService();
         var captureService = new ScreenCaptureService();
@@ -35,6 +44,11 @@ internal sealed class CompositionRoot : IDisposable
             new WindowsRunStartupEntryStore(),
             Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath);
         var moduleHost = new ModuleHost(Path.Combine(AppContext.BaseDirectory, "Modules"));
+        var applicationUpdateService = new GitHubReleaseApplicationUpdateService(
+            currentVersion,
+            AppContext.BaseDirectory,
+            Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath);
+        var pendingUpdateResult = applicationUpdateService.TakePendingApplyResult();
         var mainForm = new MainForm(
             settingsStore,
             hotkeyService,
@@ -45,10 +59,16 @@ internal sealed class CompositionRoot : IDisposable
             fileLocationService,
             moduleHost,
             startupRegistrationService,
+            applicationUpdateService,
+            pendingUpdateResult,
             initialSettings: startupWorkspace.Settings,
             startupWorkspaceReason: startupWorkspace.Reason,
             startInBackground: startInBackground);
-        return new CompositionRoot(mainForm, hotkeyService, moduleHost);
+        return new CompositionRoot(
+            mainForm,
+            hotkeyService,
+            moduleHost,
+            applicationUpdateService);
     }
 
     public void Dispose()
@@ -56,5 +76,6 @@ internal sealed class CompositionRoot : IDisposable
         MainForm.Dispose();
         _moduleHost.Dispose();
         _hotkeyService.Dispose();
+        _applicationUpdateService.Dispose();
     }
 }
