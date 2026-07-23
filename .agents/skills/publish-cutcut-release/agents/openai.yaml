@@ -1,0 +1,4 @@
+interface:
+  display_name: "发布轻截正式版"
+  short_description: "验证、打包、合并并发布轻截 GitHub 正式版本资产"
+  default_prompt: "使用 $publish-cutcut-release 完成轻截下一正式版本的验证、打包、合并与 GitHub Release 发布。"

@@ -1231,7 +1231,7 @@ kbd {
 
 .download-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   align-items: center;
 }
@@ -1258,6 +1258,7 @@ kbd {
 }
 
 .button--portable,
+.button--lightweight-full,
 .button--full {
   display: flex;
   flex-direction: column;
@@ -1271,6 +1272,12 @@ kbd {
   box-shadow: none;
 }
 
+.button--lightweight-full {
+  color: #c9fff2;
+  background: linear-gradient(135deg, rgba(28, 191, 166, 0.1), rgba(31, 135, 255, 0.09));
+  border-color: rgba(83, 222, 196, 0.22);
+}
+
 .button--full {
   color: #c9e8ff;
   background: linear-gradient(135deg, rgba(31, 135, 255, 0.11), rgba(107, 72, 255, 0.1));
@@ -1278,6 +1285,7 @@ kbd {
 }
 
 .button--portable:hover,
+.button--lightweight-full:hover,
 .button--full:hover {
   color: #eaf3ff;
   background: rgba(255, 255, 255, 0.065);
@@ -1285,6 +1293,7 @@ kbd {
 }
 
 .button--portable small,
+.button--lightweight-full small,
 .button--full small {
   color: #7f96b6;
   font-size: 8px;
@@ -1292,15 +1301,21 @@ kbd {
 }
 
 .button--portable strong,
+.button--lightweight-full strong,
 .button--full strong {
   font-size: 12px;
 }
 
 .button--portable span,
+.button--lightweight-full span,
 .button--full span {
   color: #7187a7;
   font-size: 8px;
   font-weight: 600;
+}
+
+.button--lightweight-full small {
+  color: #82d9c7;
 }
 
 .button--full small {
@@ -1740,10 +1755,11 @@ footer > a:hover {
   }
 
   .download-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   .button--portable,
+  .button--lightweight-full,
   .button--full {
     padding-right: 7px;
     padding-left: 7px;
