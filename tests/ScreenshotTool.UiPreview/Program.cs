@@ -5,6 +5,7 @@ using ScreenshotTool.Editing;
 using ScreenshotTool.Presentation;
 using ScreenshotTool.Presentation.Pages;
 using ScreenshotTool.Presentation.Shell;
+using ScreenshotTool.Presentation.Theme;
 using ScreenshotTool.ScreenRecording;
 using System.Runtime.InteropServices;
 
@@ -107,6 +108,16 @@ internal static class Program
             RunApplicationUpdatePageSmoke(updatePageOutputPath);
             return 0;
         }
+        if (args is ["--gallery-context-menu-smoke", var galleryMenuOutputPath])
+        {
+            RunGalleryContextMenuSmoke(galleryMenuOutputPath);
+            return 0;
+        }
+        if (args is ["--existing-image-edit-smoke", var existingImageOutputPath])
+        {
+            RunExistingImageEditSmoke(existingImageOutputPath);
+            return 0;
+        }
 
         var previewFolder = Path.Combine(Path.GetTempPath(), "LightShotUiPreview");
         var form = new MainForm(
@@ -117,6 +128,7 @@ internal static class Program
             new PreviewClipboardService(),
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
+            new PreviewSavedScreenshotService(),
             new PreviewModuleManager(),
             new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false)
@@ -880,6 +892,228 @@ internal static class Program
         captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
     }
 
+    private static void RunGalleryContextMenuSmoke(string outputPath)
+    {
+        var galleryFolder = Path.Combine(
+            Path.GetTempPath(),
+            $"LightShotGalleryMenuSmoke-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(galleryFolder);
+        try
+        {
+            CreateGallerySmokeImage(
+                Path.Combine(galleryFolder, "第一张截图.png"),
+                Color.FromArgb(36, 99, 235),
+                "第一张截图");
+            Thread.Sleep(20);
+            CreateGallerySmokeImage(
+                Path.Combine(galleryFolder, "准备编辑的截图.png"),
+                Color.FromArgb(22, 163, 74),
+                "右键编辑");
+
+            using var page = new ScreenshotGalleryPage(
+                galleryFolder,
+                new PreviewFileLocationService(),
+                new PreviewSavedScreenshotService())
+            {
+                Dock = DockStyle.Fill
+            };
+            using var form = new Form
+            {
+                Text = "轻截 - 查看截图右键菜单验证",
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(80, 80),
+                ClientSize = new Size(760, 480),
+                BackColor = AppTheme.Canvas
+            };
+            form.Controls.Add(page);
+            form.Show();
+            page.RefreshScreenshots();
+            System.Windows.Forms.Application.DoEvents();
+
+            var listView = (ListView)typeof(ScreenshotGalleryPage).GetField(
+                    "_listView",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(page)!;
+            var menu = (ContextMenuStrip)typeof(ScreenshotGalleryPage).GetField(
+                    "_itemMenu",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(page)!;
+            if (listView.Items.Count != 2)
+            {
+                throw new InvalidOperationException(
+                    $"截图画廊没有加载两张验证图片，实际为 {listView.Items.Count} 张。");
+            }
+
+            var selectedItem = listView.Items[0];
+            selectedItem.Selected = true;
+            selectedItem.Focused = true;
+            var editItem = menu.Items["EditScreenshotMenuItem"] ??
+                           throw new InvalidOperationException("右键菜单缺少“编辑”选项。");
+            var deleteItem = menu.Items["DeleteScreenshotMenuItem"] ??
+                             throw new InvalidOperationException("右键菜单缺少“删除”选项。");
+            if (editItem.Text != "编辑" || deleteItem.Text != "删除")
+            {
+                throw new InvalidOperationException("截图右键菜单的编辑或删除文字不正确。");
+            }
+
+            menu.Show(
+                listView,
+                new Point(
+                    Math.Max(20, selectedItem.Bounds.Left + 84),
+                    Math.Max(20, selectedItem.Bounds.Top + 52)));
+            System.Windows.Forms.Application.DoEvents();
+            Thread.Sleep(120);
+            System.Windows.Forms.Application.DoEvents();
+
+            using (var captured = new Bitmap(form.Width, form.Height))
+            {
+                form.DrawToBitmap(captured, new Rectangle(Point.Empty, form.Size));
+                using var menuBitmap = new Bitmap(menu.Width, menu.Height);
+                menu.DrawToBitmap(
+                    menuBitmap,
+                    new Rectangle(Point.Empty, menu.Size));
+                var menuLocation = form.PointToClient(menu.PointToScreen(Point.Empty));
+                using var graphics = Graphics.FromImage(captured);
+                graphics.DrawImageUnscaled(menuBitmap, menuLocation);
+                var fullOutputPath = Path.GetFullPath(outputPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+                captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            string? requestedEditPath = null;
+            page.EditRequested += (_, eventArgs) => requestedEditPath = eventArgs.Path;
+            menu.Close();
+            editItem.PerformClick();
+            if (!string.Equals(
+                    Path.GetFullPath((string)selectedItem.Tag!),
+                    Path.GetFullPath(requestedEditPath ?? string.Empty),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("编辑菜单没有回传当前选中的截图路径。");
+            }
+
+            form.Close();
+            System.Windows.Forms.Application.DoEvents();
+        }
+        finally
+        {
+            Directory.Delete(galleryFolder, recursive: true);
+        }
+    }
+
+    private static void CreateGallerySmokeImage(
+        string path,
+        Color background,
+        string title)
+    {
+        using var image = new Bitmap(640, 360);
+        using var graphics = Graphics.FromImage(image);
+        graphics.Clear(background);
+        using var font = new Font("Microsoft YaHei UI", 30F, FontStyle.Bold);
+        using var brush = new SolidBrush(Color.White);
+        graphics.DrawString(title, font, brush, new PointF(34, 44));
+        graphics.FillRectangle(brush, new Rectangle(34, 126, 400, 8));
+        image.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    private static void RunExistingImageEditSmoke(string outputPath)
+    {
+        var screen = Screen.PrimaryScreen ??
+                     throw new InvalidOperationException("找不到主显示器。");
+        var bounds = new Rectangle(
+            screen.WorkingArea.Left + 40,
+            screen.WorkingArea.Top + 40,
+            Math.Min(900, screen.WorkingArea.Width - 80),
+            Math.Min(620, screen.WorkingArea.Height - 80));
+        if (bounds.Width < 640 || bounds.Height < 420)
+        {
+            throw new InvalidOperationException("主显示器空间不足，无法验证已有截图编辑界面。");
+        }
+
+        using var snapshotImage = new Bitmap(bounds.Width, bounds.Height);
+        using (var snapshotGraphics = Graphics.FromImage(snapshotImage))
+        {
+            snapshotGraphics.Clear(Color.FromArgb(31, 41, 55));
+        }
+        using var snapshot = new DesktopSnapshot((Bitmap)snapshotImage.Clone(), bounds);
+        using var existingImage = new Bitmap(640, 360);
+        using (var existingGraphics = Graphics.FromImage(existingImage))
+        {
+            existingGraphics.Clear(Color.FromArgb(15, 23, 42));
+            using var accent = new SolidBrush(Color.FromArgb(239, 68, 68));
+            existingGraphics.FillRectangle(accent, new Rectangle(40, 48, 240, 124));
+            using var font = new Font("Microsoft YaHei UI", 26F, FontStyle.Bold);
+            using var textBrush = new SolidBrush(Color.White);
+            existingGraphics.DrawString("正在编辑这张截图", font, textBrush, 46, 214);
+        }
+
+        var width = new ToolWidthController(ToolWidthRange.Create(1, 32), 4);
+        var annotations = new LiveAnnotationSessionFactory(
+            new PreviewClipboardService(),
+            new DrawingToolCoefficients(),
+            AnnotationRotationStep.DefaultDegrees,
+            DrawingCursorShape.Circle);
+        var overlay = new CaptureOverlayForm(
+            snapshot,
+            new PreviewImageSaveService(),
+            new PreviewClipboardService(),
+            new PreviewWindowLocator(),
+            new PreviewModuleManager(),
+            SelectionMoveAnnotationStrategyFactory.Create(StickerSelectionMoveMode.FollowSelection),
+            width,
+            annotations,
+            new Dictionary<string, bool>(),
+            new Dictionary<string, int>(),
+            Path.GetTempPath(),
+            ScreenshotFileNameMode.DateTime,
+            initialEditImage: existingImage);
+        overlay.Show();
+        System.Windows.Forms.Application.DoEvents();
+        Thread.Sleep(120);
+        System.Windows.Forms.Application.DoEvents();
+
+        var featureHost = (ICaptureFeatureHost)overlay;
+        var liveFeatureHost = (ILiveCaptureFeatureHost)overlay;
+        if (!featureHost.HasSelection || !liveFeatureHost.HasEdits)
+        {
+            throw new InvalidOperationException("已有截图没有作为当前截图选区进入编辑模式。");
+        }
+        if (!overlay.Text.Contains("编辑已有截图", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("已有截图编辑窗口没有显示正确的编辑状态。");
+        }
+
+        using (var rendered = (Bitmap)typeof(CaptureOverlayForm).GetMethod(
+                       "RenderSelection",
+                       System.Reflection.BindingFlags.Instance |
+                       System.Reflection.BindingFlags.NonPublic)!
+                   .Invoke(overlay, null)!)
+        {
+            if (rendered.Size != existingImage.Size)
+            {
+                throw new InvalidOperationException(
+                    $"已有截图导出尺寸发生变化：{rendered.Size}。");
+            }
+            if (rendered.GetPixel(80, 90).ToArgb() != Color.FromArgb(239, 68, 68).ToArgb())
+            {
+                throw new InvalidOperationException("已有截图的原始像素没有进入最终编辑结果。");
+            }
+        }
+
+        using (var captured = new Bitmap(overlay.Width, overlay.Height))
+        {
+            overlay.DrawToBitmap(captured, new Rectangle(Point.Empty, overlay.Size));
+            var fullOutputPath = Path.GetFullPath(outputPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+            captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+        }
+
+        overlay.Close();
+        System.Windows.Forms.Application.DoEvents();
+    }
+
     private static void RunSelectAllDisplaysSmoke()
     {
         var virtualDesktop = SystemInformation.VirtualScreen;
@@ -1086,6 +1320,7 @@ internal static class Program
             new PreviewClipboardService(),
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
+            new PreviewSavedScreenshotService(),
             new PreviewModuleManager(),
             new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false)
@@ -1146,7 +1381,7 @@ internal static class Program
         }
         if (!navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
             shell.SelectedPageId != "screenshot-tool.screen-recording.settings" ||
-            !shell.VersionText.Equals("v1.11.3", StringComparison.Ordinal))
+            !shell.VersionText.Equals("v1.11.4", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"主界面没有正确显示录屏分页或版本号，当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");
@@ -1169,6 +1404,7 @@ internal static class Program
             new PreviewClipboardService(),
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
+            new PreviewSavedScreenshotService(),
             new PreviewModuleManager(includeScreenRecording: false),
             new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false);
@@ -1212,7 +1448,8 @@ internal static class Program
             new PreviewClipboardService(),
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
-            new PreviewModuleManager(),
+            new PreviewSavedScreenshotService(),
+            new PreviewModuleManager(includeDisabledPackage: true),
             new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false)
         {
@@ -1245,15 +1482,65 @@ internal static class Program
         {
             throw new InvalidOperationException("插件模块页面没有使用纵向单列布局。");
         }
-        var pageText = string.Join(
+        var enabledPageText = string.Join(
             '\n',
             page.Controls.Cast<Control>().SelectMany(GetControlTree).Select(control => control.Text));
-        foreach (var expectedText in new[] { "录屏", "禁用模块", "永久删除", "前往下载" })
+        foreach (var expectedText in new[]
+                 {
+                     "已启用模块 (1)",
+                     "已禁用模块 (1)",
+                     "录屏",
+                     "禁用模块",
+                     "永久删除",
+                     "前往下载"
+                 })
         {
-            if (!pageText.Contains(expectedText, StringComparison.Ordinal))
+            if (!enabledPageText.Contains(expectedText, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException($"插件模块页面缺少操作：{expectedText}");
             }
+        }
+        if (enabledPageText.Contains("PP-OCR Tiny 文字识别", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("已启用模块分页显示了禁用模块。");
+        }
+        var enabledTitle = page.Controls
+            .Cast<Control>()
+            .SelectMany(GetControlTree)
+            .Single(control => control.Name == "ModuleTitle:ScreenRecording");
+        if (enabledTitle.ForeColor != AppTheme.Success)
+        {
+            throw new InvalidOperationException("已启用模块名称没有使用绿色状态色。");
+        }
+
+        var disabledTab = page.Controls
+            .Cast<Control>()
+            .SelectMany(GetControlTree)
+            .OfType<Button>()
+            .Single(button => button.Name == "DisabledModulesTab");
+        disabledTab.PerformClick();
+        System.Windows.Forms.Application.DoEvents();
+        var disabledPageText = string.Join(
+            '\n',
+            page.Controls.Cast<Control>().SelectMany(GetControlTree).Select(control => control.Text));
+        foreach (var expectedText in new[] { "PP-OCR Tiny 文字识别", "启用模块", "永久删除" })
+        {
+            if (!disabledPageText.Contains(expectedText, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"已禁用模块分页缺少操作：{expectedText}");
+            }
+        }
+        if (disabledPageText.Contains("录屏", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("已禁用模块分页显示了启用模块。");
+        }
+        var disabledTitle = page.Controls
+            .Cast<Control>()
+            .SelectMany(GetControlTree)
+            .Single(control => control.Name == "ModuleTitle:PaddleOcrTiny");
+        if (disabledTitle.ForeColor != AppTheme.Danger)
+        {
+            throw new InvalidOperationException("已禁用模块名称没有使用红色状态色。");
         }
 
         using var captured = new Bitmap(form.Width, form.Height);
@@ -1261,6 +1548,42 @@ internal static class Program
         var fullOutputPath = Path.GetFullPath(outputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
         captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+
+        var enableButton = page.Controls
+            .Cast<Control>()
+            .SelectMany(GetControlTree)
+            .OfType<Button>()
+            .Single(button => button.Text == "启用模块");
+        enableButton.PerformClick();
+        System.Windows.Forms.Application.DoEvents();
+        var movedPageText = string.Join(
+            '\n',
+            page.Controls.Cast<Control>().SelectMany(GetControlTree).Select(control => control.Text));
+        if (!movedPageText.Contains("已启用模块 (2)", StringComparison.Ordinal) ||
+            !movedPageText.Contains("已禁用模块 (0)", StringComparison.Ordinal) ||
+            !movedPageText.Contains("没有已禁用的模块", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("重新启用后模块没有从禁用分页移出。");
+        }
+
+        var enabledTab = page.Controls
+            .Cast<Control>()
+            .SelectMany(GetControlTree)
+            .OfType<Button>()
+            .Single(button => button.Name == "EnabledModulesTab");
+        enabledTab.PerformClick();
+        System.Windows.Forms.Application.DoEvents();
+        var enabledTitles = page.Controls
+            .Cast<Control>()
+            .SelectMany(GetControlTree)
+            .Where(control => control.Name.StartsWith("ModuleTitle:", StringComparison.Ordinal))
+            .ToArray();
+        if (enabledTitles.Length != 2 ||
+            enabledTitles.Any(title => title.ForeColor != AppTheme.Success))
+        {
+            throw new InvalidOperationException("重新启用后的模块没有进入启用分页并显示为绿色。");
+        }
+
         form.Close();
         System.Windows.Forms.Application.DoEvents();
     }
@@ -1352,6 +1675,7 @@ internal static class Program
             new PreviewClipboardService(),
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
+            new PreviewSavedScreenshotService(),
             new PreviewModuleManager(),
             new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false)
@@ -1523,6 +1847,7 @@ internal static class Program
             new PreviewClipboardService(),
             new PreviewWindowLocator(),
             new PreviewFileLocationService(),
+            new PreviewSavedScreenshotService(),
             new PreviewModuleManager(),
             new PreviewStartupRegistrationService(),
             enableBackgroundIntegration: false);
@@ -1706,6 +2031,20 @@ internal sealed class PreviewFileLocationService : IFileLocationService
     }
 }
 
+internal sealed class PreviewSavedScreenshotService : ISavedScreenshotService
+{
+    public bool IsSupportedImage(string path) => Path.GetExtension(path).ToLowerInvariant() is
+        ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif";
+
+    public Bitmap LoadForEditing(string folderPath, string filePath)
+    {
+        using var source = Image.FromFile(filePath);
+        return new Bitmap(source);
+    }
+
+    public void MoveToRecycleBin(string folderPath, string filePath) => File.Delete(filePath);
+}
+
 internal sealed class PreviewStartupRegistrationService : IStartupRegistrationService
 {
     public bool IsEnabled { get; private set; } = true;
@@ -1756,12 +2095,16 @@ internal sealed class PreviewApplicationUpdateService : IApplicationUpdateServic
     }
 }
 
-internal sealed class PreviewModuleManager(bool includeScreenRecording = true) : IModuleManager
+internal sealed class PreviewModuleManager(
+    bool includeScreenRecording = true,
+    bool includeDisabledPackage = false) : IModuleManager
 {
     private readonly bool _includeScreenRecording = includeScreenRecording;
     private bool _refreshed;
     private bool _packageExists = includeScreenRecording;
     private bool _packageEnabled = true;
+    private bool _disabledPackageExists = includeDisabledPackage;
+    private bool _disabledPackageEnabled;
 
     public string ModulesDirectory => Path.Combine(Path.GetTempPath(), "LightShotUiPreviewModules");
 
@@ -1774,27 +2117,56 @@ internal sealed class PreviewModuleManager(bool includeScreenRecording = true) :
 
     public IReadOnlyList<ModuleInfo> GetModules() => [];
 
-    public IReadOnlyList<ModulePackageInfo> GetInstalledPackages() => _packageExists
-        ?
-        [
-            new ModulePackageInfo(
+    public IReadOnlyList<ModulePackageInfo> GetInstalledPackages()
+    {
+        var packages = new List<ModulePackageInfo>();
+        if (_packageExists)
+        {
+            packages.Add(new ModulePackageInfo(
                 "ScreenRecording",
                 "lightshot.screen-recording",
                 "录屏",
                 new Version(1, 0),
                 Path.Combine(ModulesDirectory, "ScreenRecording"),
-                _packageEnabled ? ModulePackageState.Enabled : ModulePackageState.Disabled)
-        ]
-        : [];
+                _packageEnabled ? ModulePackageState.Enabled : ModulePackageState.Disabled));
+        }
+        if (_disabledPackageExists)
+        {
+            packages.Add(new ModulePackageInfo(
+                "PaddleOcrTiny",
+                "screenshot-tool.paddle-ocr.tiny",
+                "PP-OCR Tiny 文字识别",
+                new Version(1, 0),
+                Path.Combine(ModulesDirectory, "PaddleOcrTiny"),
+                _disabledPackageEnabled ? ModulePackageState.Enabled : ModulePackageState.Disabled));
+        }
+
+        return packages;
+    }
 
     public ModuleOperationResult SetPackageEnabled(string packageName, bool enabled)
     {
+        if (packageName == "PaddleOcrTiny")
+        {
+            _disabledPackageEnabled = enabled;
+            return new(
+                true,
+                enabled ? "已启用 PP-OCR Tiny" : "已禁用 PP-OCR Tiny",
+                new([], [], true));
+        }
+
         _packageEnabled = enabled;
         return new(true, enabled ? "已启用录屏" : "已禁用录屏", new([], [], true));
     }
 
     public ModuleOperationResult DeletePackage(string packageName)
     {
+        if (packageName == "PaddleOcrTiny")
+        {
+            _disabledPackageExists = false;
+            return new(true, "已永久删除 PP-OCR Tiny", new([], [], true));
+        }
+
         _packageExists = false;
         return new(true, "已永久删除录屏", new([], [], true));
     }

@@ -103,7 +103,8 @@ internal sealed class CaptureOverlayForm : Form,
         DrawingCursorShape drawingCursorShape = DrawingCursorShape.Circle,
         bool annotationSnappingEnabled = AnnotationLayoutOptions.DefaultSnappingEnabled,
         int annotationSnapThresholdPixels = AnnotationLayoutOptions.DefaultSnapThresholdPixels,
-        int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels)
+        int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels,
+        Bitmap? initialEditImage = null)
     {
         _snapshot = snapshot;
         _dimmedImage = CreateDimmedImage(snapshot.Image);
@@ -175,6 +176,11 @@ internal sealed class CaptureOverlayForm : Form,
             HideDrawingCursorIndicator();
             CancelTextEditor(commit: true);
         };
+
+        if (initialEditImage is not null)
+        {
+            InitializeExistingImageEdit(initialEditImage);
+        }
     }
 
     public event EventHandler<string>? ArtifactSaved;
@@ -337,6 +343,75 @@ internal sealed class CaptureOverlayForm : Form,
         using var shade = new SolidBrush(Color.FromArgb(118, 0, 0, 0));
         graphics.FillRectangle(shade, new Rectangle(Point.Empty, source.Size));
         return dimmed;
+    }
+
+    internal static Rectangle CalculateInitialEditSelection(
+        Rectangle clientBounds,
+        Size imageSize)
+    {
+        if (clientBounds.Width <= 0 || clientBounds.Height <= 0 ||
+            imageSize.Width <= 0 || imageSize.Height <= 0)
+        {
+            return Rectangle.Empty;
+        }
+
+        var horizontalMargin = Math.Clamp(clientBounds.Width / 12, 24, 80);
+        var verticalMargin = Math.Clamp(clientBounds.Height / 10, 32, 96);
+        var availableSize = new Size(
+            Math.Max(1, clientBounds.Width - horizontalMargin * 2),
+            Math.Max(1, clientBounds.Height - verticalMargin * 2));
+        var zoom = CaptureEditorViewportLayout.CalculateFitZoom(availableSize, imageSize);
+        var displaySize = CaptureEditorViewportLayout.CalculateCanvasSize(imageSize, zoom);
+        return new Rectangle(
+            clientBounds.Left + (clientBounds.Width - displaySize.Width) / 2,
+            clientBounds.Top + (clientBounds.Height - displaySize.Height) / 2,
+            displaySize.Width,
+            displaySize.Height);
+    }
+
+    private void InitializeExistingImageEdit(Bitmap image)
+    {
+        if (image.Width <= 0 || image.Height <= 0)
+        {
+            throw new ArgumentException("待编辑截图尺寸无效。", nameof(image));
+        }
+
+        var editable = new Bitmap(
+            image.Width,
+            image.Height,
+            System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        try
+        {
+            using (var graphics = Graphics.FromImage(editable))
+            {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.DrawImageUnscaled(image, Point.Empty);
+            }
+
+            _selection = CalculateInitialEditSelection(ClientRectangle, editable.Size);
+            if (_selection.IsEmpty)
+            {
+                throw new InvalidOperationException("当前屏幕空间不足，无法打开截图编辑框。");
+            }
+
+            _replacementCaptureImage = editable;
+            editable = null!;
+            _replacementZoom = Math.Min(
+                1D,
+                Math.Min(
+                    _selection.Width / (double)_replacementCaptureImage.Width,
+                    _selection.Height / (double)_replacementCaptureImage.Height));
+            _replacementScroll = Point.Empty;
+            _hasSelection = true;
+            Text = "轻截 - 编辑已有截图";
+            SelectTool(EditorTool.None);
+            PositionToolbar();
+            _toolbar.Visible = true;
+        }
+        finally
+        {
+            editable?.Dispose();
+        }
     }
 
     private Rectangle GetDisplaySelection() =>

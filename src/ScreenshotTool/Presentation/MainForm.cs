@@ -22,6 +22,7 @@ internal sealed class MainForm : Form
     private readonly IClipboardService _clipboardService;
     private readonly IWindowLocator _windowLocator;
     private readonly IFileLocationService _fileLocationService;
+    private readonly ISavedScreenshotService _savedScreenshotService;
     private readonly IModuleManager _moduleManager;
     private readonly IStartupRegistrationService _startupRegistrationService;
     private readonly StartupWorkspaceReason _startupWorkspaceReason;
@@ -56,6 +57,7 @@ internal sealed class MainForm : Form
         IClipboardService clipboardService,
         IWindowLocator windowLocator,
         IFileLocationService fileLocationService,
+        ISavedScreenshotService savedScreenshotService,
         IModuleManager moduleManager,
         IStartupRegistrationService startupRegistrationService,
         IApplicationUpdateService? applicationUpdateService = null,
@@ -72,6 +74,7 @@ internal sealed class MainForm : Form
         _clipboardService = clipboardService;
         _windowLocator = windowLocator;
         _fileLocationService = fileLocationService;
+        _savedScreenshotService = savedScreenshotService;
         _moduleManager = moduleManager;
         _startupRegistrationService = startupRegistrationService;
         _backgroundIntegrationEnabled = enableBackgroundIntegration;
@@ -115,7 +118,10 @@ internal sealed class MainForm : Form
         _applicationUpdatePage = new ApplicationUpdatePage(
             typeof(MainForm).Assembly.GetName().Version ?? new Version(1, 0, 0),
             applicationUpdateService);
-        _galleryPage = new ScreenshotGalleryPage(_settings.OutputFolder, _fileLocationService);
+        _galleryPage = new ScreenshotGalleryPage(
+            _settings.OutputFolder,
+            _fileLocationService,
+            _savedScreenshotService);
         ComposePages();
         WirePageEvents();
 
@@ -191,7 +197,7 @@ internal sealed class MainForm : Form
         _shell.AddPage(new AppPage(
             GalleryPageId,
             "查看截图",
-            "浏览保存目录中的最近截图，双击即可查看",
+            "浏览保存目录中的最近截图，双击查看或右键编辑、删除",
             _galleryPage,
             900));
     }
@@ -226,6 +232,7 @@ internal sealed class MainForm : Form
         _savePathPage.BrowseRequested += BrowseFolder;
         _savePathPage.OpenRequested += OpenOutputFolder;
         _moduleManagementPage.OperationCompleted += HandleModuleOperationCompleted;
+        _galleryPage.EditRequested += BeginEditingScreenshot;
         _applicationUpdatePage.ExitRequested += (_, _) => ExitApplication();
     }
 
@@ -581,7 +588,14 @@ internal sealed class MainForm : Form
         }
     }
 
-    private async void BeginCapture()
+    private void BeginCapture() => BeginCaptureCore(null);
+
+    private void BeginEditingScreenshot(
+        object? sender,
+        ScreenshotEditRequestedEventArgs e) =>
+        BeginCaptureCore(e.Path);
+
+    private async void BeginCaptureCore(string? savedScreenshotPath)
     {
         if (_isCapturing || IsDisposed)
         {
@@ -598,6 +612,7 @@ internal sealed class MainForm : Form
         var originalOpacity = Opacity;
         var originalWindowState = WindowState;
         var captureProtectionApplied = false;
+        Bitmap? initialEditImage = null;
         if (hideMainWindow)
         {
             captureProtectionApplied = WindowCaptureProtection.TryExclude(this);
@@ -612,6 +627,13 @@ internal sealed class MainForm : Form
 
         try
         {
+            if (savedScreenshotPath is not null)
+            {
+                initialEditImage = _savedScreenshotService.LoadForEditing(
+                    _settings.OutputFolder,
+                    savedScreenshotPath);
+            }
+
             await Task.Yield();
             DwmFlush();
             await Task.Delay(90);
@@ -646,7 +668,8 @@ internal sealed class MainForm : Form
                 _settings.Preferences.DrawingCursorShape,
                 _settings.Preferences.AnnotationSnappingEnabled,
                 _settings.Preferences.AnnotationSnapThresholdPixels,
-                _settings.Preferences.CtrlDragStepPixels);
+                _settings.Preferences.CtrlDragStepPixels,
+                initialEditImage);
             overlay.ArtifactSaved += (_, path) =>
             {
                 _shell.ShowStatus($"已保存：{Path.GetFileName(path)}", AppTheme.Success);
@@ -661,11 +684,13 @@ internal sealed class MainForm : Form
         }
         catch (Exception exception)
         {
-            MessageBox.Show($"截图失败：{exception.Message}", "截图失败",
+            var action = savedScreenshotPath is null ? "截图" : "编辑截图";
+            MessageBox.Show($"{action}失败：{exception.Message}", $"{action}失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
+            initialEditImage?.Dispose();
             _isCapturing = false;
             Opacity = originalOpacity;
             if (hideMainWindow && mainWindowWasVisible && !_isExiting)

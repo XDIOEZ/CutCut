@@ -12,7 +12,11 @@ internal sealed class ModuleManagementPage : UserControl
     private readonly IFileLocationService _fileLocationService;
     private readonly FlowLayoutPanel _content;
     private readonly Panel _introCard;
+    private readonly TableLayoutPanel _statusTabs;
+    private readonly Button _enabledModulesTab;
+    private readonly Button _disabledModulesTab;
     private readonly List<Control> _packageCards = [];
+    private ModulePageFilter _selectedFilter = ModulePageFilter.Enabled;
 
     public ModuleManagementPage(
         IModuleManager moduleManager,
@@ -35,6 +39,18 @@ internal sealed class ModuleManagementPage : UserControl
 
         _introCard = CreateIntroCard();
         _content.Controls.Add(_introCard);
+
+        _enabledModulesTab = CreateStatusTab(
+            "EnabledModulesTab",
+            "已启用模块",
+            (_, _) => SelectFilter(ModulePageFilter.Enabled));
+        _disabledModulesTab = CreateStatusTab(
+            "DisabledModulesTab",
+            "已禁用模块",
+            (_, _) => SelectFilter(ModulePageFilter.Disabled));
+        _statusTabs = CreateStatusTabs(_enabledModulesTab, _disabledModulesTab);
+        _content.Controls.Add(_statusTabs);
+
         Resize += (_, _) => ResizeCards();
         RefreshPackages();
     }
@@ -53,13 +69,28 @@ internal sealed class ModuleManagementPage : UserControl
         try
         {
             var packages = _moduleManager.GetInstalledPackages();
+            var enabledPackages = packages
+                .Where(package => package.State == ModulePackageState.Enabled)
+                .ToArray();
+            var disabledPackages = packages
+                .Where(package => package.State != ModulePackageState.Enabled)
+                .ToArray();
+            UpdateStatusTabs(enabledPackages.Length, disabledPackages.Length);
+
             if (packages.Count == 0)
             {
                 AddPackageCard(CreateEmptyCard());
             }
             else
             {
-                foreach (var package in packages)
+                var visiblePackages = _selectedFilter == ModulePageFilter.Enabled
+                    ? enabledPackages
+                    : disabledPackages;
+                if (visiblePackages.Length == 0)
+                {
+                    AddPackageCard(CreateFilterEmptyCard(_selectedFilter));
+                }
+                foreach (var package in visiblePackages)
                 {
                     AddPackageCard(CreatePackageCard(package));
                 }
@@ -68,6 +99,7 @@ internal sealed class ModuleManagementPage : UserControl
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
+            UpdateStatusTabs(0, 0);
             AddPackageCard(CreateErrorCard(exception.Message));
         }
 
@@ -119,6 +151,39 @@ internal sealed class ModuleManagementPage : UserControl
         return card;
     }
 
+    private static TableLayoutPanel CreateStatusTabs(
+        Button enabledModulesTab,
+        Button disabledModulesTab)
+    {
+        var tabs = new TableLayoutPanel
+        {
+            Height = 48,
+            BackColor = AppTheme.Canvas,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0, 0, 0, 16),
+            Padding = Padding.Empty
+        };
+        tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        tabs.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        enabledModulesTab.Margin = new Padding(0, 0, 6, 0);
+        disabledModulesTab.Margin = new Padding(6, 0, 0, 0);
+        tabs.Controls.Add(enabledModulesTab, 0, 0);
+        tabs.Controls.Add(disabledModulesTab, 1, 0);
+        return tabs;
+    }
+
+    private static Button CreateStatusTab(string name, string text, EventHandler click)
+    {
+        var tab = AppTheme.CreateButton(text);
+        tab.Name = name;
+        tab.Dock = DockStyle.Fill;
+        tab.AccessibleRole = AccessibleRole.PageTab;
+        tab.Click += click;
+        return tab;
+    }
+
     private Panel CreatePackageCard(ModulePackageInfo package)
     {
         var card = new Panel
@@ -130,10 +195,13 @@ internal sealed class ModuleManagementPage : UserControl
         };
         var title = new Label
         {
+            Name = $"ModuleTitle:{package.PackageName}",
             Text = package.DisplayName,
             AutoSize = true,
             Font = AppTheme.CreateFont(11F, FontStyle.Bold),
-            ForeColor = AppTheme.Text,
+            ForeColor = package.State == ModulePackageState.Enabled
+                ? AppTheme.Success
+                : AppTheme.Danger,
             Location = new Point(26, 20)
         };
         var metadata = new Label
@@ -231,6 +299,18 @@ internal sealed class ModuleManagementPage : UserControl
         card.Height = 112;
         return card;
     }
+
+    private static Panel CreateFilterEmptyCard(ModulePageFilter filter) => filter switch
+    {
+        ModulePageFilter.Enabled => CreateMessageCard(
+            "没有已启用的模块",
+            "已安装模块都处于禁用或加载失败状态，可切换到“已禁用模块”分页重新启用。",
+            AppTheme.MutedText),
+        _ => CreateMessageCard(
+            "没有已禁用的模块",
+            "当前安装的插件模块都已启用。",
+            AppTheme.MutedText)
+    };
 
     private static Panel CreateErrorCard(string message) => CreateMessageCard(
         "无法读取模块列表",
@@ -330,6 +410,48 @@ internal sealed class ModuleManagementPage : UserControl
         }
     }
 
+    private void SelectFilter(ModulePageFilter filter)
+    {
+        if (_selectedFilter == filter)
+        {
+            return;
+        }
+
+        _selectedFilter = filter;
+        RefreshPackages();
+    }
+
+    private void UpdateStatusTabs(int enabledCount, int disabledCount)
+    {
+        _enabledModulesTab.Text = $"已启用模块 ({enabledCount})";
+        _disabledModulesTab.Text = $"已禁用模块 ({disabledCount})";
+        ApplyStatusTabStyle(
+            _enabledModulesTab,
+            _selectedFilter == ModulePageFilter.Enabled,
+            AppTheme.Success);
+        ApplyStatusTabStyle(
+            _disabledModulesTab,
+            _selectedFilter == ModulePageFilter.Disabled,
+            AppTheme.Danger);
+    }
+
+    private static void ApplyStatusTabStyle(Button tab, bool selected, Color accent)
+    {
+        tab.BackColor = selected
+            ? Color.FromArgb(
+                BlendWithWhite(accent.R),
+                BlendWithWhite(accent.G),
+                BlendWithWhite(accent.B))
+            : AppTheme.Surface;
+        tab.ForeColor = selected ? accent : AppTheme.MutedText;
+        tab.FlatAppearance.BorderColor = selected ? accent : AppTheme.Border;
+        tab.FlatAppearance.MouseOverBackColor = selected
+            ? tab.BackColor
+            : Color.FromArgb(241, 245, 249);
+
+        static int BlendWithWhite(byte channel) => (channel * 15 + 255 * 85) / 100;
+    }
+
     private void AddPackageCard(Control card)
     {
         _packageCards.Add(card);
@@ -343,6 +465,7 @@ internal sealed class ModuleManagementPage : UserControl
             _content.ClientSize.Width - _content.Padding.Horizontal -
             SystemInformation.VerticalScrollBarWidth - 2);
         _introCard.Width = width;
+        _statusTabs.Width = width;
         foreach (var card in _packageCards)
         {
             card.Width = width;
@@ -362,6 +485,12 @@ internal sealed class ModuleManagementPage : UserControl
         ModulePackageState.LoadFailed => package.ErrorMessage ?? "加载失败，可尝试重新启用。",
         _ => "状态未知"
     };
+}
+
+internal enum ModulePageFilter
+{
+    Enabled,
+    Disabled
 }
 
 internal sealed class ModuleOperationCompletedEventArgs(ModuleOperationResult result) : EventArgs

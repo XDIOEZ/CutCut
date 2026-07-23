@@ -5,14 +5,14 @@
 ## 当前快照
 
 - 快照日期：2026-07-23。
-- 主程序版本：`1.11.3`。
+- 主程序版本：`1.11.4`。
 - 长截图模块版本：`1.1.0`。
 - 录屏模块版本：`1.7.0`，最低要求主程序 `1.10.0`。
 - 本地 OCR 模块版本：`1.1.0`，最低要求主程序 `1.11.0`。
 - PP-OCR Tiny 与 PP-OCR Small 模块版本：均为 `1.0.0`，最低要求主程序 `1.11.0`。
 - 二维码扫描模块版本：`1.0.0`，最低要求主程序 `1.11.0`。
 - GitHub 仓库：`XDIOEZ/CutCut`，默认分支 `main`。
-- 当前 Release：`v1.11.3`。
+- 当前 Release：`v1.11.4`。
 - 发布首页：<https://xdioez.github.io/CutCut/>。
 - 模块下载页：<https://xdioez.github.io/CutCut/modules.html>。
 
@@ -25,9 +25,17 @@
 - “开机自动启动”是重要功能：使用当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `LightShotCN`，命令为带引号的当前 EXE 绝对路径加 `--background`。不要求管理员权限，登录后安静进入托盘。
 - 相关入口：`Application/StartupWorkspaceService.cs`、`Core/StartupWorkspacePolicy.cs`、`Infrastructure/WindowsRunStartupEntryStore.cs`、`Application/StartupRegistrationService.cs`、`Presentation/MainForm.cs`。
 
+### 查看截图与再次编辑
+
+- “查看截图”页保留双击使用系统图片查看器打开的行为；右键当前缩略图时提供“编辑”和“删除”两个选项。
+- “编辑”把选中的已保存图片载入现有截图覆盖层，显示整张原图并复用矩形、椭圆、箭头、画笔、文字、马赛克、撤销、粗细和颜色等编辑能力。保存时沿用截图命名规则生成新的 PNG，不覆盖或删除原文件。
+- “删除”必须二次确认，并将文件移入 Windows 回收站而不是永久删除；只允许管理当前截图保存目录直属层级中的受支持图片。
+- 相关入口：`Presentation/Pages/ScreenshotGalleryPage.cs`、`Abstractions/ISavedScreenshotService.cs`、`Infrastructure/SavedScreenshotService.cs`、`Presentation/MainForm.cs`、`Presentation/CaptureOverlayForm.cs`。
+
 ### 插件与设置页
 
 - 设置工作台包含宿主级“插件模块”页，使用纵向单列布局。用户可以查看已安装或已禁用模块，并自主启用、禁用或永久删除。
+- “插件模块”页内使用“已启用模块”和“已禁用模块”两个状态分页；分页只显示对应状态的模块，加载失败模块归入禁用分页以保留恢复入口。已启用模块名称使用绿色，已禁用或加载失败模块名称使用红色。
 - 禁用只退役程序集并保留文件和跨重启标记；永久删除会删除该模块自己的一级目录。删除前必须明确提示不可恢复，并说明重新安装需要前往模块发布页下载。
 - 模块自己的设置页仍由模块契约动态加入导航；模块禁用或删除后立即移除，重新启用后恢复。
 - 轻量版和重量版预装长截图、本地 OCR、二维码扫描与录屏模块，但仍要保留独立模块包，供按需安装或永久删除后恢复。PP-OCR Tiny/Small 模型不进入这两个常规包，避免破坏 5 MiB / 90 MiB 体积约束；轻量完全版与完全版分别以轻量版、重量版为底包，额外预装 Tiny、Small 及其模型，作为依赖系统 .NET 或自带运行库的一次装齐全部插件选项。
@@ -76,7 +84,7 @@
 | 录屏独立模块 | `screen-recording-addon-win-x64.zip` | 模块页录屏按钮 |
 | 校验和 | `SHA256SUMS.txt` | Release 完整性校验 |
 
-`v1.11.3` 起正式提供表中的全部十一个固定资产。`v1.11.3` 发布候选包核对结果为：
+`v1.11.3` 起正式提供表中的全部十一个固定资产。`v1.11.4` 发布候选包核对结果为：
 
 - 轻量完整包约 `1.24 MiB`。
 - 重量完整包约 `59.04 MiB`。

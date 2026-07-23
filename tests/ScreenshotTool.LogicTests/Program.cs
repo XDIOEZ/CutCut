@@ -438,6 +438,106 @@ runEntryStore.Value = "\"C:\\OldLocation\\ScreenshotTool.exe\" --background";
 AssertTrue(!startupRegistration.IsEnabled, "程序移动后不会把旧路径误认为当前开机启动项");
 startupRegistration.SetEnabled(enabled: false);
 AssertTrue(runEntryStore.Value is null, "关闭开机启动会永久移除当前用户启动项");
+
+var savedScreenshotTestRoot = Path.Combine(
+    Path.GetTempPath(),
+    $"LightShotSavedScreenshotTests-{Guid.NewGuid():N}");
+var outsideScreenshotTestRoot = Path.Combine(
+    Path.GetTempPath(),
+    $"LightShotOutsideScreenshotTests-{Guid.NewGuid():N}");
+Directory.CreateDirectory(savedScreenshotTestRoot);
+Directory.CreateDirectory(outsideScreenshotTestRoot);
+try
+{
+    var savedScreenshotPath = Path.Combine(savedScreenshotTestRoot, "可编辑截图.png");
+    using (var savedScreenshot = new Bitmap(48, 32))
+    {
+        savedScreenshot.SetPixel(10, 12, Color.CornflowerBlue);
+        savedScreenshot.Save(
+            savedScreenshotPath,
+            System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    string? recycledScreenshotPath = null;
+    var savedScreenshotService = new SavedScreenshotService(path =>
+    {
+        recycledScreenshotPath = path;
+        File.Delete(path);
+    });
+    AssertTrue(
+        savedScreenshotService.IsSupportedImage(savedScreenshotPath),
+        "截图管理识别 PNG 图片");
+    AssertTrue(
+        !savedScreenshotService.IsSupportedImage(
+            Path.Combine(savedScreenshotTestRoot, "说明.txt")),
+        "截图管理拒绝非图片文件");
+    using (var editableScreenshot = savedScreenshotService.LoadForEditing(
+               savedScreenshotTestRoot,
+               savedScreenshotPath))
+    {
+        AssertEqual(new Size(48, 32), editableScreenshot.Size, "编辑已有截图保留原始像素尺寸");
+        AssertEqual(
+            Color.CornflowerBlue.ToArgb(),
+            editableScreenshot.GetPixel(10, 12).ToArgb(),
+            "编辑已有截图保留原始像素内容");
+    }
+    using (File.Open(
+               savedScreenshotPath,
+               FileMode.Open,
+               FileAccess.ReadWrite,
+               FileShare.None))
+    {
+    }
+
+    var outsideScreenshotPath = Path.Combine(outsideScreenshotTestRoot, "目录外截图.png");
+    File.Copy(savedScreenshotPath, outsideScreenshotPath);
+    var outsidePathRejected = false;
+    try
+    {
+        using var _ = savedScreenshotService.LoadForEditing(
+            savedScreenshotTestRoot,
+            outsideScreenshotPath);
+    }
+    catch (InvalidOperationException)
+    {
+        outsidePathRejected = true;
+    }
+    AssertTrue(outsidePathRejected, "编辑拒绝截图保存目录之外的文件");
+
+    savedScreenshotService.MoveToRecycleBin(
+        savedScreenshotTestRoot,
+        savedScreenshotPath);
+    AssertEqual(
+        Path.GetFullPath(savedScreenshotPath),
+        recycledScreenshotPath ?? string.Empty,
+        "删除把经过校验的截图路径交给回收站");
+    AssertTrue(!File.Exists(savedScreenshotPath), "删除后截图不再留在保存目录");
+}
+finally
+{
+    Directory.Delete(savedScreenshotTestRoot, recursive: true);
+    Directory.Delete(outsideScreenshotTestRoot, recursive: true);
+}
+
+var wideEditSelection = CaptureOverlayForm.CalculateInitialEditSelection(
+    new Rectangle(0, 0, 1000, 700),
+    new Size(1600, 900));
+AssertTrue(
+    new Rectangle(0, 0, 1000, 700).Contains(wideEditSelection),
+    "已有截图编辑画布保持在当前屏幕范围内");
+AssertEqual(
+    new Point(
+        (1000 - wideEditSelection.Width) / 2,
+        (700 - wideEditSelection.Height) / 2),
+    wideEditSelection.Location,
+    "已有截图编辑画布在当前屏幕居中");
+AssertEqual(
+    new Rectangle(400, 300, 200, 100),
+    CaptureOverlayForm.CalculateInitialEditSelection(
+        new Rectangle(0, 0, 1000, 700),
+        new Size(200, 100)),
+    "小尺寸已有截图保持原尺寸并居中");
+
 var currentProductVersion = new Version(1, 10, 0, 0);
 AssertEqual(
     StartupWorkspaceReason.FirstRun,
