@@ -36,6 +36,16 @@
 - 二维码扫描通过稳定命令 ID `screenshot-tool.qr-code.scan` 离线扫描当前截图选区，只尝试 QR Code；成功后复用宿主侧边结果窗显示原始内容，不自动打开网址或执行二维码内容。入口 DLL、私有 `zxing.dll` 与许可文本共同位于 `Modules\QrCode`。
 - 相关入口：`Infrastructure/Modules/ModuleHost.cs`、`Infrastructure/Modules/ModuleLoadContext.cs`、`Presentation/Pages/ModuleManagementPage.cs`、`ScreenshotTool.Ocr`、`ScreenshotTool.PaddleOcr*`、`ScreenshotTool.Contracts/ModuleContracts.cs`。
 
+### 软件内更新
+
+- 设置工作台包含宿主级“软件更新”页，使用纵向单列布局。更新只检查 `XDIOEZ/CutCut` 的 GitHub 最新正式 Release，不自动安装预发布版，也不上传截图、设置或其他本地内容。
+- 当前电脑已安装 .NET 8 或更高 Windows Desktop Runtime 时下载 `complete-lightweight-win-x64.zip`；没有系统桌面运行库时下载 `complete-portable-win-x64.zip`，保证原本依靠自带运行库运行的用户更新后仍能启动。
+- 更新必须验证 GitHub Release API 对资产提供的 `sha256:` digest、压缩包大小、解压路径和包内 `ScreenshotTool.exe` 文件版本。摘要缺失、版本不一致、文件超限或 ZIP 路径越界时停止安装。
+- 下载和解压只发生在 `%LocalAppData%\LightShotCN\Updates`。校验完成后启动独立 PowerShell 更新进程，主程序正常退出；更新进程先备份将覆盖的文件，再原地替换并自动重启。替换失败时尝试回滚，并在重启后的工作台显示结果。安装目录不可写时请求当前操作所需的 UAC 授权。
+- 整包更新只升级当前仍存在的 `Modules/<模块目录>`；用户已永久删除的模块不会因为完整包中预装该模块而被重新安装，禁用但仍保留文件的模块会正常更新且保持禁用标记。
+- 软件内更新依赖每个正式 Release 同时提供稳定命名的轻量与便携完整包。用户必须先运行一次已经包含更新页的版本；再往后的正式版才可完全通过软件内按钮更新。
+- 相关入口：`Abstractions/IApplicationUpdateService.cs`、`Infrastructure/GitHubReleaseApplicationUpdateService.cs`、`Presentation/Pages/ApplicationUpdatePage.cs`、`Application/CompositionRoot.cs`、`Presentation/MainForm.cs`。
+
 ### 发布页体验
 
 - 轻量版是主下载入口，保持视觉优先级最高；它依赖目标电脑安装 .NET 8 Desktop Runtime。
@@ -84,6 +94,7 @@
 - 新功能优先进入独立服务、页面或模块，不继续扩大 `MainForm`、`CaptureOverlayForm` 和 `CompositionRoot` 的职责。
 - 新增可选模块时，除模块实现和生命周期测试外，还要补齐模块管理显示、独立发布脚本、模块页卡片、稳定资产名和永久删除后的恢复路径。
 - 发布后不要只看 GitHub Actions 成功状态：还要在线核对按钮文案、`href`、`download` 属性，并实际重新下载资产核对大小或 SHA-256。
+- 软件内更新要求正式 Release 同时保留两个完整包的固定文件名和 GitHub `sha256:` digest；发布后应从更新页分别验证“有桌面运行库”和“无桌面运行库”两条选包路径。更新程序不得重新安装已永久删除的模块。
 
 ## 核对与验证入口
 
@@ -103,4 +114,4 @@ $verificationRoot = Join-Path (Resolve-Path .) 'artifacts\build-verification'
 dotnet build .\ScreenshotTool.sln -c Release -p:UseArtifactsOutput=true "-p:ArtifactsPath=$verificationRoot"
 ```
 
-涉及设置工作台时，按变更范围运行 `ScreenshotTool.UiPreview` 对应的 smoke 参数，例如 `--screenshot-settings-page-smoke`、`--main-navigation-smoke` 或 `--module-management-page-smoke`，并查看生成图片。涉及发布页时，除静态脚本检查外，还要在已部署网址中检查 GitHub API 填充后的真实状态。
+涉及设置工作台时，按变更范围运行 `ScreenshotTool.UiPreview` 对应的 smoke 参数，例如 `--screenshot-settings-page-smoke`、`--main-navigation-smoke`、`--module-management-page-smoke` 或 `--application-update-page-smoke`，并查看生成图片。涉及发布页时，除静态脚本检查外，还要在已部署网址中检查 GitHub API 填充后的真实状态。
