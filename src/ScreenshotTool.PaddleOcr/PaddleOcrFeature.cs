@@ -2,7 +2,10 @@ using ScreenshotTool.Contracts;
 
 namespace ScreenshotTool.PaddleOcr;
 
-internal sealed class PaddleOcrFeature : CaptureFeatureBase, ICaptureToolbarCommandProvider
+internal sealed class PaddleOcrFeature :
+    CaptureFeatureBase,
+    ICaptureToolbarCommandProvider,
+    ICaptureToolbarCommandProgressProvider
 {
     private readonly IPaddleOcrRecognizer _recognizer;
     private readonly IReadOnlyList<CaptureToolbarCommand> _commands;
@@ -42,6 +45,9 @@ internal sealed class PaddleOcrFeature : CaptureFeatureBase, ICaptureToolbarComm
     public override int Order { get; }
 
     public IReadOnlyList<CaptureToolbarCommand> GetToolbarCommands() => _commands;
+
+    public bool UsesIndeterminateProgress(string commandId) =>
+        string.Equals(commandId, _commandId, StringComparison.Ordinal);
 
     public async Task ExecuteToolbarCommandAsync(
         string commandId,

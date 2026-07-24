@@ -13,9 +13,15 @@ internal sealed class SavedScreenshotService(Action<string>? recycleFile = null)
         Path.GetExtension(path).ToLowerInvariant() is
             ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif";
 
+    public bool IsSupportedVideo(string path) =>
+        string.Equals(
+            Path.GetExtension(path),
+            ".mp4",
+            StringComparison.OrdinalIgnoreCase);
+
     public Bitmap LoadForEditing(string folderPath, string filePath)
     {
-        var validatedPath = ValidateScreenshotPath(folderPath, filePath);
+        var validatedPath = ValidateImagePath(folderPath, filePath);
         using var stream = new FileStream(
             validatedPath,
             FileMode.Open,
@@ -52,11 +58,22 @@ internal sealed class SavedScreenshotService(Action<string>? recycleFile = null)
 
     public void MoveToRecycleBin(string folderPath, string filePath)
     {
-        var validatedPath = ValidateScreenshotPath(folderPath, filePath);
+        var validatedPath = ValidateArtifactPath(folderPath, filePath);
         _recycleFile(validatedPath);
     }
 
-    private string ValidateScreenshotPath(string folderPath, string filePath)
+    private string ValidateImagePath(string folderPath, string filePath)
+    {
+        var validatedPath = ValidateArtifactPath(folderPath, filePath);
+        if (!IsSupportedImage(validatedPath))
+        {
+            throw new InvalidOperationException("选中的文件不是受支持的图片格式。");
+        }
+
+        return validatedPath;
+    }
+
+    private string ValidateArtifactPath(string folderPath, string filePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
@@ -70,15 +87,15 @@ internal sealed class SavedScreenshotService(Action<string>? recycleFile = null)
                 fullFolderPath,
                 StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("只能管理当前截图保存目录中的图片。");
+            throw new InvalidOperationException("只能管理当前保存目录中的截图或视频。");
         }
-        if (!IsSupportedImage(fullFilePath))
+        if (!IsSupportedImage(fullFilePath) && !IsSupportedVideo(fullFilePath))
         {
-            throw new InvalidOperationException("选中的文件不是受支持的截图格式。");
+            throw new InvalidOperationException("选中的文件不是受支持的截图或视频格式。");
         }
         if (!File.Exists(fullFilePath))
         {
-            throw new FileNotFoundException("选中的截图文件已经不存在。", fullFilePath);
+            throw new FileNotFoundException("选中的文件已经不存在。", fullFilePath);
         }
 
         return fullFilePath;

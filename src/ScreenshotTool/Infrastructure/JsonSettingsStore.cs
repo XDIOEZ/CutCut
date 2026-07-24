@@ -186,6 +186,11 @@ internal sealed class JsonSettingsStore : ISettingsStore
                 settings.Preferences.AnnotationSnapThresholdPixels);
         settings.Preferences.CtrlDragStepPixels = AnnotationLayoutOptions.NormalizeCtrlDragStep(
             settings.Preferences.CtrlDragStepPixels);
+        if (!Enum.IsDefined(settings.Preferences.AnnotationMoveActivationMode))
+        {
+            settings.Preferences.AnnotationMoveActivationMode =
+                AnnotationMoveActivationMode.HoldAlt;
+        }
         if (!Enum.IsDefined(settings.Preferences.RecordingRegionIndicatorStyle))
         {
             settings.Preferences.RecordingRegionIndicatorStyle =

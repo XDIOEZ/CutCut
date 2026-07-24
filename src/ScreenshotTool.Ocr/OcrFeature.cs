@@ -2,7 +2,10 @@ using ScreenshotTool.Contracts;
 
 namespace ScreenshotTool.Ocr;
 
-internal sealed class OcrFeature : CaptureFeatureBase, ICaptureToolbarCommandProvider
+internal sealed class OcrFeature :
+    CaptureFeatureBase,
+    ICaptureToolbarCommandProvider,
+    ICaptureToolbarCommandProgressProvider
 {
     internal const string CommandId = "screenshot-tool.ocr.recognize";
     private static readonly IReadOnlyList<CaptureToolbarCommand> Commands =
@@ -32,6 +35,9 @@ internal sealed class OcrFeature : CaptureFeatureBase, ICaptureToolbarCommandPro
     public override int Order => 550;
 
     public IReadOnlyList<CaptureToolbarCommand> GetToolbarCommands() => Commands;
+
+    public bool UsesIndeterminateProgress(string commandId) =>
+        string.Equals(commandId, CommandId, StringComparison.Ordinal);
 
     public async Task ExecuteToolbarCommandAsync(
         string commandId,

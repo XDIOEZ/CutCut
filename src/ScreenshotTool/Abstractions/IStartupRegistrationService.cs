@@ -2,6 +2,8 @@ namespace ScreenshotTool.Abstractions;
 
 internal interface IStartupRegistrationService
 {
+    bool HasRegistration { get; }
+
     bool IsEnabled { get; }
 
     void SetEnabled(bool enabled);

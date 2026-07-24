@@ -14,7 +14,9 @@ internal sealed class LiveAnnotationSessionFactory(
     DrawingCursorShape drawingCursorShape,
     bool annotationSnappingEnabled = AnnotationLayoutOptions.DefaultSnappingEnabled,
     int annotationSnapThresholdPixels = AnnotationLayoutOptions.DefaultSnapThresholdPixels,
-    int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels)
+    int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels,
+    AnnotationMoveActivationMode annotationMoveActivationMode =
+        AnnotationMoveActivationMode.HoldAlt)
 {
     public ICaptureAnnotationSession Create(
         Rectangle screenBounds,
@@ -46,7 +48,8 @@ internal sealed class LiveAnnotationSessionFactory(
                 annotationSnapThresholdPixels,
                 ctrlDragStepPixels,
                 ToRecordingRegionIndicatorStyle(options.RegionIndicatorStyle),
-                options.ShowMouseClickIndicator);
+                options.ShowMouseClickIndicator,
+                annotationMoveActivationMode);
         }
         catch
         {
@@ -115,6 +118,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
     private readonly int _rotationStepDegrees;
     private readonly int _annotationSnapThresholdPixels;
     private readonly int _ctrlDragStepPixels;
+    private readonly AnnotationMoveActivationState _annotationMoveActivationState;
     private readonly RecordingRegionIndicatorStyle _recordingRegionIndicatorStyle;
     private readonly bool _showMouseClickIndicator;
     private readonly ControlDoubleTapDetector _controlDoubleTapDetector = new();
@@ -167,7 +171,9 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels,
         RecordingRegionIndicatorStyle recordingRegionIndicatorStyle =
             RecordingRegionIndicatorStyle.Dashed,
-        bool showMouseClickIndicator = true)
+        bool showMouseClickIndicator = true,
+        AnnotationMoveActivationMode annotationMoveActivationMode =
+            AnnotationMoveActivationMode.HoldAlt)
     {
         _source = source;
         _inputSurface = CreateTransparentSurface(screenBounds.Size);
@@ -185,6 +191,8 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         _annotationSnapThresholdPixels = AnnotationLayoutOptions.NormalizeSnapThreshold(
             annotationSnapThresholdPixels);
         _ctrlDragStepPixels = AnnotationLayoutOptions.NormalizeCtrlDragStep(ctrlDragStepPixels);
+        _annotationMoveActivationState = new AnnotationMoveActivationState(
+            annotationMoveActivationMode);
         _recordingRegionIndicatorStyle = Enum.IsDefined(recordingRegionIndicatorStyle)
             ? recordingRegionIndicatorStyle
             : RecordingRegionIndicatorStyle.Dashed;
@@ -254,14 +262,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         _toolbarWindow = new CaptureEditorToolbarWindow(_toolbar, screenBounds);
         _toolbarWindow.Owner = this;
         _toolbarWindow.KeyDown += HandleKeyDown;
-        _toolbarWindow.KeyUp += (_, e) =>
-        {
-            if (_controlDoubleTapDetector.RegisterKeyUp(e.KeyCode, Environment.TickCount64))
-            {
-                ToggleAnnotationSnapping();
-                e.SuppressKeyPress = true;
-            }
-        };
+        _toolbarWindow.KeyUp += HandleKeyUp;
         Shown += HandleShown;
         FormClosing += HandleFormClosing;
         MouseDown += HandleMouseDown;
@@ -271,18 +272,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         MouseWheel += HandleMouseWheel;
         MouseLeave += (_, _) => HideDrawingCursorIndicator();
         KeyDown += HandleKeyDown;
-        KeyUp += (_, e) =>
-        {
-            if (_controlDoubleTapDetector.RegisterKeyUp(e.KeyCode, Environment.TickCount64))
-            {
-                ToggleAnnotationSnapping();
-                e.SuppressKeyPress = true;
-            }
-            if (IsAltKey(e.KeyCode) || IsControlKey(e.KeyCode))
-            {
-                UpdateIdleCursor(PointToClient(Cursor.Position));
-            }
-        };
+        KeyUp += HandleKeyUp;
     }
 
     public IReadOnlyList<CaptureAnnotationToolDefinition> Tools => ToolDefinitions;
@@ -630,15 +620,21 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
 
     private void HandleMouseDown(object? sender, MouseEventArgs e)
     {
-        if (ActiveTool == CaptureAnnotationTool.Operation || e.Button != MouseButtons.Left)
+        if (e.Button != MouseButtons.Left ||
+            (ActiveTool == CaptureAnnotationTool.Operation && !IsAnnotationMoveActive()))
         {
             return;
+        }
+
+        if (IsAltPressed())
+        {
+            _annotationMoveActivationState.MarkAltUsedAsModifier();
         }
 
         TrackTextDoubleClickCandidate(e.Location);
         CancelTextEditor(commit: true);
 
-        if (ActiveTool == CaptureAnnotationTool.Select || IsAltPressed())
+        if (ActiveTool == CaptureAnnotationTool.Select || IsAnnotationMoveActive())
         {
             var controlPressed = IsControlPressed();
             if (controlPressed)
@@ -1056,6 +1052,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         }
         else if (IsAltPressed())
         {
+            _annotationMoveActivationState.MarkAltUsedAsModifier();
             RotateAnnotationUnderPointer(e);
         }
     }
@@ -1064,6 +1061,15 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
     {
         _controlDoubleTapDetector.RegisterKeyDown(e.KeyCode, Environment.TickCount64);
 
+        if (IsAltKey(e.KeyCode))
+        {
+            _annotationMoveActivationState.HandleAltKeyDown();
+        }
+        else if (e.Alt)
+        {
+            _annotationMoveActivationState.MarkAltUsedAsModifier();
+        }
+
         if (IsAltKey(e.KeyCode) || IsControlKey(e.KeyCode))
         {
             UpdateIdleCursor(PointToClient(Cursor.Position));
@@ -1071,7 +1077,12 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
 
         if (_textEditor is not null)
         {
-            if (e.KeyCode == Keys.Escape)
+            if (e.Control && !e.Alt && e.KeyCode == Keys.Z)
+            {
+                _textEditor.UndoTextChange();
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Escape)
             {
                 CancelTextEditor(commit: true);
                 e.SuppressKeyPress = true;
@@ -1112,6 +1123,23 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         {
             HandleEscape();
             e.SuppressKeyPress = true;
+        }
+    }
+
+    private void HandleKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (_controlDoubleTapDetector.RegisterKeyUp(e.KeyCode, Environment.TickCount64))
+        {
+            ToggleAnnotationSnapping();
+            e.SuppressKeyPress = true;
+        }
+        if (IsAltKey(e.KeyCode))
+        {
+            _annotationMoveActivationState.HandleAltKeyUp();
+        }
+        if (IsAltKey(e.KeyCode) || IsControlKey(e.KeyCode))
+        {
+            UpdateIdleCursor(PointToClient(Cursor.Position));
         }
     }
 
@@ -1162,7 +1190,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         if (target == StickerHitTarget.Move &&
             _editor.Selection.RequiresAltToMove &&
             ActiveTool != CaptureAnnotationTool.Select &&
-            !IsAltPressed() &&
+            !IsAnnotationMoveActive() &&
             !IsControlPressed())
         {
             InvalidateInput(UnionDirtyBounds(
@@ -1333,17 +1361,14 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
 
         _editor.Selection.Clear();
         var editorBounds = descriptor.Bounds;
-        if (descriptor.BoundsMode == TextAnnotationEditorBoundsMode.Content)
-        {
-            editorBounds.Inflate(descriptor.TextPadding.Width, descriptor.TextPadding.Height);
-        }
+        editorBounds.Inflate(
+            TransparentTextEditorControl.ContentPadding.Width,
+            TransparentTextEditorControl.ContentPadding.Height);
         ShowTextEditor(
             editorBounds.Location,
             editorBounds.Size,
             descriptor.ForegroundColor,
-            descriptor.FontSize,
-            descriptor.TextPadding,
-            descriptor.FontStyle);
+            descriptor.FontSize);
         _textEditor!.Text = descriptor.Text;
         _textEditor.SelectText(descriptor.Text.Length, 0);
         InvalidateLayers();
@@ -1353,9 +1378,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         Point location,
         Size minimumSize,
         Color foregroundColor,
-        float fontSize,
-        Size? textPadding = null,
-        FontStyle fontStyle = FontStyle.Bold)
+        float fontSize)
     {
         _textEditor = new TransparentTextEditorControl(
             location,
@@ -1364,8 +1387,9 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
             ClientRectangle,
             _clipboardService,
             fontSize,
-            textPadding,
-            fontStyle);
+            null,
+            IsAnnotationMoveActive,
+            _annotationMoveActivationState.MarkAltUsedAsModifier);
         _textEditor.CommitRequested += (_, _) => CancelTextEditor(commit: true);
         Controls.Add(_textEditor);
         _textEditor.BringToFront();
@@ -1385,7 +1409,6 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         {
             var annotation = _editor.EndTextEdit(
                 commit,
-                editor.Bounds,
                 editor.TextContentBounds,
                 editor.Text,
                 editor.TextFontSize);
@@ -1442,34 +1465,9 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         {
             return;
         }
-        var fontSize = PastedTextAnnotation.DefaultFontSize;
-        var boundsForText = CreatePastedTextBounds(text, anchor, fontSize);
-        _editor.AddAndSelect(new PastedTextAnnotation(boundsForText, text, fontSize));
-        ActiveTool = CaptureAnnotationTool.Select;
-        InvalidateLayers();
-    }
-
-    private Rectangle CreatePastedTextBounds(string text, Point anchor, float fontSize)
-    {
-        var maximumWidth = Math.Max(1, ClientSize.Width * 2 / 3);
-        var maximumHeight = Math.Max(1, ClientSize.Height * 2 / 3);
-        using var font = new Font(
-            "Microsoft YaHei UI",
-            fontSize,
-            FontStyle.Regular,
-            GraphicsUnit.Pixel);
-        var measured = TextRenderer.MeasureText(
-            text,
-            font,
-            new Size(Math.Max(1, maximumWidth - 16), Math.Max(1, maximumHeight - 12)),
-            TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPadding);
-        var width = Math.Clamp(measured.Width + 16, Math.Min(80, maximumWidth), maximumWidth);
-        var height = Math.Clamp(measured.Height + 12, Math.Min(36, maximumHeight), maximumHeight);
-        return new Rectangle(
-            Math.Clamp(anchor.X - width / 2, 0, Math.Max(0, ClientSize.Width - width)),
-            Math.Clamp(anchor.Y - height / 2, 0, Math.Max(0, ClientSize.Height - height)),
-            width,
-            height);
+        ActiveTool = CaptureAnnotationTool.Text;
+        BeginTextEditor(anchor);
+        _textEditor!.InsertText(text);
     }
 
     private void RotateAnnotationUnderPointer(MouseEventArgs e)
@@ -1564,6 +1562,23 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         {
             return;
         }
+        if (IsAnnotationMoveActive())
+        {
+            if (_editor.Selection.Count == 1 && _editor.Selection.Primary is { } selected)
+            {
+                var target = HitTestMovable(selected, point);
+                if (target is not StickerHitTarget.None and not StickerHitTarget.Move)
+                {
+                    Cursor = StickerLayout.GetCursor(target);
+                    return;
+                }
+            }
+
+            Cursor = _editor.FindTopMovableAt(point, GetHitTolerance()) is null
+                ? Cursors.Default
+                : Cursors.SizeAll;
+            return;
+        }
         if (ActiveTool == CaptureAnnotationTool.Operation)
         {
             Cursor = Cursors.Default;
@@ -1581,7 +1596,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
                 }
             }
             var hovered = _editor.FindTopMovableAt(point, GetHitTolerance());
-            Cursor = hovered is not null && IsAltPressed()
+            Cursor = hovered is not null && IsAnnotationMoveActive()
                 ? Cursors.SizeAll
                 : hovered is not null && IsControlPressed()
                     ? Cursors.Hand
@@ -1597,7 +1612,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         if (!DrawingCursorIndicator.Supports(editorTool) ||
             !ClientRectangle.Contains(point) ||
             _textEditor is not null ||
-            IsAltPressed() ||
+            IsAnnotationMoveActive() ||
             IsControlPressed())
         {
             HideDrawingCursorIndicator();
@@ -1877,6 +1892,9 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
     }
 
     private static bool IsAltPressed() => (ModifierKeys & Keys.Alt) == Keys.Alt;
+
+    private bool IsAnnotationMoveActive() =>
+        _annotationMoveActivationState.IsActive(IsAltPressed());
 
     private static bool IsAltKey(Keys keyCode) =>
         keyCode is Keys.Menu or Keys.LMenu or Keys.RMenu;

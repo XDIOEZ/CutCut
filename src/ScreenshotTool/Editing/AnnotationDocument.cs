@@ -80,7 +80,6 @@ internal sealed class AnnotationDocument : IDisposable
             .Select(annotation => annotation switch
             {
                 TextAnnotation text => text.Text,
-                PastedTextAnnotation text => text.Text,
                 _ => null
             })
             .Where(text => !string.IsNullOrWhiteSpace(text))

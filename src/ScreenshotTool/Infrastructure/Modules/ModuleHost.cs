@@ -706,7 +706,8 @@ internal sealed class ModuleHost : IModuleManager
 
     private sealed class CaptureFeatureLease(ICaptureFeature inner, Action release) :
         ICaptureFeature,
-        ICaptureToolbarCommandProvider
+        ICaptureToolbarCommandProvider,
+        ICaptureToolbarCommandProgressProvider
     {
         private bool _disposed;
 
@@ -730,6 +731,10 @@ internal sealed class ModuleHost : IModuleManager
             inner is ICaptureToolbarCommandProvider provider
                 ? provider.ExecuteToolbarCommandAsync(commandId, cancellationToken)
                 : Task.CompletedTask;
+
+        public bool UsesIndeterminateProgress(string commandId) =>
+            inner is ICaptureToolbarCommandProgressProvider progressProvider &&
+            progressProvider.UsesIndeterminateProgress(commandId);
 
         public void Dispose()
         {

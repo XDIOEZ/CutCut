@@ -30,10 +30,17 @@ internal sealed class CompositionRoot : IDisposable
         var settingsStore = new JsonSettingsStore();
         var currentVersion =
             typeof(CompositionRoot).Assembly.GetName().Version ?? new Version(1, 0, 0);
+        var startupRegistrationService = new StartupRegistrationService(
+            new WindowsRunStartupEntryStore(),
+            Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath);
         var startupWorkspace = new StartupWorkspaceService(
             settingsStore,
             currentVersion)
             .PrepareLaunch();
+        var startupRegistrationError = new StartupRegistrationPreferenceService(
+            settingsStore,
+            startupRegistrationService)
+            .Synchronize(startupWorkspace.Settings);
         var hotkeyService = new GlobalHotkeyService();
         var captureService = new ScreenCaptureService();
         var imageSaveService = new PngImageSaveService();
@@ -41,9 +48,6 @@ internal sealed class CompositionRoot : IDisposable
         var windowLocator = new NativeWindowLocator();
         var fileLocationService = new ExplorerFileLocationService();
         var savedScreenshotService = new SavedScreenshotService();
-        var startupRegistrationService = new StartupRegistrationService(
-            new WindowsRunStartupEntryStore(),
-            Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath);
         var moduleImageHost = new ModuleImageHostProxy();
         var moduleHost = new ModuleHost(
             Path.Combine(AppContext.BaseDirectory, "Modules"),
@@ -68,7 +72,8 @@ internal sealed class CompositionRoot : IDisposable
             pendingUpdateResult,
             initialSettings: startupWorkspace.Settings,
             startupWorkspaceReason: startupWorkspace.Reason,
-            startInBackground: startInBackground);
+            startInBackground: startInBackground,
+            startupRegistrationError: startupRegistrationError);
         moduleImageHost.Attach(mainForm);
         return new CompositionRoot(
             mainForm,

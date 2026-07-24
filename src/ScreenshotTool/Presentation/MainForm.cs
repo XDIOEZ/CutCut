@@ -42,6 +42,7 @@ internal sealed class MainForm : Form, IModuleImageHost
     private readonly bool _backgroundIntegrationEnabled;
     private readonly bool _startInBackground;
     private readonly ApplicationUpdateApplyResult? _pendingUpdateResult;
+    private string? _pendingStartupRegistrationError;
     private AppSettings _settings;
     private bool _isCapturing;
     private bool _isExiting;
@@ -65,7 +66,8 @@ internal sealed class MainForm : Form, IModuleImageHost
         bool enableBackgroundIntegration = true,
         AppSettings? initialSettings = null,
         StartupWorkspaceReason startupWorkspaceReason = StartupWorkspaceReason.None,
-        bool startInBackground = false)
+        bool startInBackground = false,
+        string? startupRegistrationError = null)
     {
         _settingsStore = settingsStore;
         _hotkeyService = hotkeyService;
@@ -80,6 +82,7 @@ internal sealed class MainForm : Form, IModuleImageHost
         _backgroundIntegrationEnabled = enableBackgroundIntegration;
         _startInBackground = startInBackground;
         _pendingUpdateResult = pendingUpdateResult;
+        _pendingStartupRegistrationError = startupRegistrationError;
         _settings = initialSettings ?? settingsStore.Load();
         _startupWorkspaceReason = startupWorkspaceReason;
 
@@ -102,13 +105,14 @@ internal sealed class MainForm : Form, IModuleImageHost
             _settings.Preferences.DrawingCursorShape,
             _settings.Preferences.AnnotationSnappingEnabled,
             _settings.Preferences.AnnotationSnapThresholdPixels,
-            _settings.Preferences.CtrlDragStepPixels);
+            _settings.Preferences.CtrlDragStepPixels,
+            _settings.Preferences.AnnotationMoveActivationMode);
         _drawingCoefficientsPage = new DrawingCoefficientsSettingsPage(
             _settings.Preferences.DrawingToolCoefficients);
         _screenshotSettingsPage = new ScreenshotSettingsPage(
             _settings.GetHotkey(),
             _settings.StartMinimized,
-            ReadStartupRegistration(),
+            _settings.StartWithWindows || ReadStartupRegistration(),
             _settings.Preferences.DismissSaveNotificationBeforeCapture,
             _settings.Preferences.HideMainWindowDuringCapture);
         _savePathPage = new SavePathSettingsPage(
@@ -121,7 +125,8 @@ internal sealed class MainForm : Form, IModuleImageHost
         _galleryPage = new ScreenshotGalleryPage(
             _settings.OutputFolder,
             _fileLocationService,
-            _savedScreenshotService);
+            _savedScreenshotService,
+            _clipboardService);
         ComposePages();
         WirePageEvents();
 
@@ -197,7 +202,7 @@ internal sealed class MainForm : Form, IModuleImageHost
         _shell.AddPage(new AppPage(
             GalleryPageId,
             "查看截图",
-            "浏览保存目录中的最近截图，双击查看或右键编辑、删除",
+            "浏览保存目录中的最近截图和视频，双击查看或右键管理",
             _galleryPage,
             900));
     }
@@ -290,6 +295,7 @@ internal sealed class MainForm : Form, IModuleImageHost
             {
                 OutputFolder = Path.GetFullPath(folder),
                 StartMinimized = _screenshotSettingsPage.StartMinimized,
+                StartWithWindows = _screenshotSettingsPage.StartWithWindows,
                 HotkeyModifiers = newHotkey.Modifiers,
                 HotkeyVirtualKey = newHotkey.VirtualKey,
                 LastLaunchedVersion = _settings.LastLaunchedVersion,
@@ -304,6 +310,8 @@ internal sealed class MainForm : Form, IModuleImageHost
                     AnnotationSnappingEnabled = _editorSettingsPage.SnappingEnabled,
                     AnnotationSnapThresholdPixels = _editorSettingsPage.SnapThresholdPixels,
                     CtrlDragStepPixels = _editorSettingsPage.CtrlDragStepPixels,
+                    AnnotationMoveActivationMode =
+                        _editorSettingsPage.AnnotationMoveActivationMode,
                     ModuleBooleanPreferences = new Dictionary<string, bool>(
                         _settings.Preferences.ModuleBooleanPreferences,
                         StringComparer.Ordinal),
@@ -429,7 +437,6 @@ internal sealed class MainForm : Form, IModuleImageHost
         }
         catch (Exception exception) when (IsStartupRegistrationException(exception))
         {
-            _screenshotSettingsPage.StartWithWindows = ReadStartupRegistration();
             return exception.Message;
         }
     }
@@ -679,7 +686,8 @@ internal sealed class MainForm : Form, IModuleImageHost
                 _settings.Preferences.DrawingCursorShape,
                 _settings.Preferences.AnnotationSnappingEnabled,
                 _settings.Preferences.AnnotationSnapThresholdPixels,
-                _settings.Preferences.CtrlDragStepPixels);
+                _settings.Preferences.CtrlDragStepPixels,
+                _settings.Preferences.AnnotationMoveActivationMode);
             using var overlay = new CaptureOverlayForm(
                 snapshot,
                 _imageSaveService,
@@ -700,7 +708,8 @@ internal sealed class MainForm : Form, IModuleImageHost
                 _settings.Preferences.AnnotationSnappingEnabled,
                 _settings.Preferences.AnnotationSnapThresholdPixels,
                 _settings.Preferences.CtrlDragStepPixels,
-                initialEditImage);
+                initialEditImage,
+                _settings.Preferences.AnnotationMoveActivationMode);
             overlay.ArtifactSaved += (_, path) => HandleArtifactSaved(path);
             overlay.ShowDialog();
             SaveLastToolWidth(toolWidthController.Current);
@@ -791,6 +800,22 @@ internal sealed class MainForm : Form, IModuleImageHost
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
+        }
+
+        if (_pendingStartupRegistrationError is not null)
+        {
+            _shell.ShowStatus("开机自动启动设置未能修复", AppTheme.Danger);
+            if (!_startInBackground)
+            {
+                MessageBox.Show(
+                    this,
+                    $"开机自动启动设置未能修复：{_pendingStartupRegistrationError}",
+                    "开机启动设置失败",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+
+            _pendingStartupRegistrationError = null;
         }
 
         if (_pendingHotkeyError is not null)

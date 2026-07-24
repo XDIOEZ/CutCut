@@ -2,6 +2,8 @@ namespace ScreenshotTool.Core;
 
 internal sealed class AppSettings
 {
+    private bool _startWithWindows;
+
     public string OutputFolder { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "轻截");
 
@@ -10,6 +12,18 @@ internal sealed class AppSettings
     public int HotkeyVirtualKey { get; set; } = HotkeyDefinition.Default.VirtualKey;
 
     public bool StartMinimized { get; set; }
+
+    public bool StartWithWindows
+    {
+        get => _startWithWindows;
+        set
+        {
+            _startWithWindows = value;
+            HasStartWithWindowsPreference = true;
+        }
+    }
+
+    internal bool HasStartWithWindowsPreference { get; private set; }
 
     public string? LastLaunchedVersion { get; set; }
 

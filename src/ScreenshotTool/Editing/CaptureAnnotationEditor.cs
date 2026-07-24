@@ -104,13 +104,11 @@ internal sealed class CaptureAnnotationEditor : IDisposable
 
     public MovableAnnotation? EndTextEdit(
         bool commit,
-        Rectangle editorOuterBounds,
         Rectangle editorContentBounds,
         string text,
         float fontSize) =>
         _textEditSession.End(
             commit,
-            editorOuterBounds,
             editorContentBounds,
             text,
             fontSize);

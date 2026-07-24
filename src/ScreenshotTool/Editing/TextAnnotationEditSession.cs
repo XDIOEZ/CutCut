@@ -1,20 +1,10 @@
 namespace ScreenshotTool.Editing;
 
-internal enum TextAnnotationEditorBoundsMode
-{
-    Content,
-    Outer
-}
-
 internal sealed record TextAnnotationEditDescriptor(
-    MovableAnnotation Annotation,
     Rectangle Bounds,
     string Text,
     Color ForegroundColor,
-    float FontSize,
-    Size TextPadding,
-    FontStyle FontStyle,
-    TextAnnotationEditorBoundsMode BoundsMode);
+    float FontSize);
 
 internal sealed class TextAnnotationEditSession
 {
@@ -40,7 +30,6 @@ internal sealed class TextAnnotationEditSession
 
     public MovableAnnotation? End(
         bool commit,
-        Rectangle editorOuterBounds,
         Rectangle editorContentBounds,
         string text,
         float fontSize)
@@ -52,15 +41,12 @@ internal sealed class TextAnnotationEditSession
             return annotation;
         }
 
-        var normalizedText = text.TrimEnd();
-        switch (annotation)
+        if (annotation is TextAnnotation textAnnotation)
         {
-            case TextAnnotation transparentText:
-                transparentText.UpdateText(editorContentBounds, normalizedText, fontSize);
-                break;
-            case PastedTextAnnotation pastedText:
-                pastedText.UpdateText(editorOuterBounds, normalizedText, fontSize);
-                break;
+            textAnnotation.UpdateText(
+                editorContentBounds,
+                text.TrimEnd(),
+                fontSize);
         }
 
         return annotation;
@@ -69,29 +55,16 @@ internal sealed class TextAnnotationEditSession
     public void Cancel() => ActiveAnnotation = null;
 
     public static bool CanEdit(MovableAnnotation annotation) =>
-        annotation is TextAnnotation or PastedTextAnnotation;
+        annotation is TextAnnotation;
 
     private static TextAnnotationEditDescriptor? CreateDescriptor(MovableAnnotation annotation) =>
         annotation switch
         {
             TextAnnotation text => new TextAnnotationEditDescriptor(
-                text,
                 text.Bounds,
                 text.Text,
                 text.Color,
-                text.FontSize,
-                new Size(4, 3),
-                FontStyle.Bold,
-                TextAnnotationEditorBoundsMode.Content),
-            PastedTextAnnotation text => new TextAnnotationEditDescriptor(
-                text,
-                text.Bounds,
-                text.Text,
-                Color.White,
-                text.FontSize,
-                new Size(8, 6),
-                FontStyle.Regular,
-                TextAnnotationEditorBoundsMode.Outer),
+                text.FontSize),
             _ => null
         };
 }

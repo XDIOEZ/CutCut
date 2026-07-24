@@ -4,13 +4,13 @@ namespace ScreenshotTool.Ocr;
 
 public sealed class OcrModule : ScreenshotToolModuleBase
 {
-    public static Version MinimumHostVersion { get; } = new(1, 11, 0);
+    public static Version MinimumHostVersion { get; } = new(1, 11, 6);
 
     public override string Id => "screenshot-tool.ocr";
 
     public override string DisplayName => "本地 OCR 文字识别";
 
-    public override Version Version => new(1, 1, 0);
+    public override Version Version => new(1, 2, 0);
 
     public override void Initialize(IModuleContext context)
     {

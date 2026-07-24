@@ -19,6 +19,7 @@
     "hotkeyModifiers": "control, shift",
     "hotkeyVirtualKey": 88,
     "startMinimized": false,
+    "startWithWindows": false,
     "lastLaunchedVersion": "1.10.0",
     "preferences": {
       "stickerSelectionMoveMode": "followSelection",
@@ -30,6 +31,7 @@
       "annotationSnappingEnabled": true,
       "annotationSnapThresholdPixels": 8,
       "ctrlDragStepPixels": 10,
+      "annotationMoveActivationMode": "holdAlt",
       "screenRecordingCaptureSystemAudio": true,
       "screenRecordingCaptureMicrophone": true,
       "screenRecordingShowMouseClickIndicator": true,
@@ -57,10 +59,12 @@
 }
 ```
 
-`hotkeyModifiers`、`hotkeyVirtualKey` 和 `startMinimized` 统一在“截图设置”分页中配置。快捷键输入框获得焦点时会暂时取消全局监听，保存新组合键失败时恢复原快捷键；`startMinimized` 为 `true` 时，程序启动后直接进入系统托盘。
+`hotkeyModifiers`、`hotkeyVirtualKey`、`startMinimized` 和 `startWithWindows` 统一在“截图设置”分页中配置。快捷键输入框获得焦点时会暂时取消全局监听，保存新组合键失败时恢复原快捷键；`startMinimized` 为 `true` 时，程序启动后直接进入系统托盘。
 
-“开机自动启动”也位于“截图设置”分页，但 Windows 当前用户启动项本身就是它的持久化来源，因此不重复写入 JSON。开启后程序在
-`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` 中维护名为 `LightShotCN` 的值，命令使用带引号的当前 EXE 绝对路径和 `--background` 参数；登录 Windows 后会安静进入托盘，即使“手动启动后最小化”处于关闭状态也不会弹出工作台。该启动项只影响当前用户且无需管理员权限。关闭开关会删除该值；程序移动后旧路径不会误显示为已开启，重新勾选即可写入新位置。
+开启“开机自动启动”后，程序在
+`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` 中维护名为 `LightShotCN` 的值，命令使用带引号的当前 EXE 绝对路径和 `--background` 参数；登录 Windows 后会安静进入托盘，即使“手动启动后最小化”处于关闭状态也不会弹出工作台。该启动项只影响当前用户且无需管理员权限。关闭开关会删除该值。
+
+`startWithWindows` 同时保存用户的明确选择。程序每次启动都会按它同步注册表：已开启时补回缺失项，并在程序移动或原地更新后把命令修复为当前 EXE 路径；已关闭时清理残留项。旧版配置没有该字段时，会从稳定值名 `LightShotCN` 的现有启动项迁移一次，之后以 JSON 中的选择为准。
 
 首次运行或版本更新仍优先打开设置工作台：即使这次进程由 Windows 启动项以 `--background` 唤起，也不会跳过首次/更新检查。设置确认完成后，同一版本的后续开机启动才会恢复安静进入托盘。
 
@@ -74,6 +78,8 @@
 粗细范围会在读取时归一化到程序支持的安全范围，异常枚举值会恢复为默认模式。`lastToolWidth` 会在每次截图编辑结束后记录最后使用的粗细，并在下次打开编辑器时恢复；若粗细范围后来发生变化，该值会自动限制到新范围内。当前粗细除了控制绘图工具线宽，也会按默认粗细 `4` 对应 `18px` 的比例控制新建文字元素字号；极小字号保留 `8px` 的可读下限。
 
 `annotationRotationStepDegrees` 是 `Alt + 鼠标滚轮` 每格旋转的角度，默认为 `5`，读取时会限制在 `1` 至 `90` 度。滚轮向上为顺时针，向下为逆时针。
+
+`annotationMoveActivationMode` 决定 Alt 如何开启元素移动：`holdAlt` 表示按住 Alt 时临时生效、松开即关闭；`toggleOnAltTap` 表示裸按并松开一次 Alt 切换开启，再裸按一次关闭。默认值为 `holdAlt`。Alt+滚轮旋转等组合操作不会改变切换状态；该选择同时应用于普通截图、已有图片重新编辑、录屏实时批注和文字输入框。
 
 `drawingCursorShape` 控制画笔和马赛克的笔刷轮廓光标，支持 `circle`（圆形，默认）和 `square`（正方形）。轮廓尺寸按当前粗细和绘制系数计算；编辑长图时还会跟随当前视图缩放。该光标只在编辑预览中显示，不会写入导出图片。
 

@@ -228,6 +228,39 @@ internal sealed class CaptureEditorToolbar : FlowLayoutPanel
         return button;
     }
 
+    public IDisposable ShowCommandProgress(Button button, string text)
+    {
+        ArgumentNullException.ThrowIfNull(button);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (!ReferenceEquals(button.Parent, this))
+        {
+            throw new ArgumentException("命令按钮不属于当前工具栏。", nameof(button));
+        }
+
+        var childIndex = Controls.GetChildIndex(button);
+        var progressBar = new CaptureCommandProgressBar(text)
+        {
+            Size = button.Size,
+            Margin = button.Margin
+        };
+        _toolTip.SetToolTip(progressBar, $"{button.Text}正在执行，请稍候");
+
+        SuspendLayout();
+        try
+        {
+            Controls.Add(progressBar);
+            Controls.SetChildIndex(progressBar, childIndex);
+            button.Visible = false;
+        }
+        finally
+        {
+            ResumeLayout(performLayout: true);
+        }
+
+        Refresh();
+        return new CommandProgressScope(this, button, progressBar);
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -282,6 +315,146 @@ internal sealed class CaptureEditorToolbar : FlowLayoutPanel
         BackColor = HoverBackColor,
         Margin = new Padding(5, 3, 5, 3)
     };
+
+    private void RestoreCommandButton(Button button, CaptureCommandProgressBar progressBar)
+    {
+        if (IsDisposed)
+        {
+            if (!progressBar.IsDisposed)
+            {
+                progressBar.Dispose();
+            }
+            return;
+        }
+
+        SuspendLayout();
+        try
+        {
+            if (!progressBar.IsDisposed)
+            {
+                Controls.Remove(progressBar);
+                progressBar.Dispose();
+            }
+
+            if (!button.IsDisposed)
+            {
+                button.Visible = true;
+            }
+        }
+        finally
+        {
+            ResumeLayout(performLayout: true);
+        }
+    }
+
+    private sealed class CommandProgressScope(
+        CaptureEditorToolbar toolbar,
+        Button button,
+        CaptureCommandProgressBar progressBar) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            toolbar.RestoreCommandButton(button, progressBar);
+        }
+    }
+}
+
+internal sealed class CaptureCommandProgressBar : Control
+{
+    private static readonly Color TrackColor = Color.FromArgb(30, 41, 59);
+    private static readonly Color ProgressColor = Color.FromArgb(37, 99, 235);
+    private static readonly Color BorderColor = Color.FromArgb(96, 165, 250);
+    private readonly System.Windows.Forms.Timer _animationTimer = new()
+    {
+        Interval = 35
+    };
+    private int _phase;
+
+    public CaptureCommandProgressBar(string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+
+        Text = text;
+        ForeColor = Color.White;
+        BackColor = TrackColor;
+        Font = new Font("Microsoft YaHei UI", 8.5F);
+        AccessibleRole = AccessibleRole.ProgressBar;
+        AccessibleName = text;
+        TabStop = false;
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer |
+            ControlStyles.ResizeRedraw |
+            ControlStyles.UserPaint,
+            true);
+
+        _animationTimer.Tick += (_, _) =>
+        {
+            _phase = (_phase + 4) % 100;
+            Invalidate();
+        };
+        _animationTimer.Start();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        if (ClientSize.Width <= 0 || ClientSize.Height <= 0)
+        {
+            return;
+        }
+
+        e.Graphics.Clear(TrackColor);
+        var bandWidth = Math.Max(18, ClientSize.Width / 3);
+        var travelWidth = ClientSize.Width + bandWidth;
+        var bandX = -bandWidth + (int)Math.Round(travelWidth * (_phase / 100D));
+        using (var progressBrush = new SolidBrush(ProgressColor))
+        {
+            e.Graphics.FillRectangle(
+                progressBrush,
+                new Rectangle(bandX, 1, bandWidth, Math.Max(1, ClientSize.Height - 2)));
+        }
+        using (var borderPen = new Pen(BorderColor))
+        {
+            e.Graphics.DrawRectangle(
+                borderPen,
+                0,
+                0,
+                Math.Max(0, ClientSize.Width - 1),
+                Math.Max(0, ClientSize.Height - 1));
+        }
+
+        TextRenderer.DrawText(
+            e.Graphics,
+            Text,
+            Font,
+            ClientRectangle,
+            ForeColor,
+            TextFormatFlags.HorizontalCenter |
+            TextFormatFlags.VerticalCenter |
+            TextFormatFlags.SingleLine |
+            TextFormatFlags.EndEllipsis);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _animationTimer.Stop();
+            _animationTimer.Dispose();
+            Font.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
 }
 
 internal sealed class CaptureEditorToolbarWindow : Form

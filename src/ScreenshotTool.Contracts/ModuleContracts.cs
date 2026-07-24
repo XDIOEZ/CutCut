@@ -146,6 +146,11 @@ public interface ICaptureToolbarCommandProvider
         CancellationToken cancellationToken);
 }
 
+public interface ICaptureToolbarCommandProgressProvider
+{
+    bool UsesIndeterminateProgress(string commandId);
+}
+
 public interface ICaptureFeatureHost
 {
     bool HasSelection { get; }
@@ -168,6 +173,10 @@ public interface ICaptureFeatureHost
 
     void SetMouseCapture(bool capture);
 
+    /// <summary>
+    /// Copies the current unannotated capture source. During image re-editing this is
+    /// the replacement image rather than the desktop hidden behind the editor.
+    /// </summary>
     Bitmap CopyDesktopSelection();
 }
 

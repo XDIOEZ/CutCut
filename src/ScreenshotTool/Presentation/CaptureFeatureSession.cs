@@ -77,7 +77,12 @@ internal sealed class CaptureFeatureSession : IDisposable
             try
             {
                 commands.AddRange(provider.GetToolbarCommands().Select(command =>
-                    new CaptureFeatureCommand(feature, provider, command)));
+                    new CaptureFeatureCommand(
+                        feature,
+                        provider,
+                        command,
+                        feature is ICaptureToolbarCommandProgressProvider progressProvider &&
+                        progressProvider.UsesIndeterminateProgress(command.Id))));
             }
             catch (Exception exception)
             {
@@ -171,7 +176,8 @@ internal sealed class CaptureFeatureSession : IDisposable
 internal sealed record CaptureFeatureCommand(
     ICaptureFeature Feature,
     ICaptureToolbarCommandProvider Provider,
-    CaptureToolbarCommand Command);
+    CaptureToolbarCommand Command,
+    bool UsesIndeterminateProgress);
 
 internal sealed record CaptureFeatureCommandExecutionResult(bool Succeeded, string? ErrorMessage)
 {

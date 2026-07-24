@@ -902,6 +902,7 @@ internal static class Program
         {
             var firstGalleryImagePath = Path.Combine(galleryFolder, "第一张截图.png");
             var newestGalleryImagePath = Path.Combine(galleryFolder, "准备编辑的截图.png");
+            var galleryVideoPath = Path.Combine(galleryFolder, "录屏示例.mp4");
             CreateGallerySmokeImage(
                 firstGalleryImagePath,
                 Color.FromArgb(36, 99, 235),
@@ -910,14 +911,18 @@ internal static class Program
                 newestGalleryImagePath,
                 Color.FromArgb(22, 163, 74),
                 "右键编辑");
+            File.WriteAllBytes(galleryVideoPath, [0, 0, 0, 0]);
             var galleryBaseTime = new DateTime(2026, 7, 23, 10, 0, 0, DateTimeKind.Utc);
             File.SetLastWriteTimeUtc(firstGalleryImagePath, galleryBaseTime);
+            File.SetLastWriteTimeUtc(galleryVideoPath, galleryBaseTime.AddSeconds(30));
             File.SetLastWriteTimeUtc(newestGalleryImagePath, galleryBaseTime.AddMinutes(1));
 
+            using var galleryClipboard = new RecordingPreviewClipboardService();
             using var page = new ScreenshotGalleryPage(
                 galleryFolder,
                 new PreviewFileLocationService(),
-                new PreviewSavedScreenshotService())
+                new PreviewSavedScreenshotService(),
+                galleryClipboard)
             {
                 Dock = DockStyle.Fill
             };
@@ -959,10 +964,11 @@ internal static class Program
                     System.Reflection.BindingFlags.Instance |
                     System.Reflection.BindingFlags.NonPublic)!
                 .GetValue(page)!;
-            if (listView.Items.Count != 2)
+            if (listView.Items.Count != 3 ||
+                listView.Items.Cast<ListViewItem>().All(item => item.Text != "录屏示例.mp4"))
             {
                 throw new InvalidOperationException(
-                    $"截图画廊没有加载两张验证图片，实际为 {listView.Items.Count} 张。");
+                    $"截图画廊没有加载两张图片和一个视频，实际为 {listView.Items.Count} 个文件。");
             }
             if (searchInput.PlaceholderText != "按文件名搜索" ||
                 sortButton.Text != "时间：新→旧")
@@ -993,7 +999,7 @@ internal static class Program
                 .OfType<ToolStripMenuItem>()
                 .Single(item => item.Text == "保存时间（最早优先）");
             oldestFirstItem.PerformClick();
-            if (listView.Items.Count != 2 ||
+            if (listView.Items.Count != 3 ||
                 listView.Items[0].Text != "第一张截图.png" ||
                 sortButton.Text != "时间：旧→新")
             {
@@ -1009,11 +1015,19 @@ internal static class Program
             selectedItem.Focused = true;
             var editItem = menu.Items["EditScreenshotMenuItem"] ??
                            throw new InvalidOperationException("右键菜单缺少“编辑”选项。");
+            var copyItem = menu.Items["CopyScreenshotMenuItem"] ??
+                           throw new InvalidOperationException("右键菜单缺少“复制”选项。");
             var deleteItem = menu.Items["DeleteScreenshotMenuItem"] ??
                              throw new InvalidOperationException("右键菜单缺少“删除”选项。");
-            if (editItem.Text != "编辑" || deleteItem.Text != "删除")
+            if (editItem.Text != "编辑" ||
+                copyItem.Text != "复制" ||
+                deleteItem.Text != "删除" ||
+                string.Join(
+                    ',',
+                    menu.Items.OfType<ToolStripMenuItem>().Select(item => item.Text)) !=
+                "编辑,复制,删除")
             {
-                throw new InvalidOperationException("截图右键菜单的编辑或删除文字不正确。");
+                throw new InvalidOperationException("截图右键菜单的编辑、复制或删除文字不正确。");
             }
 
             menu.Show(
@@ -1043,6 +1057,14 @@ internal static class Program
             string? requestedEditPath = null;
             page.EditRequested += (_, eventArgs) => requestedEditPath = eventArgs.Path;
             menu.Close();
+            copyItem.PerformClick();
+            if (galleryClipboard.CopiedImage is null ||
+                galleryClipboard.CopiedImage.Size != new Size(640, 360) ||
+                galleryClipboard.CopiedImage.GetPixel(0, 0).ToArgb() !=
+                Color.FromArgb(22, 163, 74).ToArgb())
+            {
+                throw new InvalidOperationException("复制菜单没有把当前选中的原始截图写入剪贴板。");
+            }
             editItem.PerformClick();
             if (!string.Equals(
                     Path.GetFullPath((string)selectedItem.Tag!),
@@ -1051,6 +1073,20 @@ internal static class Program
             {
                 throw new InvalidOperationException("编辑菜单没有回传当前选中的截图路径。");
             }
+
+            foreach (ListViewItem item in listView.Items)
+            {
+                item.Selected = item.Text == "录屏示例.mp4";
+                item.Focused = item.Selected;
+            }
+            menu.Show(listView, new Point(20, 20));
+            System.Windows.Forms.Application.DoEvents();
+            if (editItem.Visible || copyItem.Visible || !deleteItem.Visible)
+            {
+                throw new InvalidOperationException(
+                    "视频右键菜单应隐藏图片专用的编辑和复制，只保留删除。");
+            }
+            menu.Close();
 
             form.Close();
             System.Windows.Forms.Application.DoEvents();
@@ -1113,10 +1149,14 @@ internal static class Program
             new DrawingToolCoefficients(),
             AnnotationRotationStep.DefaultDegrees,
             DrawingCursorShape.Circle);
+        using var existingImageClipboard = new RecordingPreviewClipboardService
+        {
+            Text = "粘贴文字继续编辑"
+        };
         var overlay = new CaptureOverlayForm(
             snapshot,
             new PreviewImageSaveService(),
-            new PreviewClipboardService(),
+            existingImageClipboard,
             new PreviewWindowLocator(),
             new PreviewModuleManager(),
             SelectionMoveAnnotationStrategyFactory.Create(StickerSelectionMoveMode.FollowSelection),
@@ -1141,6 +1181,62 @@ internal static class Program
         if (!overlay.Text.Contains("编辑已有截图", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("已有截图编辑窗口没有显示正确的编辑状态。");
+        }
+
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "PasteClipboardContent",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, null);
+        var pastedInputEditor = (TransparentTextEditorControl?)typeof(CaptureOverlayForm)
+            .GetField(
+                "_textEditor",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(overlay);
+        if (pastedInputEditor is null ||
+            pastedInputEditor.Text != "粘贴文字继续编辑")
+        {
+            throw new InvalidOperationException(
+                "已有截图粘贴文字没有进入统一文字输入框。");
+        }
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "CancelTextEditor",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, [true]);
+        var annotationEditor = (CaptureAnnotationEditor)typeof(CaptureOverlayForm)
+            .GetField(
+                "_annotationEditor",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(overlay)!;
+        var pastedAnnotation = annotationEditor.Document
+            .GetMovableAnnotations()
+            .Single();
+        if (pastedAnnotation is not TextAnnotation textAnnotation ||
+            textAnnotation.Text != "粘贴文字继续编辑")
+        {
+            throw new InvalidOperationException(
+                "已有截图粘贴文字提交后没有生成普通文字元素。");
+        }
+        if (!annotationEditor.Undo())
+        {
+            throw new InvalidOperationException("已有截图无法撤销粘贴文字验证元素。");
+        }
+        existingImageClipboard.Text = null;
+
+        using (var recognitionInput = featureHost.CopyDesktopSelection())
+        {
+            if (recognitionInput.Size != existingImage.Size ||
+                recognitionInput.GetPixel(80, 90).ToArgb() !=
+                Color.FromArgb(239, 68, 68).ToArgb())
+            {
+                throw new InvalidOperationException(
+                    "再次编辑时 OCR 取到的不是当前已有截图原始像素。");
+            }
         }
 
         using (var rendered = (Bitmap)typeof(CaptureOverlayForm).GetMethod(
@@ -1439,7 +1535,7 @@ internal static class Program
         }
         if (!navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
             shell.SelectedPageId != "screenshot-tool.screen-recording.settings" ||
-            !shell.VersionText.Equals("v1.11.5", StringComparison.Ordinal))
+            !shell.VersionText.Equals("v1.11.6", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"主界面没有正确显示录屏分页或版本号，当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");
@@ -1819,7 +1915,8 @@ internal static class Program
             DrawingCursorShape.Circle,
             snappingEnabled: true,
             snapThresholdPixels: 8,
-            ctrlDragStepPixels: 10)
+            ctrlDragStepPixels: 10,
+            annotationMoveActivationMode: AnnotationMoveActivationMode.ToggleOnAltTap)
         {
             Location = new Point(18, 18),
             Size = new Size(724, 604)
@@ -1834,9 +1931,10 @@ internal static class Program
 
         if (!page.SnappingEnabled ||
             page.SnapThresholdPixels != 8 ||
-            page.CtrlDragStepPixels != 10)
+            page.CtrlDragStepPixels != 10 ||
+            page.AnnotationMoveActivationMode != AnnotationMoveActivationMode.ToggleOnAltTap)
         {
-            throw new InvalidOperationException("编辑设置页面没有恢复元素吸附与 Ctrl 拖动参数。");
+            throw new InvalidOperationException("编辑设置页面没有恢复移动方式、元素吸附与 Ctrl 拖动参数。");
         }
 
         using var captured = new Bitmap(form.Width, form.Height);
@@ -2065,6 +2163,28 @@ internal sealed class PreviewClipboardService : IClipboardService
     }
 }
 
+internal sealed class RecordingPreviewClipboardService : IClipboardService, IDisposable
+{
+    public Bitmap? CopiedImage { get; private set; }
+
+    public string? Text { get; set; }
+
+    public void SetImage(Image image)
+    {
+        CopiedImage?.Dispose();
+        CopiedImage = new Bitmap(image);
+    }
+
+    public Bitmap? GetImage() =>
+        CopiedImage is null ? null : new Bitmap(CopiedImage);
+
+    public string? GetText() => Text;
+
+    public void SetText(string text) => Text = text;
+
+    public void Dispose() => CopiedImage?.Dispose();
+}
+
 internal sealed class PreviewWindowLocator : IWindowLocator
 {
     public Rectangle? FindWindowAt(Point screenPoint) => null;
@@ -2094,6 +2214,12 @@ internal sealed class PreviewSavedScreenshotService : ISavedScreenshotService
     public bool IsSupportedImage(string path) => Path.GetExtension(path).ToLowerInvariant() is
         ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif";
 
+    public bool IsSupportedVideo(string path) =>
+        string.Equals(
+            Path.GetExtension(path),
+            ".mp4",
+            StringComparison.OrdinalIgnoreCase);
+
     public Bitmap LoadForEditing(string folderPath, string filePath)
     {
         using var source = Image.FromFile(filePath);
@@ -2105,6 +2231,8 @@ internal sealed class PreviewSavedScreenshotService : ISavedScreenshotService
 
 internal sealed class PreviewStartupRegistrationService : IStartupRegistrationService
 {
+    public bool HasRegistration => IsEnabled;
+
     public bool IsEnabled { get; private set; } = true;
 
     public void SetEnabled(bool enabled) => IsEnabled = enabled;

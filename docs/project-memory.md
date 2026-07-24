@@ -4,16 +4,16 @@
 
 ## 当前快照
 
-- 快照日期：2026-07-23。
-- 主程序版本：`1.11.5`。
+- 快照日期：2026-07-24。
+- 主程序版本：`1.11.6`。
 - 长截图模块版本：`1.1.0`。
 - 录屏模块版本：`1.7.0`，最低要求主程序 `1.10.0`。
-- 本地 OCR 模块版本：`1.1.0`，最低要求主程序 `1.11.0`。
-- PP-OCR Tiny 与 PP-OCR Small 模块版本：均为 `1.0.0`，最低要求主程序 `1.11.0`。
+- 本地 OCR 模块版本：`1.2.0`，最低要求主程序 `1.11.6`。
+- PP-OCR Tiny 与 PP-OCR Small 模块版本：均为 `1.1.0`，最低要求主程序 `1.11.6`。
 - 二维码扫描模块版本：`1.0.0`，最低要求主程序 `1.11.0`。
 - 贴图悬浮窗模块版本：`1.0.0`，最低要求主程序 `1.11.5`。
 - GitHub 仓库：`XDIOEZ/CutCut`，默认分支 `main`。
-- 当前 Release：`v1.11.5`。
+- 当前 Release：`v1.11.6`。
 - 发布首页：<https://xdioez.github.io/CutCut/>。
 - 模块下载页：<https://xdioez.github.io/CutCut/modules.html>。
 
@@ -24,17 +24,22 @@
 - 首次运行，或配置中的 `lastLaunchedVersion` 与当前主程序版本不一致时，主动打开设置工作台并选中“截图设置”。这是帮助新用户完成必要配置、让升级用户检查新选项的固定行为。
 - 首次/更新检查优先级高于“手动启动后最小化”和 `--background`；同一版本完成标记后，后续启动才恢复用户选择的安静启动行为。
 - “开机自动启动”是重要功能：使用当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名为 `LightShotCN`，命令为带引号的当前 EXE 绝对路径加 `--background`。不要求管理员权限，登录后安静进入托盘。
+- 开机自启动的用户选择同时持久化到配置文件；程序每次启动都会按该选择重新同步启动项。已有稳定启动项会自动迁移到配置，程序移动或原地更新后会把启动命令修复为当前 EXE 路径，避免注册表项丢失或旧路径导致重启后无法启动。
 - 相关入口：`Application/StartupWorkspaceService.cs`、`Core/StartupWorkspacePolicy.cs`、`Infrastructure/WindowsRunStartupEntryStore.cs`、`Application/StartupRegistrationService.cs`、`Presentation/MainForm.cs`。
 
 ### 查看截图与再次编辑
 
-- “查看截图”页保留双击使用系统图片查看器打开的行为；右键当前缩略图时提供“编辑”和“删除”两个选项。
+- “查看截图”页同时展示保存目录直属层级中的受支持图片与录屏 MP4；双击时交给系统默认图片查看器或视频播放器打开。图片右键依次提供“编辑”“复制”和“删除”，其中“复制”把原始截图像素写入系统剪贴板且不锁定源文件；视频没有编辑能力，也不提供图片像素复制，因此右键只显示“删除”。
 - “查看截图”页顶部提供文件名实时搜索框和排序菜单；排序固定支持保存时间最新优先、保存时间最早优先、名称 A→Z、名称 Z→A 四种模式，按钮文字应显示当前模式。搜索忽略大小写并先筛选再排序，`Esc` 可清空当前搜索词。
 - “编辑”把选中的已保存图片载入现有截图覆盖层，显示整张原图并复用矩形、椭圆、箭头、画笔、文字、马赛克、撤销、粗细和颜色等编辑能力。保存时沿用截图命名规则生成新的 PNG，不覆盖或删除原文件。
+- 进入已有图片或贴图的重新编辑模式时，编辑覆盖层仍使用虚拟桌面坐标，但初始图片只在进入编辑瞬间鼠标所在的显示器范围内缩放并居中，不能以整个虚拟桌面居中而跨在多显示器接缝上。
 - 箭头被单独选中时只显示箭尾起点和箭头终点两个缩放手柄，不显示外接框四边中点及另外两个边角手柄；命中与缩放也只响应这两个可见端点。
-- 新建或重新编辑文字时，无需退出文字输入模式；按住 `Alt` 后可以从文字输入框内任意位置拖动整个输入框，松开后继续保持焦点、光标位置和输入状态。未按 `Alt` 的左键拖动仍用于选择文字。
-- “删除”必须二次确认，并将文件移入 Windows 回收站而不是永久删除；只允许管理当前截图保存目录直属层级中的受支持图片。
-- 相关入口：`Presentation/Pages/ScreenshotGalleryPage.cs`、`Presentation/Pages/ScreenshotGalleryQuery.cs`、`Abstractions/ISavedScreenshotService.cs`、`Infrastructure/SavedScreenshotService.cs`、`Editing/AnnotationHandleLayout.cs`、`Presentation/TransparentTextEditorControl.cs`、`Presentation/MainForm.cs`、`Presentation/CaptureOverlayForm.cs`。
+- “图片修改”设置页提供“Alt 移动元素方式”，默认保持“按住 Alt 临时移动”，也可选择“裸按一次 Alt 切换移动模式开关”。该选择统一作用于普通截图编辑、已有图片/贴图重新编辑、录屏实时批注和文字输入框；Alt+滚轮旋转等组合操作不能误触发切换。
+- 新建或重新编辑文字时，无需退出文字输入模式；移动模式开启后可以从文字输入框内任意位置拖动整个输入框，松开后继续保持焦点、光标位置和输入状态。移动模式关闭时，左键拖动仍用于选择文字。
+- 未处于文字编辑状态时粘贴剪贴板文本，必须在鼠标位置打开与文字工具相同的透明输入框并预填内容，继续使用当前颜色、粗细、输入、选区和撤销能力；提交后统一生成普通文字元素。不得再为粘贴文字维护独立的深色背景元素、渲染样式或重新编辑分支。粘贴图片仍生成图片贴纸。
+- 文字输入框拥有独立的撤销历史；编辑文字期间按 `Ctrl+Z` 优先撤销输入、删除、剪切或粘贴造成的文字变化，并恢复当时的光标与选区，不得误触发画布级批注撤销。没有正在编辑的文字框时，`Ctrl+Z` 仍撤销上一项画布批注操作。
+- “删除”必须二次确认，并将文件移入 Windows 回收站而不是永久删除；只允许管理当前截图保存目录直属层级中的受支持图片或 MP4 视频。
+- 相关入口：`Presentation/Pages/ScreenshotGalleryPage.cs`、`Presentation/Pages/ScreenshotGalleryQuery.cs`、`Abstractions/ISavedScreenshotService.cs`、`Infrastructure/SavedScreenshotService.cs`、`Editing/AnnotationHandleLayout.cs`、`Editing/AnnotationMoveActivationState.cs`、`Presentation/ExistingImageEditLayout.cs`、`Presentation/TransparentTextEditorControl.cs`、`Presentation/MainForm.cs`、`Presentation/CaptureOverlayForm.cs`。
 
 ### 插件与设置页
 
@@ -44,6 +49,8 @@
 - 模块自己的设置页仍由模块契约动态加入导航；模块禁用或删除后立即移除，重新启用后恢复。
 - 从 `v1.11.5` 起，轻量版和重量版预装贴图悬浮窗、长截图、本地 OCR、二维码扫描与录屏模块，但仍要保留独立模块包，供按需安装或永久删除后恢复。PP-OCR Tiny/Small 模型不进入这两个常规包，避免破坏 5 MiB / 90 MiB 体积约束；轻量完全版与完全版分别以轻量版、重量版为底包，额外预装 Tiny、Small 及其模型，作为依赖系统 .NET 或自带运行库的一次装齐全部插件选项。
 - 本地 OCR 保持稳定命令 ID `screenshot-tool.ocr.recognize`，使用 Windows 自带离线 OCR；识别前对原图、高清放大、灰度增强和 Otsu 二值化候选结果分别识别并择优。PP-OCR Tiny 和 Small 是稳定 ID、独立目录、独立依赖与模型的两个模块，分别偏向体积/速度和复杂场景精度。三者都不上传图片；成功后关闭截图遮罩，并由宿主在选区旁打开可编辑、可复制的独立文本结果窗。
+- 本地 OCR、PP-OCR Tiny 和 PP-OCR Small 开始识别后，当前点击的工具栏按钮必须原位切换为带“识别中…”文字的连续动画进度条；没有识别到文字或执行失败时恢复原按钮，识别成功时随截图会话一起关闭。OCR 引擎没有可校准的百分比时不得显示虚假的完成百分比。
+- OCR 与二维码扫描始终读取当前未标注的截图源：普通截图读取桌面选区；已有图片、贴图再次编辑或长图替换结果存在时读取当前替换图片的原始像素，不能穿透编辑窗口读取其下方桌面。
 - 三种 OCR 可以同时安装，但默认建议用户只启用其中一个。对应目录为 `Modules\Ocr`、`Modules\PaddleOcrTiny` 和 `Modules\PaddleOcrSmall`；任一模块的禁用、删除或替换不得影响另外两个。
 - 二维码扫描通过稳定命令 ID `screenshot-tool.qr-code.scan` 离线扫描当前截图选区，只尝试 QR Code；成功后复用宿主侧边结果窗显示原始内容，不自动打开网址或执行二维码内容。入口 DLL、私有 `zxing.dll` 与许可文本共同位于 `Modules\QrCode`。
 - 贴图悬浮窗使用稳定模块 ID `screenshot-tool.pinned-image` 和命令 ID `screenshot-tool.pinned-image.pin`，位于 `Modules\PinnedImage`。点击“贴图”时使用最终导出渲染取得包含全部批注的选区位图，在原选区位置创建置顶无边框窗并结束截图会话。拖动内部可移动；拖动四边或四角默认等比缩放，按住 `Shift` 可自由改变宽高比。右键菜单固定为删除、复制、保存、编辑；编辑会把当前贴图像素作为新底图回到现有编辑窗口。禁用、删除或替换模块时必须关闭并释放其全部贴图窗口。
@@ -104,7 +111,7 @@
 - 录屏独立模块约 `0.45 MiB`。
 - `v1.11.5` 的轻量版和重量版预装贴图悬浮窗、长截图、本地 OCR、二维码扫描与录屏；轻量完全版和完全版分别在轻量版、重量版基础上再预装 PP-OCR Tiny/Small，因此包含全部七个模块。独立模块包保持程序旁 `Modules/<模块目录>/...` 的目录结构，解压到程序目录即可安装。
 
-发布脚本 `scripts/Publish-Release.ps1` 会生成四种完整包、七个独立模块包、免解压运行目录和 `SHA256SUMS.txt`，并检查轻量版小于 `5 MiB`、重量版小于 `90 MiB`、轻量完全版未压缩目录小于 `110 MiB` 且 ZIP 小于 `80 MiB`、完全版未压缩目录小于 `180 MiB` 且 ZIP 小于 `130 MiB`。项目级 Skill `.agents/skills/publish-cutcut-release` 固化版本升级、验证、组包、GitHub 合并、Release 上传和线上回查流程；只有用户在当前需求中明确要求打包或发布时才调用该流程。贴图、本地 OCR 与二维码扫描的独立恢复资产名分别固定为 `pinned-image-addon-win-x64.zip`、`ocr-addon-win-x64.zip` 和 `qr-code-addon-win-x64.zip`；PP-OCR 通过 `scripts/Get-PaddleOcrModels.ps1` 下载固定版本并核对 SHA-256，再由 `scripts/Publish-PaddleOcrModule.ps1` 分别组装 Tiny/Small。
+发布脚本 `scripts/Publish-Release.ps1` 会生成四种完整包、七个独立模块包、免解压运行目录和 `SHA256SUMS.txt`，并检查轻量版小于 `5 MiB`、重量版小于 `90 MiB`、轻量完全版未压缩目录小于 `110 MiB` 且 ZIP 小于 `80 MiB`、完全版未压缩目录小于 `180 MiB` 且 ZIP 小于 `130 MiB`。项目级 Skill `.agents/skills/publish-cutcut-release` 使用快速直发流程：用户明确要求打包或发布后，更新版本并直接提交到 `main`，只生成一次正式资产并上传，不再单独运行格式、测试、UI、候选包、`ValidateOnly`、PR/CI 或发布后复核步骤。贴图、本地 OCR 与二维码扫描的独立恢复资产名分别固定为 `pinned-image-addon-win-x64.zip`、`ocr-addon-win-x64.zip` 和 `qr-code-addon-win-x64.zip`；PP-OCR 通过 `scripts/Get-PaddleOcrModels.ps1` 下载固定版本并核对 SHA-256，再由 `scripts/Publish-PaddleOcrModule.ps1` 分别组装 Tiny/Small。
 
 ## 本地最新测试包
 

@@ -7,15 +7,19 @@ namespace ScreenshotTool.Presentation;
 internal sealed class TransparentTextEditorControl : Control
 {
     private const int GlyphSafetyPadding = 3;
+    private const int MaximumUndoHistoryCount = 100;
+    public static Size ContentPadding { get; } = new(4, 3);
 
     private Font _editorFont;
     private readonly int _horizontalPadding;
     private readonly int _verticalPadding;
-    private readonly FontStyle _fontStyle;
     private readonly Size _minimumSize;
     private readonly Rectangle _movementBounds;
     private readonly IClipboardService? _clipboardService;
+    private readonly Func<bool>? _moveModeActive;
+    private readonly Action? _altModifierUsed;
     private readonly ContextMenuStrip _textMenu;
+    private readonly List<TextEditorUndoState> _undoHistory = [];
     private int _caretIndex;
     private int _selectionAnchor;
     private bool _isSelectingText;
@@ -31,7 +35,8 @@ internal sealed class TransparentTextEditorControl : Control
         IClipboardService? clipboardService = null,
         float textFontSize = TextToolSizing.DefaultFontSize,
         Size? textPadding = null,
-        FontStyle fontStyle = FontStyle.Bold)
+        Func<bool>? moveModeActive = null,
+        Action? altModifierUsed = null)
     {
         if (!float.IsFinite(textFontSize) || textFontSize <= 0F)
         {
@@ -49,11 +54,12 @@ internal sealed class TransparentTextEditorControl : Control
         _movementBounds = movementBounds.IsEmpty
             ? new Rectangle(location, minimumSize)
             : movementBounds;
-        var effectivePadding = textPadding ?? new Size(4, 3);
+        var effectivePadding = textPadding ?? ContentPadding;
         _horizontalPadding = Math.Max(0, effectivePadding.Width);
         _verticalPadding = Math.Max(0, effectivePadding.Height);
-        _fontStyle = fontStyle;
         _clipboardService = clipboardService;
+        _moveModeActive = moveModeActive;
+        _altModifierUsed = altModifierUsed;
         _textMenu = new ContextMenuStrip();
         _textMenu.Items.Add("剪切", null, (_, _) => CutSelectedText());
         _textMenu.Items.Add("复制", null, (_, _) => CopySelectedText());
@@ -83,7 +89,7 @@ internal sealed class TransparentTextEditorControl : Control
         _editorFont = new Font(
             "Microsoft YaHei UI",
             textFontSize,
-            _fontStyle,
+            FontStyle.Bold,
             GraphicsUnit.Pixel);
         Font = _editorFont;
         ResizeToContent();
@@ -109,6 +115,8 @@ internal sealed class TransparentTextEditorControl : Control
 
     public float TextFontSize => _editorFont.Size;
 
+    public bool CanUndoTextChange => _undoHistory.Count > 0;
+
     public void SetTextFontSize(float textFontSize)
     {
         if (!float.IsFinite(textFontSize) || textFontSize <= 0F)
@@ -124,7 +132,7 @@ internal sealed class TransparentTextEditorControl : Control
         _editorFont = new Font(
             "Microsoft YaHei UI",
             textFontSize,
-            _fontStyle,
+            FontStyle.Bold,
             GraphicsUnit.Pixel);
         Font = _editorFont;
         previousFont.Dispose();
@@ -165,10 +173,35 @@ internal sealed class TransparentTextEditorControl : Control
             .Insert(selectionStart, normalized);
         var candidateCaret = selectionStart + normalized.Length;
         var wrapped = WrapToRightBoundary(candidate, candidateCaret);
+        if (Text == wrapped.Text &&
+            _caretIndex == wrapped.CaretIndex &&
+            _selectionAnchor == wrapped.CaretIndex)
+        {
+            return;
+        }
+
+        RecordUndoState();
         Text = wrapped.Text;
         _caretIndex = wrapped.CaretIndex;
         _selectionAnchor = _caretIndex;
         Invalidate();
+    }
+
+    public bool UndoTextChange()
+    {
+        if (_undoHistory.Count == 0)
+        {
+            return false;
+        }
+
+        var stateIndex = _undoHistory.Count - 1;
+        var state = _undoHistory[stateIndex];
+        _undoHistory.RemoveAt(stateIndex);
+        Text = state.Text;
+        _caretIndex = Math.Clamp(state.CaretIndex, 0, Text.Length);
+        _selectionAnchor = Math.Clamp(state.SelectionAnchor, 0, Text.Length);
+        Invalidate();
+        return true;
     }
 
     public void SelectAllText()
@@ -203,7 +236,7 @@ internal sealed class TransparentTextEditorControl : Control
     {
         if (IsAltKey(e.KeyCode))
         {
-            UpdatePointerCursor(altPressed: true);
+            UpdatePointerCursor();
         }
 
         if (e.KeyCode == Keys.Enter)
@@ -224,6 +257,10 @@ internal sealed class TransparentTextEditorControl : Control
         {
             switch (e.KeyCode)
             {
+                case Keys.Z:
+                    UndoTextChange();
+                    e.SuppressKeyPress = true;
+                    return;
                 case Keys.A:
                     SelectAllText();
                     e.SuppressKeyPress = true;
@@ -281,7 +318,7 @@ internal sealed class TransparentTextEditorControl : Control
     {
         if (IsAltKey(e.KeyCode))
         {
-            UpdatePointerCursor(altPressed: false);
+            UpdatePointerCursor();
         }
         base.OnKeyUp(e);
     }
@@ -321,7 +358,12 @@ internal sealed class TransparentTextEditorControl : Control
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (TextEditorInteraction.ShouldBeginMove(e.Button, IsAltPressed()))
+        if (IsAltPressed())
+        {
+            _altModifierUsed?.Invoke();
+        }
+
+        if (TextEditorInteraction.ShouldBeginMove(e.Button, IsMoveModeActive()))
         {
             Focus();
             _isSelectingText = false;
@@ -371,7 +413,7 @@ internal sealed class TransparentTextEditorControl : Control
             return;
         }
 
-        Cursor = IsAltPressed() ? Cursors.SizeAll : Cursors.IBeam;
+        Cursor = IsMoveModeActive() ? Cursors.SizeAll : Cursors.IBeam;
         base.OnMouseMove(e);
     }
 
@@ -381,7 +423,7 @@ internal sealed class TransparentTextEditorControl : Control
         {
             _isMoving = false;
             Capture = false;
-            Cursor = IsAltPressed() ? Cursors.SizeAll : Cursors.IBeam;
+            Cursor = IsMoveModeActive() ? Cursors.SizeAll : Cursors.IBeam;
             return;
         }
 
@@ -470,6 +512,7 @@ internal sealed class TransparentTextEditorControl : Control
         }
 
         var newCaretIndex = _caretIndex - 1;
+        RecordUndoState();
         Text = Text.Remove(newCaretIndex, 1);
         _caretIndex = newCaretIndex;
         _selectionAnchor = _caretIndex;
@@ -487,6 +530,7 @@ internal sealed class TransparentTextEditorControl : Control
             return;
         }
 
+        RecordUndoState();
         Text = Text.Remove(_caretIndex, 1);
         Invalidate();
     }
@@ -536,6 +580,7 @@ internal sealed class TransparentTextEditorControl : Control
         }
 
         var start = SelectionStart;
+        RecordUndoState();
         Text = Text.Remove(start, SelectionLength);
         _caretIndex = start;
         _selectionAnchor = start;
@@ -568,6 +613,15 @@ internal sealed class TransparentTextEditorControl : Control
         {
             InsertText(text);
         }
+    }
+
+    private void RecordUndoState()
+    {
+        if (_undoHistory.Count >= MaximumUndoHistoryCount)
+        {
+            _undoHistory.RemoveAt(0);
+        }
+        _undoHistory.Add(new TextEditorUndoState(Text, _caretIndex, _selectionAnchor));
     }
 
     private int FindCharacterIndex(Point point)
@@ -735,12 +789,14 @@ internal sealed class TransparentTextEditorControl : Control
 
     private static bool IsAltPressed() => (ModifierKeys & Keys.Alt) == Keys.Alt;
 
+    private bool IsMoveModeActive() => _moveModeActive?.Invoke() ?? IsAltPressed();
+
     private static bool IsAltKey(Keys keyCode) => keyCode is Keys.Menu or Keys.LMenu or Keys.RMenu;
 
-    private void UpdatePointerCursor(bool altPressed)
+    private void UpdatePointerCursor()
     {
         var pointer = PointToClient(Cursor.Position);
-        Cursor = altPressed && ClientRectangle.Contains(pointer)
+        Cursor = IsMoveModeActive() && ClientRectangle.Contains(pointer)
             ? Cursors.SizeAll
             : Cursors.IBeam;
     }
@@ -762,4 +818,9 @@ internal sealed class TransparentTextEditorControl : Control
         Trimming = StringTrimming.None,
         FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces
     };
+
+    private readonly record struct TextEditorUndoState(
+        string Text,
+        int CaretIndex,
+        int SelectionAnchor);
 }

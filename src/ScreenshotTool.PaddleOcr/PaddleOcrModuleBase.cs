@@ -4,7 +4,7 @@ namespace ScreenshotTool.PaddleOcr;
 
 public abstract class PaddleOcrModuleBase : ScreenshotToolModuleBase
 {
-    public static Version MinimumHostVersion { get; } = new(1, 11, 0);
+    public static Version MinimumHostVersion { get; } = new(1, 11, 6);
 
     private readonly object _lifecycleLock = new();
     private string? _moduleDirectory;
@@ -25,7 +25,7 @@ public abstract class PaddleOcrModuleBase : ScreenshotToolModuleBase
 
     protected abstract int FeatureOrder { get; }
 
-    public override Version Version => new(1, 0, 0);
+    public override Version Version => new(1, 1, 0);
 
     public override void Initialize(IModuleContext context)
     {

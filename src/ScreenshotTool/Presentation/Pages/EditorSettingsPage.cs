@@ -12,6 +12,7 @@ internal sealed class EditorSettingsPage : UserControl
     private readonly CheckBox _snappingEnabled;
     private readonly NumericUpDown _snapThresholdPixels;
     private readonly NumericUpDown _ctrlDragStepPixels;
+    private readonly ComboBox _annotationMoveActivationMode;
     private readonly Panel _settingsCard;
     private readonly Panel _note;
     private readonly List<Panel> _settingRows = [];
@@ -23,7 +24,9 @@ internal sealed class EditorSettingsPage : UserControl
         DrawingCursorShape drawingCursorShape = DrawingCursorShape.Circle,
         bool snappingEnabled = AnnotationLayoutOptions.DefaultSnappingEnabled,
         int snapThresholdPixels = AnnotationLayoutOptions.DefaultSnapThresholdPixels,
-        int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels)
+        int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels,
+        AnnotationMoveActivationMode annotationMoveActivationMode =
+            AnnotationMoveActivationMode.HoldAlt)
     {
         BackColor = AppTheme.Canvas;
         AutoScroll = true;
@@ -31,7 +34,7 @@ internal sealed class EditorSettingsPage : UserControl
         _settingsCard = new Panel
         {
             Location = Point.Empty,
-            Height = 680,
+            Height = 752,
             BackColor = AppTheme.Surface,
             BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(26, 22, 26, 22)
@@ -71,6 +74,20 @@ internal sealed class EditorSettingsPage : UserControl
         _minimumWidth.ValueChanged += HandleMinimumChanged;
         _maximumWidth.ValueChanged += HandleMaximumChanged;
 
+        _annotationMoveActivationMode = new ComboBox
+        {
+            Size = new Size(196, 34),
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Font = AppTheme.CreateFont(10F)
+        };
+        _annotationMoveActivationMode.Items.AddRange(
+            ["按住 Alt 临时移动（推荐）", "按一下 Alt 切换移动模式"]);
+        AddSettingRow(
+            "Alt 移动元素方式",
+            "选择按住生效，或裸按 Alt 切换。",
+            _annotationMoveActivationMode,
+            321);
+
         _drawingCursorShape = new ComboBox
         {
             Size = new Size(180, 34),
@@ -82,7 +99,7 @@ internal sealed class EditorSettingsPage : UserControl
             "画笔 / 马赛克光标",
             "选择绘制时显示的笔刷轮廓形状。",
             _drawingCursorShape,
-            321);
+            393);
 
         _snappingEnabled = new CheckBox
         {
@@ -96,7 +113,7 @@ internal sealed class EditorSettingsPage : UserControl
             "编辑元素吸附",
             "移动元素时自动对齐其他元素的边缘和中心。",
             _snappingEnabled,
-            393);
+            465);
 
         _snapThresholdPixels = CreateLayoutInput(
             AnnotationLayoutOptions.MinimumSnapThresholdPixels,
@@ -107,7 +124,7 @@ internal sealed class EditorSettingsPage : UserControl
             "吸附距离（像素）",
             "元素接近参考线多少像素时触发吸附。",
             _snapThresholdPixels,
-            465);
+            537);
 
         _ctrlDragStepPixels = CreateLayoutInput(
             AnnotationLayoutOptions.MinimumCtrlDragStepPixels,
@@ -116,10 +133,10 @@ internal sealed class EditorSettingsPage : UserControl
             "Ctrl 拖动步长（像素）",
             "拖动或缩放时按住 Ctrl 使用的固定步长。",
             _ctrlDragStepPixels,
-            537);
+            609);
 
         var saveButton = AppTheme.CreateButton("保存编辑设置", primary: true);
-        saveButton.Location = new Point(28, 622);
+        saveButton.Location = new Point(28, 694);
         saveButton.Size = new Size(142, 38);
         saveButton.Click += (_, _) => SaveRequested?.Invoke(this, EventArgs.Empty);
 
@@ -127,7 +144,7 @@ internal sealed class EditorSettingsPage : UserControl
 
         _note = new Panel
         {
-            Location = new Point(0, 700),
+            Location = new Point(0, 772),
             Height = 112,
             BackColor = Color.FromArgb(240, 253, 244),
             Padding = new Padding(20, 16, 20, 14)
@@ -141,7 +158,7 @@ internal sealed class EditorSettingsPage : UserControl
             Location = new Point(20, 15)
         };
         var noteBody = AppTheme.CreateBodyLabel(
-            "Alt + 拖动可移动元素；拖动时按住 Ctrl 会按固定步长变化；快速双击 Ctrl 可切换吸附。Ctrl + 滚轮缩放，Alt + 滚轮旋转。",
+            "Alt 移动可配置为按住临时生效或裸按切换；Ctrl 拖动使用固定步长，快速双击 Ctrl 切换吸附。Ctrl + 滚轮缩放，Alt + 滚轮旋转。",
             660);
         noteBody.Location = new Point(22, 47);
         _note.Controls.AddRange([noteTitle, noteBody]);
@@ -153,6 +170,7 @@ internal sealed class EditorSettingsPage : UserControl
         SnappingEnabled = snappingEnabled;
         SnapThresholdPixels = snapThresholdPixels;
         CtrlDragStepPixels = ctrlDragStepPixels;
+        AnnotationMoveActivationMode = annotationMoveActivationMode;
         Resize += (_, _) => ResizeContent();
         ResizeContent();
     }
@@ -203,6 +221,15 @@ internal sealed class EditorSettingsPage : UserControl
         set => _ctrlDragStepPixels.Value = AnnotationLayoutOptions.NormalizeCtrlDragStep(value);
     }
 
+    public AnnotationMoveActivationMode AnnotationMoveActivationMode
+    {
+        get => _annotationMoveActivationMode.SelectedIndex == 1
+            ? AnnotationMoveActivationMode.ToggleOnAltTap
+            : AnnotationMoveActivationMode.HoldAlt;
+        set => _annotationMoveActivationMode.SelectedIndex =
+            value == AnnotationMoveActivationMode.ToggleOnAltTap ? 1 : 0;
+    }
+
     private void AddSettingRow(
         string title,
         string description,
@@ -225,7 +252,8 @@ internal sealed class EditorSettingsPage : UserControl
             ForeColor = AppTheme.Text,
             Location = new Point(16, 9)
         };
-        var descriptionLabel = AppTheme.CreateBodyLabel(description, 280);
+        var descriptionWidth = Math.Max(180, row.ClientSize.Width - input.Width - 64);
+        var descriptionLabel = AppTheme.CreateBodyLabel(description, descriptionWidth);
         descriptionLabel.Location = new Point(17, 34);
         descriptionLabel.Height = 20;
         input.Anchor = AnchorStyles.Top | AnchorStyles.Right;

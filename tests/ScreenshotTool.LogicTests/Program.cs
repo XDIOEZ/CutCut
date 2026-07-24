@@ -428,6 +428,7 @@ var startupRegistration = new StartupRegistrationService(
     runEntryStore,
     @"C:\Program Files\LightShotCN\ScreenshotTool.exe");
 AssertTrue(!startupRegistration.IsEnabled, "没有当前用户启动项时默认关闭开机启动");
+AssertTrue(!startupRegistration.HasRegistration, "没有当前用户启动项时不会误判为已配置");
 startupRegistration.SetEnabled(enabled: true);
 AssertEqual("LightShotCN", runEntryStore.Name ?? string.Empty, "开机启动项使用稳定名称");
 AssertEqual(
@@ -436,9 +437,39 @@ AssertEqual(
     "开机启动命令正确引用带空格路径并请求后台运行");
 AssertTrue(startupRegistration.IsEnabled, "写入匹配命令后识别为开机启动已开启");
 runEntryStore.Value = "\"C:\\OldLocation\\ScreenshotTool.exe\" --background";
+AssertTrue(startupRegistration.HasRegistration, "程序移动后仍能识别已有的稳定启动项");
 AssertTrue(!startupRegistration.IsEnabled, "程序移动后不会把旧路径误认为当前开机启动项");
 startupRegistration.SetEnabled(enabled: false);
 AssertTrue(runEntryStore.Value is null, "关闭开机启动会永久移除当前用户启动项");
+
+var startupPreferenceStore = new TestSettingsStore();
+var requestedStartupSettings = new AppSettings { StartWithWindows = true };
+AssertTrue(
+    new StartupRegistrationPreferenceService(startupPreferenceStore, startupRegistration)
+        .Synchronize(requestedStartupSettings) is null,
+    "启动时可以按持久化选择同步开机启动项");
+AssertTrue(startupRegistration.IsEnabled, "启动时会修复缺失的开机启动项");
+
+runEntryStore.Value = "\"C:\\OldLocation\\ScreenshotTool.exe\" --background";
+var migratedStartupSettings = new AppSettings();
+AssertTrue(
+    new StartupRegistrationPreferenceService(startupPreferenceStore, startupRegistration)
+        .Synchronize(migratedStartupSettings) is null,
+    "旧版稳定启动项可以迁移到持久化配置");
+AssertTrue(migratedStartupSettings.StartWithWindows, "已有启动项会恢复开机自启动选择");
+AssertTrue(startupRegistration.IsEnabled, "程序移动后会把启动项修复为当前 EXE 路径");
+AssertEqual(1, startupPreferenceStore.SaveCount, "迁移开机启动选择时保存一次配置");
+
+runEntryStore.Value = "\"C:\\OldLocation\\ScreenshotTool.exe\" --background";
+var explicitlyDisabledStartupSettings = new AppSettings { StartWithWindows = false };
+AssertTrue(
+    new StartupRegistrationPreferenceService(startupPreferenceStore, startupRegistration)
+        .Synchronize(explicitlyDisabledStartupSettings) is null,
+    "启动时可以按明确关闭的选择清理残留启动项");
+AssertTrue(!startupRegistration.HasRegistration, "明确关闭开机自启动后不会迁移残留启动项");
+AssertTrue(
+    !explicitlyDisabledStartupSettings.StartWithWindows,
+    "明确关闭的开机自启动选择保持关闭");
 
 var savedScreenshotTestRoot = Path.Combine(
     Path.GetTempPath(),
@@ -472,6 +503,15 @@ try
         !savedScreenshotService.IsSupportedImage(
             Path.Combine(savedScreenshotTestRoot, "说明.txt")),
         "截图管理拒绝非图片文件");
+    var savedVideoPath = Path.Combine(savedScreenshotTestRoot, "录屏示例.mp4");
+    File.WriteAllBytes(savedVideoPath, [0, 0, 0, 0]);
+    AssertTrue(
+        savedScreenshotService.IsSupportedVideo(savedVideoPath),
+        "保存内容管理识别录屏 MP4");
+    AssertTrue(
+        !savedScreenshotService.IsSupportedVideo(
+            Path.Combine(savedScreenshotTestRoot, "录屏示例.webm")),
+        "保存内容管理拒绝非录屏输出格式");
     using (var editableScreenshot = savedScreenshotService.LoadForEditing(
                savedScreenshotTestRoot,
                savedScreenshotPath))
@@ -505,6 +545,34 @@ try
     }
     AssertTrue(outsidePathRejected, "编辑拒绝截图保存目录之外的文件");
 
+    var outsideVideoPath = Path.Combine(outsideScreenshotTestRoot, "目录外录屏.mp4");
+    File.WriteAllBytes(outsideVideoPath, [0, 0, 0, 0]);
+    var outsideVideoRejected = false;
+    try
+    {
+        savedScreenshotService.MoveToRecycleBin(
+            savedScreenshotTestRoot,
+            outsideVideoPath);
+    }
+    catch (InvalidOperationException)
+    {
+        outsideVideoRejected = true;
+    }
+    AssertTrue(outsideVideoRejected, "删除拒绝截图保存目录之外的视频");
+
+    var videoEditRejected = false;
+    try
+    {
+        using var _ = savedScreenshotService.LoadForEditing(
+            savedScreenshotTestRoot,
+            savedVideoPath);
+    }
+    catch (InvalidOperationException)
+    {
+        videoEditRejected = true;
+    }
+    AssertTrue(videoEditRejected, "图片编辑入口拒绝视频文件");
+
     savedScreenshotService.MoveToRecycleBin(
         savedScreenshotTestRoot,
         savedScreenshotPath);
@@ -513,6 +581,15 @@ try
         recycledScreenshotPath ?? string.Empty,
         "删除把经过校验的截图路径交给回收站");
     AssertTrue(!File.Exists(savedScreenshotPath), "删除后截图不再留在保存目录");
+
+    savedScreenshotService.MoveToRecycleBin(
+        savedScreenshotTestRoot,
+        savedVideoPath);
+    AssertEqual(
+        Path.GetFullPath(savedVideoPath),
+        recycledScreenshotPath ?? string.Empty,
+        "删除把经过校验的视频路径交给回收站");
+    AssertTrue(!File.Exists(savedVideoPath), "删除后视频不再留在保存目录");
 }
 finally
 {
@@ -601,7 +678,9 @@ AssertEqual(
     gallerySearchResult.Entries[0].Name,
     "查看截图先筛选再应用当前排序");
 
-var wideEditSelection = CaptureOverlayForm.CalculateInitialEditSelection(
+var wideEditSelection = ExistingImageEditLayout.CalculateSelection(
+    new Rectangle(0, 0, 1000, 700),
+    new Rectangle(0, 0, 1000, 700),
     new Rectangle(0, 0, 1000, 700),
     new Size(1600, 900));
 AssertTrue(
@@ -615,10 +694,36 @@ AssertEqual(
     "已有截图编辑画布在当前屏幕居中");
 AssertEqual(
     new Rectangle(400, 300, 200, 100),
-    CaptureOverlayForm.CalculateInitialEditSelection(
+    ExistingImageEditLayout.CalculateSelection(
+        new Rectangle(0, 0, 1000, 700),
+        new Rectangle(0, 0, 1000, 700),
         new Rectangle(0, 0, 1000, 700),
         new Size(200, 100)),
     "小尺寸已有截图保持原尺寸并居中");
+
+var dualScreenOverlayBounds = new Rectangle(-1920, 0, 3840, 1080);
+var dualScreenClientBounds = new Rectangle(0, 0, 3840, 1080);
+var leftScreenEditSelection = ExistingImageEditLayout.CalculateSelection(
+    dualScreenOverlayBounds,
+    dualScreenClientBounds,
+    new Rectangle(-1920, 0, 1920, 1080),
+    new Size(640, 360));
+AssertEqual(
+    new Rectangle(640, 360, 640, 360),
+    leftScreenEditSelection,
+    "鼠标位于左侧副屏时已有截图在该屏幕客户区中心");
+var rightScreenEditSelection = ExistingImageEditLayout.CalculateSelection(
+    dualScreenOverlayBounds,
+    dualScreenClientBounds,
+    new Rectangle(0, 0, 1920, 1080),
+    new Size(640, 360));
+AssertEqual(
+    new Rectangle(2560, 360, 640, 360),
+    rightScreenEditSelection,
+    "鼠标位于右侧主屏时已有截图在该屏幕客户区中心");
+AssertTrue(
+    rightScreenEditSelection.Left >= 1920,
+    "双屏重新编辑不会把图片放在两个屏幕接缝上");
 
 var currentProductVersion = new Version(1, 10, 0, 0);
 AssertEqual(
@@ -739,17 +844,19 @@ using (var widthDrivenTextEditor = new TransparentTextEditorControl(
     AssertEqual(36F, widthDrivenTextEditor.TextFontSize, "编辑文字时调整粗细会立即更新字号");
     AssertTrue(widthDrivenTextEditor.IsTextFullyVisible, "实时放大字号后文字编辑框重新换行并完整显示");
 }
-using (var pastedTextEditor = new TransparentTextEditorControl(
+using (var paddedTextEditor = new TransparentTextEditorControl(
            new Point(20, 30),
            new Size(160, 54),
            Color.White,
            new Rectangle(0, 0, 420, 220),
            textFontSize: 17F,
-           textPadding: new Size(8, 6),
-           fontStyle: FontStyle.Regular))
+           textPadding: new Size(8, 6)))
 {
-    AssertEqual(new Rectangle(28, 36, 144, 42), pastedTextEditor.TextContentBounds, "粘贴文字重新编辑使用原有文本内边距");
-    AssertEqual(FontStyle.Regular, pastedTextEditor.Font.Style, "粘贴文字重新编辑保留常规字体样式");
+    AssertEqual(
+        new Rectangle(28, 36, 144, 42),
+        paddedTextEditor.TextContentBounds,
+        "缩放后的文字输入框使用对应视觉内边距");
+    AssertEqual(FontStyle.Bold, paddedTextEditor.Font.Style, "统一文字输入框始终使用同一字体样式");
 }
 AssertEqual(
     90F,
@@ -757,14 +864,6 @@ AssertEqual(
         TextToolSizing.CalculateVisualFontSize(8),
         0.4D),
     "长截图按缩放比例提交粗细对应的文字字号");
-using (var customPastedText = new PastedTextAnnotation(
-           new Rectangle(10, 10, 160, 60),
-           "粗细控制粘贴文字",
-           TextToolSizing.CalculateVisualFontSize(8)))
-{
-    AssertEqual(36F, customPastedText.FontSize, "粘贴文字元素接受粗细对应的字号");
-}
-
 using (var smallTextDocument = new AnnotationDocument())
 using (var largeTextDocument = new AnnotationDocument())
 using (var textSizeSource = CreateSolidBitmap(new Size(240, 120), Color.Black))
@@ -811,7 +910,7 @@ using (var hiddenTextPreview = CreateSolidBitmap(new Size(320, 220), Color.Black
     AssertEqual("原始文字", descriptor!.Text, "重新编辑载入原文字内容");
     AssertEqual(Color.CornflowerBlue.ToArgb(), descriptor.ForegroundColor.ToArgb(), "重新编辑载入原文字颜色");
     AssertEqual(18F, descriptor.FontSize, "重新编辑载入原字号");
-    AssertEqual(TextAnnotationEditorBoundsMode.Content, descriptor.BoundsMode, "透明文字以内容区域回写边界");
+    AssertEqual(original.Bounds, descriptor.Bounds, "统一文字重新编辑使用文字内容边界");
 
     using (var graphics = Graphics.FromImage(hiddenTextPreview))
     {
@@ -826,7 +925,6 @@ using (var hiddenTextPreview = CreateSolidBitmap(new Size(320, 220), Color.Black
 
     var updated = textReeditEditor.EndTextEdit(
         commit: true,
-        editorOuterBounds: new Rectangle(56, 66, 188, 60),
         editorContentBounds: new Rectangle(60, 69, 180, 54),
         text: "修改后的文字",
         fontSize: 24F);
@@ -840,34 +938,11 @@ using (var hiddenTextPreview = CreateSolidBitmap(new Size(320, 220), Color.Black
     AssertTrue(textReeditEditor.TryBeginTextEdit(original, out _), "更新后的文字可再次编辑");
     textReeditEditor.EndTextEdit(
         commit: false,
-        editorOuterBounds: new Rectangle(10, 10, 50, 30),
         editorContentBounds: new Rectangle(14, 13, 42, 24),
         text: "不应保存",
         fontSize: 9F);
     AssertEqual("修改后的文字", original.Text, "取消重新编辑会恢复原内容");
     AssertEqual(new Rectangle(60, 69, 180, 54), original.Bounds, "取消重新编辑会恢复原边界");
-}
-
-using (var pastedTextReeditEditor = new CaptureAnnotationEditor())
-{
-    var original = pastedTextReeditEditor.AddAndSelect(new PastedTextAnnotation(
-        new Rectangle(30, 40, 180, 62),
-        "原粘贴文字",
-        17F));
-    AssertTrue(
-        pastedTextReeditEditor.TryBeginTextEdit(original, out var descriptor),
-        "选中的粘贴文字也可重新编辑");
-    AssertEqual(TextAnnotationEditorBoundsMode.Outer, descriptor!.BoundsMode, "粘贴文字以外框回写边界");
-    AssertEqual(new Size(8, 6), descriptor.TextPadding, "粘贴文字重新编辑保留文本内边距");
-    pastedTextReeditEditor.EndTextEdit(
-        commit: true,
-        editorOuterBounds: new Rectangle(36, 44, 210, 70),
-        editorContentBounds: new Rectangle(44, 50, 194, 58),
-        text: "修改后的粘贴文字",
-        fontSize: 20F);
-    AssertEqual("修改后的粘贴文字", original.Text, "粘贴文字提交新内容");
-    AssertEqual(new Rectangle(36, 44, 210, 70), original.Bounds, "粘贴文字保留外框语义");
-    AssertEqual(20F, original.FontSize, "粘贴文字提交新字号");
 }
 
 using (var autoSizeEditor = new TransparentTextEditorControl(
@@ -927,6 +1002,60 @@ using (var selectionEditor = new TransparentTextEditorControl(
     selectionEditor.SelectAllText();
     selectionEditor.PasteClipboardText();
     AssertEqual("粘贴文字", selectionEditor.Text, "Ctrl+V 替换选区并粘贴文字");
+}
+
+var undoTextClipboard = new TestTextClipboardService();
+using (var undoTextEditor = new TransparentTextEditorControl(
+           Point.Empty,
+           new Size(180, 38),
+           Color.Red,
+           new Rectangle(0, 0, 360, 220),
+           undoTextClipboard))
+{
+    AssertTrue(!undoTextEditor.CanUndoTextChange, "空文字框没有可撤销的输入操作");
+    undoTextEditor.InsertText("第一步");
+    undoTextEditor.InsertText("第二步");
+    var undoKey = new KeyEventArgs(Keys.Control | Keys.Z);
+    var textEditorKeyDown = typeof(TransparentTextEditorControl)
+        .GetMethod(
+            "OnKeyDown",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic)!;
+    textEditorKeyDown.Invoke(undoTextEditor, [undoKey]);
+    AssertEqual("第一步", undoTextEditor.Text, "文字框内 Ctrl+Z 撤销最近一次输入");
+    AssertEqual(undoTextEditor.Text.Length, undoTextEditor.CaretIndex, "撤销输入恢复原光标位置");
+    AssertTrue(undoKey.SuppressKeyPress, "文字框消费 Ctrl+Z 以避免触发画布级撤销");
+
+    undoTextEditor.SelectText(0, 2);
+    undoTextEditor.InsertText("替换");
+    AssertEqual("替换步", undoTextEditor.Text, "文字框支持替换当前选区");
+    AssertTrue(undoTextEditor.UndoTextChange(), "文字框可以撤销选区替换");
+    AssertEqual("第一步", undoTextEditor.Text, "撤销选区替换恢复原文字");
+    AssertEqual("第一", undoTextEditor.SelectedText, "撤销选区替换恢复原选区");
+
+    undoTextEditor.CutSelectedText();
+    AssertEqual("步", undoTextEditor.Text, "文字框剪切选区后更新内容");
+    AssertTrue(undoTextEditor.UndoTextChange(), "文字框可以撤销剪切");
+    AssertEqual("第一步", undoTextEditor.Text, "撤销剪切恢复原文字");
+    AssertEqual("第一", undoTextEditor.SelectedText, "撤销剪切恢复原选区");
+
+    undoTextClipboard.Text = "粘贴";
+    undoTextEditor.PasteClipboardText();
+    AssertEqual("粘贴步", undoTextEditor.Text, "文字框粘贴替换当前选区");
+    AssertTrue(undoTextEditor.UndoTextChange(), "文字框可以撤销粘贴");
+    AssertEqual("第一步", undoTextEditor.Text, "撤销粘贴恢复原文字");
+    AssertEqual("第一", undoTextEditor.SelectedText, "撤销粘贴恢复原选区");
+
+    undoTextEditor.SelectText(undoTextEditor.Text.Length, 0);
+    textEditorKeyDown.Invoke(undoTextEditor, [new KeyEventArgs(Keys.Back)]);
+    AssertEqual("第一", undoTextEditor.Text, "文字框退格删除光标前字符");
+    AssertTrue(undoTextEditor.UndoTextChange(), "文字框可以撤销退格删除");
+    AssertEqual("第一步", undoTextEditor.Text, "撤销退格删除恢复原文字");
+    AssertEqual(undoTextEditor.Text.Length, undoTextEditor.CaretIndex, "撤销退格删除恢复原光标位置");
+
+    AssertTrue(undoTextEditor.UndoTextChange(), "文字框可以继续撤销到初始状态");
+    AssertEqual(string.Empty, undoTextEditor.Text, "连续撤销最终恢复空文字框");
+    AssertTrue(!undoTextEditor.CanUndoTextChange, "撤销到初始状态后历史为空");
 }
 
 using (var noWrapSource = CreateSolidBitmap(new Size(220, 90), Color.CornflowerBlue))
@@ -1109,20 +1238,45 @@ AssertTrue(
     "启用绘制工具后在截图区域内使用绘制光标");
 
 AssertTrue(
-    TemporaryAnnotationMoveMode.ShouldTryMove(EditorTool.Rectangle, altPressed: true),
+    TemporaryAnnotationMoveMode.ShouldTryMove(EditorTool.Rectangle, moveModeActive: true),
     "按下 Alt 时方框工具临时进入元素移动模式");
 AssertTrue(
-    !TemporaryAnnotationMoveMode.ShouldTryMove(EditorTool.Rectangle, altPressed: false),
+    !TemporaryAnnotationMoveMode.ShouldTryMove(EditorTool.Rectangle, moveModeActive: false),
     "松开 Alt 后方框工具恢复绘制优先级");
 AssertTrue(
-    TemporaryAnnotationMoveMode.ShouldPreserveTool(EditorTool.Rectangle, altPressed: true),
+    TemporaryAnnotationMoveMode.ShouldPreserveTool(EditorTool.Rectangle, moveModeActive: true),
     "临时移动元素不会关闭方框工具");
 AssertTrue(
-    TemporaryAnnotationMoveMode.ShouldTryMove(EditorTool.None, altPressed: false),
+    TemporaryAnnotationMoveMode.ShouldTryMove(EditorTool.None, moveModeActive: false),
     "未选择绘图工具时普通左键仍可选中元素");
 AssertTrue(
-    !TemporaryAnnotationMoveMode.ShouldPreserveTool(EditorTool.None, altPressed: true),
+    !TemporaryAnnotationMoveMode.ShouldPreserveTool(EditorTool.None, moveModeActive: true),
     "没有活动绘图工具时无需恢复工具");
+
+var holdAltMoveState = new AnnotationMoveActivationState(
+    AnnotationMoveActivationMode.HoldAlt);
+AssertTrue(!holdAltMoveState.IsActive(altPhysicallyPressed: false), "按住模式默认未开启元素移动");
+AssertTrue(holdAltMoveState.IsActive(altPhysicallyPressed: true), "按住模式只在 Alt 按下时开启元素移动");
+holdAltMoveState.HandleAltKeyDown();
+AssertTrue(!holdAltMoveState.HandleAltKeyUp(), "按住模式松开 Alt 不会切换锁定状态");
+
+var toggleAltMoveState = new AnnotationMoveActivationState(
+    AnnotationMoveActivationMode.ToggleOnAltTap);
+toggleAltMoveState.HandleAltKeyDown();
+toggleAltMoveState.HandleAltKeyDown();
+AssertTrue(!toggleAltMoveState.IsActive(altPhysicallyPressed: true), "切换模式等待 Alt 完整裸按");
+AssertTrue(toggleAltMoveState.HandleAltKeyUp(), "切换模式裸按一次 Alt 开启元素移动");
+AssertTrue(toggleAltMoveState.IsActive(altPhysicallyPressed: false), "切换模式松开 Alt 后保持开启");
+toggleAltMoveState.HandleAltKeyDown();
+AssertTrue(toggleAltMoveState.HandleAltKeyUp(), "切换模式再次裸按 Alt 关闭元素移动");
+AssertTrue(!toggleAltMoveState.IsActive(altPhysicallyPressed: false), "切换模式第二次裸按后保持关闭");
+
+var altChordMoveState = new AnnotationMoveActivationState(
+    AnnotationMoveActivationMode.ToggleOnAltTap);
+altChordMoveState.HandleAltKeyDown();
+altChordMoveState.MarkAltUsedAsModifier();
+AssertTrue(!altChordMoveState.HandleAltKeyUp(), "Alt 组合操作不会误切换元素移动模式");
+AssertTrue(!altChordMoveState.IsActive(altPhysicallyPressed: false), "Alt 滚轮后元素移动保持原状态");
 AssertEqual(
     CaptureSelectAllAction.ExpandCaptureSelection,
     CaptureSelectAllPolicy.Resolve(editingElementCount: 0, allEditingElementsSelected: false),
@@ -1262,9 +1416,11 @@ using (var namingDocument = new AnnotationDocument())
         "可见标题",
         Color.White,
         18F));
-    namingDocument.Add(new PastedTextAnnotation(
+    namingDocument.Add(new TextAnnotation(
         new Rectangle(30, 50, 120, 36),
-        "可见说明"));
+        "可见说明",
+        Color.White,
+        18F));
     namingDocument.Add(new TextAnnotation(
         new Rectangle(500, 500, 100, 30),
         "选区外文字",
@@ -1543,6 +1699,10 @@ AssertTrue(new AppSettings().Preferences.AnnotationSnappingEnabled, "编辑元�
 AssertEqual(8, new AppSettings().Preferences.AnnotationSnapThresholdPixels, "元素吸附距离默认 8 像素");
 AssertEqual(10, new AppSettings().Preferences.CtrlDragStepPixels, "Ctrl 拖动默认按 10 像素步进");
 AssertEqual(
+    AnnotationMoveActivationMode.HoldAlt,
+    new AppSettings().Preferences.AnnotationMoveActivationMode,
+    "编辑元素移动默认使用按住 Alt 模式");
+AssertEqual(
     RecordingRegionIndicatorStyle.Dashed,
     new AppSettings().Preferences.RecordingRegionIndicatorStyle,
     "录屏范围默认使用虚线提示");
@@ -1603,24 +1763,34 @@ using (var editorSettingsPage = new EditorSettingsPage(
            drawingCursorShape: DrawingCursorShape.Square,
            snappingEnabled: false,
            snapThresholdPixels: 14,
-           ctrlDragStepPixels: 20))
+           ctrlDragStepPixels: 20,
+           annotationMoveActivationMode: AnnotationMoveActivationMode.ToggleOnAltTap))
 {
-    AssertSingleColumnSettings(editorSettingsPage, 7, "图片修改设置页");
+    AssertSingleColumnSettings(editorSettingsPage, 8, "图片修改设置页");
     AssertEqual(12, editorSettingsPage.RotationStepDegrees, "图片修改页显示旋转速度配置");
     AssertEqual(DrawingCursorShape.Square, editorSettingsPage.DrawingCursorShape, "图片修改页显示方形绘制光标");
     AssertTrue(!editorSettingsPage.SnappingEnabled, "图片修改页显示元素吸附开关");
     AssertEqual(14, editorSettingsPage.SnapThresholdPixels, "图片修改页显示吸附距离");
     AssertEqual(20, editorSettingsPage.CtrlDragStepPixels, "图片修改页显示 Ctrl 拖动步长");
+    AssertEqual(
+        AnnotationMoveActivationMode.ToggleOnAltTap,
+        editorSettingsPage.AnnotationMoveActivationMode,
+        "图片修改页显示单击 Alt 切换移动模式");
     editorSettingsPage.RotationStepDegrees = 18;
     editorSettingsPage.DrawingCursorShape = DrawingCursorShape.Circle;
     editorSettingsPage.SnappingEnabled = true;
     editorSettingsPage.SnapThresholdPixels = 9;
     editorSettingsPage.CtrlDragStepPixels = 12;
+    editorSettingsPage.AnnotationMoveActivationMode = AnnotationMoveActivationMode.HoldAlt;
     AssertEqual(18, editorSettingsPage.RotationStepDegrees, "图片修改页可调整旋转速度");
     AssertEqual(DrawingCursorShape.Circle, editorSettingsPage.DrawingCursorShape, "图片修改页可切换圆形绘制光标");
     AssertTrue(editorSettingsPage.SnappingEnabled, "图片修改页可切换元素吸附");
     AssertEqual(9, editorSettingsPage.SnapThresholdPixels, "图片修改页可调节吸附距离");
     AssertEqual(12, editorSettingsPage.CtrlDragStepPixels, "图片修改页可调节 Ctrl 拖动步长");
+    AssertEqual(
+        AnnotationMoveActivationMode.HoldAlt,
+        editorSettingsPage.AnnotationMoveActivationMode,
+        "图片修改页可切换为按住 Alt 移动");
 }
 using (var drawingCoefficientsSettingsPage = new DrawingCoefficientsSettingsPage(
            new DrawingToolCoefficients()))
@@ -1781,28 +1951,36 @@ using (var movableDocument = new AnnotationDocument())
 using (var movableImage = new Bitmap(20, 20))
 {
     var imageAnnotation = new StickerAnnotation(movableImage, new Rectangle(120, 120, 40, 40));
-    var pastedText = new PastedTextAnnotation(new Rectangle(180, 140, 100, 40), "可拖动文字");
-    var transparentText = new TextAnnotation(new Rectangle(220, 180, 140, 50), "透明文字", Color.Red, 18F);
+    var firstText = new TextAnnotation(
+        new Rectangle(180, 140, 100, 40),
+        "可拖动文字",
+        Color.White,
+        18F);
+    var secondText = new TextAnnotation(
+        new Rectangle(220, 180, 140, 50),
+        "第二段文字",
+        Color.Red,
+        18F);
     movableDocument.Add(imageAnnotation);
-    movableDocument.Add(pastedText);
-    movableDocument.Add(transparentText);
+    movableDocument.Add(firstText);
+    movableDocument.Add(secondText);
 
     AssertTrue(imageAnnotation.SupportsResize, "图片贴纸保留四角缩放能力");
     AssertTrue(imageAnnotation.PreserveAspectRatioWhenResizing, "图片缩放继续保持宽高比");
-    AssertTrue(!pastedText.SupportsResize && !transparentText.SupportsResize, "文字框只显示拖动交互");
-    AssertTrue(ReferenceEquals(transparentText, movableDocument.FindTopMovableAt(new Point(230, 190))), "普通文字参与可移动标注命中");
-    AssertTrue(ReferenceEquals(pastedText, movableDocument.FindTopMovableAt(new Point(190, 150))), "粘贴文字参与可移动标注命中");
+    AssertTrue(!firstText.SupportsResize && !secondText.SupportsResize, "文字框只显示拖动交互");
+    AssertTrue(ReferenceEquals(secondText, movableDocument.FindTopMovableAt(new Point(230, 190))), "第二段文字参与可移动标注命中");
+    AssertTrue(ReferenceEquals(firstText, movableDocument.FindTopMovableAt(new Point(190, 150))), "第一段文字参与可移动标注命中");
     AssertTrue(!imageAnnotation.CanMove(altPressed: false), "图片不能只用鼠标左键移动");
-    AssertTrue(!pastedText.CanMove(altPressed: false), "粘贴文字不能只用鼠标左键移动");
-    AssertTrue(!transparentText.CanMove(altPressed: false), "普通文字不能只用鼠标左键移动");
+    AssertTrue(!firstText.CanMove(altPressed: false), "第一段文字不能只用鼠标左键移动");
+    AssertTrue(!secondText.CanMove(altPressed: false), "第二段文字不能只用鼠标左键移动");
     AssertTrue(imageAnnotation.CanMove(altPressed: true), "图片支持 Alt 加鼠标左键移动");
-    AssertTrue(pastedText.CanMove(altPressed: true), "粘贴文字支持 Alt 加鼠标左键移动");
-    AssertTrue(transparentText.CanMove(altPressed: true), "普通文字支持 Alt 加鼠标左键移动");
-    transparentText.SetBounds(StickerLayout.Move(
-        transparentText.Bounds,
+    AssertTrue(firstText.CanMove(altPressed: true), "第一段文字支持 Alt 加鼠标左键移动");
+    AssertTrue(secondText.CanMove(altPressed: true), "第二段文字支持 Alt 加鼠标左键移动");
+    secondText.SetBounds(StickerLayout.Move(
+        secondText.Bounds,
         new Point(35, 20),
         selection));
-    AssertEqual(new Rectangle(255, 200, 140, 50), transparentText.Bounds, "普通文字可以在截图框内拖动");
+    AssertEqual(new Rectangle(255, 200, 140, 50), secondText.Bounds, "普通文字可以在截图框内拖动");
 }
 
 using (var rotationDocument = new AnnotationDocument())
@@ -1919,12 +2097,14 @@ using (var scalingSource = CreateSolidBitmap(new Size(300, 240), Color.Black))
         "缩放文字",
         Color.White,
         20F);
-    var scaledPastedText = new PastedTextAnnotation(
+    var secondScaledText = new TextAnnotation(
         new Rectangle(30, 180, 100, 40),
-        "缩放粘贴文字");
+        "第二段缩放文字",
+        Color.CornflowerBlue,
+        TextToolSizing.DefaultFontSize);
     scalingDocument.Add(scaledRectangle);
     scalingDocument.Add(scaledText);
-    scalingDocument.Add(scaledPastedText);
+    scalingDocument.Add(secondScaledText);
 
     scaledRectangle.SetBounds(AnnotationScaling.ScaleAt(
         scaledRectangle.Bounds,
@@ -1938,16 +2118,16 @@ using (var scalingSource = CreateSolidBitmap(new Size(300, 240), Color.Black))
         new Point(80, 50),
         1.5D,
         scalingLimits));
-    scaledPastedText.SetBounds(AnnotationScaling.ScaleAt(
-        scaledPastedText.Bounds,
-        scaledPastedText.RotationDegrees,
+    secondScaledText.SetBounds(AnnotationScaling.ScaleAt(
+        secondScaledText.Bounds,
+        secondScaledText.RotationDegrees,
         new Point(80, 200),
         1.5D,
         scalingLimits));
     AssertTrue(Math.Abs(scaledText.FontSize - 30F) < 0.001F, "普通文字缩放时同步调整字体");
     AssertTrue(
-        Math.Abs(scaledPastedText.FontSize - PastedTextAnnotation.DefaultFontSize * 1.5F) < 0.001F,
-        "粘贴文字缩放时同步调整字体");
+        Math.Abs(secondScaledText.FontSize - TextToolSizing.DefaultFontSize * 1.5F) < 0.001F,
+        "第二段普通文字缩放时同步调整字体");
 
     using var scaledExport = RenderDocumentSelection(
         scalingDocument,
@@ -2440,6 +2620,7 @@ try
     {
         OutputFolder = Path.Combine(settingsTestDirectory, "captures"),
         StartMinimized = true,
+        StartWithWindows = true,
         LastLaunchedVersion = " 1.9.3 ",
         HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
         HotkeyVirtualKey = (int)Keys.Q,
@@ -2454,6 +2635,7 @@ try
             AnnotationSnappingEnabled = false,
             AnnotationSnapThresholdPixels = 14,
             CtrlDragStepPixels = 20,
+            AnnotationMoveActivationMode = AnnotationMoveActivationMode.ToggleOnAltTap,
             RecordingRegionIndicatorStyle = RecordingRegionIndicatorStyle.Solid,
             ScreenRecordingCaptureSystemAudio = false,
             ScreenRecordingCaptureMicrophone = true,
@@ -2476,6 +2658,7 @@ try
     AssertTrue(savedJson.Contains("\"schemaVersion\": 1", StringComparison.Ordinal), "JSON 保存配置版本");
     AssertTrue(savedJson.Contains("\"profileId\": \"account-demo\"", StringComparison.Ordinal), "JSON 保存配置身份");
     AssertTrue(savedJson.Contains("\"lastLaunchedVersion\": \"1.9.3\"", StringComparison.Ordinal), "JSON 保存并规范化上次启动版本");
+    AssertTrue(savedJson.Contains("\"startWithWindows\": true", StringComparison.Ordinal), "JSON 保存开机自启动选择");
     AssertTrue(savedJson.Contains("\"preferences\"", StringComparison.Ordinal), "JSON 独立保存用户偏好");
     AssertTrue(savedJson.Contains("\"keepScreenPosition\"", StringComparison.Ordinal), "JSON 使用可读的贴纸模式");
     AssertTrue(savedJson.Contains("\"longCaptureSafetyChecksEnabled\": true", StringComparison.Ordinal), "JSON 保存长截图安全开关");
@@ -2489,6 +2672,11 @@ try
     AssertTrue(savedJson.Contains("\"annotationSnappingEnabled\": false", StringComparison.Ordinal), "JSON 保存元素吸附开关");
     AssertTrue(savedJson.Contains("\"annotationSnapThresholdPixels\": 14", StringComparison.Ordinal), "JSON 保存元素吸附距离");
     AssertTrue(savedJson.Contains("\"ctrlDragStepPixels\": 20", StringComparison.Ordinal), "JSON 保存 Ctrl 拖动步长");
+    AssertTrue(
+        savedJson.Contains(
+            "\"annotationMoveActivationMode\": \"toggleOnAltTap\"",
+            StringComparison.Ordinal),
+        "JSON 保存 Alt 移动元素方式");
     AssertTrue(
         savedJson.Contains(
             "\"recordingRegionIndicatorStyle\": \"solid\"",
@@ -2536,6 +2724,10 @@ try
     AssertEqual(14, loadedSettings.Preferences.AnnotationSnapThresholdPixels, "JSON 恢复元素吸附距离");
     AssertEqual(20, loadedSettings.Preferences.CtrlDragStepPixels, "JSON 恢复 Ctrl 拖动步长");
     AssertEqual(
+        AnnotationMoveActivationMode.ToggleOnAltTap,
+        loadedSettings.Preferences.AnnotationMoveActivationMode,
+        "JSON 恢复 Alt 移动元素方式");
+    AssertEqual(
         RecordingRegionIndicatorStyle.Solid,
         loadedSettings.Preferences.RecordingRegionIndicatorStyle,
         "JSON 恢复录屏范围提示样式");
@@ -2558,6 +2750,7 @@ try
     AssertEqual(1.25M, loadedSettings.Preferences.DrawingToolCoefficients.ArrowBody, "JSON 恢复箭身基础系数");
     AssertEqual(4M, loadedSettings.Preferences.DrawingToolCoefficients.ArrowHeadWidth, "JSON 恢复箭头宽度基础系数");
     AssertTrue(loadedSettings.StartMinimized, "JSON 恢复启动喜好");
+    AssertTrue(loadedSettings.StartWithWindows, "JSON 恢复开机自启动选择");
     AssertEqual(
         "1.9.3",
         loadedSettings.LastLaunchedVersion ?? string.Empty,
@@ -2578,6 +2771,7 @@ try
             ScreenshotFileNameMode = (ScreenshotFileNameMode)99,
             AnnotationSnapThresholdPixels = -50,
             CtrlDragStepPixels = 500,
+            AnnotationMoveActivationMode = (AnnotationMoveActivationMode)99,
             ScreenRecordingFramesPerSecond = -1,
             ScreenRecordingVideoBitrate = int.MaxValue
         }
@@ -2610,6 +2804,10 @@ try
         AnnotationLayoutOptions.MaximumCtrlDragStepPixels,
         invalidShapeStore.Load().Preferences.CtrlDragStepPixels,
         "JSON 异常 Ctrl 拖动步长限制到最大值");
+    AssertEqual(
+        AnnotationMoveActivationMode.HoldAlt,
+        invalidShapeStore.Load().Preferences.AnnotationMoveActivationMode,
+        "JSON 异常 Alt 移动方式恢复为按住模式");
 
     var legacyRoot = Path.Combine(settingsTestDirectory, "legacy");
     Directory.CreateDirectory(legacyRoot);
@@ -2657,12 +2855,12 @@ using (var followDocument = new AnnotationDocument())
 {
     var drawing = new ShapeAnnotation(EditorTool.Rectangle, new Rectangle(10, 10, 30, 20), Color.Red, 2F);
     var imageSticker = new StickerAnnotation(new Bitmap(20, 20), new Rectangle(20, 20, 20, 20));
-    var textSticker = new PastedTextAnnotation(new Rectangle(30, 30, 80, 36), "跟随");
-    var transparentText = new TextAnnotation(new Rectangle(40, 40, 90, 40), "普通文字", Color.White, 18F);
+    var firstText = new TextAnnotation(new Rectangle(30, 30, 80, 36), "跟随一", Color.White, 18F);
+    var secondText = new TextAnnotation(new Rectangle(40, 40, 90, 40), "跟随二", Color.White, 18F);
     followDocument.Add(drawing);
     followDocument.Add(imageSticker);
-    followDocument.Add(textSticker);
-    followDocument.Add(transparentText);
+    followDocument.Add(firstText);
+    followDocument.Add(secondText);
 
     AssertEqual(AnnotationCategory.All, FollowSelectionStrategy.Instance.MovedCategories, "跟随模式声明全部标注随截图框移动");
     AssertEqual(1, followDocument.GetVisualAreas(AnnotationCategory.Drawing).Count, "绘制标注视觉区域可单独查询");
@@ -2671,28 +2869,28 @@ using (var followDocument = new AnnotationDocument())
 
     AssertEqual(new Rectangle(25, 18, 30, 20), drawing.Bounds, "跟随模式移动普通标注");
     AssertEqual(new Rectangle(35, 28, 20, 20), imageSticker.Bounds, "跟随模式移动图片贴纸");
-    AssertEqual(new Rectangle(45, 38, 80, 36), textSticker.Bounds, "跟随模式移动文字贴纸");
-    AssertEqual(new Rectangle(55, 48, 90, 40), transparentText.Bounds, "跟随模式移动透明文字");
+    AssertEqual(new Rectangle(45, 38, 80, 36), firstText.Bounds, "跟随模式移动第一段文字");
+    AssertEqual(new Rectangle(55, 48, 90, 40), secondText.Bounds, "跟随模式移动第二段文字");
 }
 
 using (var keepDocument = new AnnotationDocument())
 {
     var drawing = new ShapeAnnotation(EditorTool.Rectangle, new Rectangle(10, 10, 30, 20), Color.Red, 2F);
     var imageSticker = new StickerAnnotation(new Bitmap(20, 20), new Rectangle(20, 20, 20, 20));
-    var textSticker = new PastedTextAnnotation(new Rectangle(30, 30, 80, 36), "保留");
-    var transparentText = new TextAnnotation(new Rectangle(40, 40, 90, 40), "普通文字", Color.White, 18F);
+    var firstText = new TextAnnotation(new Rectangle(30, 30, 80, 36), "保留一", Color.White, 18F);
+    var secondText = new TextAnnotation(new Rectangle(40, 40, 90, 40), "保留二", Color.White, 18F);
     keepDocument.Add(drawing);
     keepDocument.Add(imageSticker);
-    keepDocument.Add(textSticker);
-    keepDocument.Add(transparentText);
+    keepDocument.Add(firstText);
+    keepDocument.Add(secondText);
 
     AssertEqual(AnnotationCategory.Drawing, KeepStickersAtScreenPositionStrategy.Instance.MovedCategories, "固定模式只声明绘制标注随截图框移动");
     KeepStickersAtScreenPositionStrategy.Instance.Apply(keepDocument, new Point(15, 8));
 
     AssertEqual(new Rectangle(25, 18, 30, 20), drawing.Bounds, "固定模式仍移动普通标注");
     AssertEqual(new Rectangle(20, 20, 20, 20), imageSticker.Bounds, "固定模式保留图片贴纸坐标");
-    AssertEqual(new Rectangle(30, 30, 80, 36), textSticker.Bounds, "固定模式保留文字贴纸坐标");
-    AssertEqual(new Rectangle(40, 40, 90, 40), transparentText.Bounds, "固定模式保留透明文字坐标");
+    AssertEqual(new Rectangle(30, 30, 80, 36), firstText.Bounds, "固定模式保留第一段文字坐标");
+    AssertEqual(new Rectangle(40, 40, 90, 40), secondText.Bounds, "固定模式保留第二段文字坐标");
     AssertEqual(4, keepDocument.Count, "固定模式不会删除越界贴纸");
 }
 
@@ -2994,10 +3192,10 @@ using (var pinnedImageModule = new PinnedImageModule(pinnedImageWindowFactory))
 
 using (var ocrModule = new OcrModule())
 {
-    AssertEqual(new Version(1, 11, 0), OcrModule.MinimumHostVersion, "OCR 模块最低主程序版本");
+    AssertEqual(new Version(1, 11, 6), OcrModule.MinimumHostVersion, "OCR 模块最低主程序版本");
     AssertEqual("screenshot-tool.ocr", ocrModule.Id, "OCR 模块 ID 保持稳定");
     AssertEqual("本地 OCR 文字识别", ocrModule.DisplayName, "OCR 模块显示名称");
-    AssertEqual(new Version(1, 1, 0), ocrModule.Version, "OCR 模块版本");
+    AssertEqual(new Version(1, 2, 0), ocrModule.Version, "OCR 模块版本");
 
     var incompatibleOcrModuleRejected = false;
     try
@@ -3019,6 +3217,50 @@ using (var ocrModule = new OcrModule())
     var ocrCommands = ((ICaptureToolbarCommandProvider)ocrFeature).GetToolbarCommands();
     AssertEqual(1, ocrCommands.Count, "OCR 功能只注册一个工具栏命令");
     AssertEqual("OCR 本地", ocrCommands[0].Text, "OCR 工具栏命令文字");
+    AssertTrue(
+        ocrFeature is ICaptureToolbarCommandProgressProvider progressProvider &&
+        progressProvider.UsesIndeterminateProgress(ocrCommands[0].Id),
+        "OCR 命令声明识别期间显示连续进度");
+}
+
+using (var ocrProgressToolbar = new CaptureEditorToolbar(
+           [],
+           [],
+           activeTool: null,
+           Color.Red,
+           toolWidth: 4,
+           minimumWidth: 1,
+           maximumWidth: 32))
+{
+    var ocrProgressButton = ocrProgressToolbar.AddCommandButton("OCR Small", 104);
+    var originalCommandIndex = ocrProgressToolbar.Controls.GetChildIndex(ocrProgressButton);
+    using (ocrProgressToolbar.ShowCommandProgress(ocrProgressButton, "识别中…"))
+    {
+        var progressBar = ocrProgressToolbar.Controls
+            .OfType<CaptureCommandProgressBar>()
+            .Single();
+        AssertTrue(!ocrProgressButton.Visible, "OCR 识别时隐藏原命令按钮");
+        AssertEqual(ocrProgressButton.Size, progressBar.Size, "OCR 进度条原位沿用按钮尺寸");
+        AssertEqual("识别中…", progressBar.Text, "OCR 进度条显示识别状态");
+        AssertEqual(
+            originalCommandIndex,
+            ocrProgressToolbar.Controls.GetChildIndex(progressBar),
+            "OCR 进度条占用原按钮顺序位置");
+    }
+    AssertTrue(ocrProgressButton.Visible, "OCR 识别结束后恢复原命令按钮");
+    AssertEqual(
+        0,
+        ocrProgressToolbar.Controls.OfType<CaptureCommandProgressBar>().Count(),
+        "OCR 识别结束后移除进度控件");
+}
+
+using (var ocrProgressSession = new CaptureFeatureSession(
+           new TestCaptureFeatureCatalog(new OcrFeature(new TestOcrRecognizer("测试"))),
+           new TestCaptureFeatureHost()))
+{
+    AssertTrue(
+        ocrProgressSession.GetToolbarCommands().Single().UsesIndeterminateProgress,
+        "截图会话把 OCR 连续进度声明传给工具栏");
 }
 
 using (var darkSmallText = new Bitmap(420, 90))
@@ -3286,6 +3528,10 @@ try
     AssertEqual(1, loadedOcrFeatures.Count, "OCR 模块为截图会话创建功能实例");
     using var loadedOcrFeature = loadedOcrFeatures[0];
     AssertTrue(loadedOcrFeature is ICaptureToolbarCommandProvider, "加载后的 OCR 功能转发工具栏命令");
+    AssertTrue(
+        loadedOcrFeature is ICaptureToolbarCommandProgressProvider loadedProgressProvider &&
+        loadedProgressProvider.UsesIndeterminateProgress(OcrFeature.CommandId),
+        "OCR 模块租约转发命令进度契约");
     Directory.Delete(ocrModulePackageDirectory, recursive: true);
     var removedOcrModules = ocrModuleHost.Refresh();
     AssertEqual(0, removedOcrModules.Modules.Count, "删除 OCR 模块文件夹后立即从目录卸载");
@@ -3576,10 +3822,14 @@ AssertEqual(
     "大容量估算使用 GB 显示");
 var sharedRecordingWidth = new ToolWidthController(ToolWidthRange.Create(1, 32), 4);
 var sharedRecordingColor = Color.Empty;
+var sharedRecordingClipboard = new TestTextClipboardService
+{
+    Text = "粘贴文字"
+};
 using (var sharedRecordingAnnotations = new LiveAnnotationSessionForm(
            new Rectangle(0, 0, 180, 120),
            new Bitmap(180, 120),
-           new TestTextClipboardService(),
+           sharedRecordingClipboard,
            sharedRecordingWidth,
            new DrawingToolCoefficients(),
            AnnotationRotationStep.DefaultDegrees,
@@ -3599,6 +3849,51 @@ using (var sharedRecordingAnnotations = new LiveAnnotationSessionForm(
     AssertTrue(
         sharedRecordingAnnotations is ICaptureAnnotationToolbarSession,
         "实时批注会话由宿主提供共享截图工具栏");
+    typeof(LiveAnnotationSessionForm)
+        .GetMethod(
+            "PasteClipboardContent",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic)!
+        .Invoke(sharedRecordingAnnotations, null);
+    var pastedInputEditor = (TransparentTextEditorControl?)typeof(LiveAnnotationSessionForm)
+        .GetField(
+            "_textEditor",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic)!
+        .GetValue(sharedRecordingAnnotations);
+    AssertTrue(pastedInputEditor is not null, "录屏粘贴文字会打开统一文字输入框");
+    AssertEqual("粘贴文字", pastedInputEditor!.Text, "统一文字输入框预填剪贴板文字");
+    pastedInputEditor.InsertText("继续");
+    AssertEqual(
+        "粘贴文字继续",
+        pastedInputEditor.Text.Replace("\n", string.Empty, StringComparison.Ordinal),
+        "粘贴后可以在同一文字框继续输入");
+    AssertEqual(0, sharedRecordingAnnotations.AnnotationCount, "粘贴文字在提交前不创建独立元素");
+    AssertEqual(
+        CaptureAnnotationTool.Text,
+        sharedRecordingAnnotations.ActiveTool,
+        "粘贴文字进入普通文字工具状态");
+    typeof(LiveAnnotationSessionForm)
+        .GetMethod(
+            "CancelTextEditor",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic)!
+        .Invoke(sharedRecordingAnnotations, [true]);
+    var pastedAnnotation = sharedRecordingAnnotations.Editor.Document
+        .GetMovableAnnotations()
+        .Single();
+    AssertTrue(pastedAnnotation is TextAnnotation, "粘贴文字提交后生成普通文字元素");
+    AssertEqual(
+        "粘贴文字继续",
+        ((TextAnnotation)pastedAnnotation).Text.Replace(
+            "\n",
+            string.Empty,
+            StringComparison.Ordinal),
+        "普通文字元素保留粘贴内容");
+    AssertTrue(sharedRecordingAnnotations.Undo(), "录屏可以撤销刚提交的粘贴文字");
+    AssertEqual(0, sharedRecordingAnnotations.AnnotationCount, "撤销后不残留粘贴文字元素");
+    sharedRecordingClipboard.Text = null;
+    sharedRecordingAnnotations.ActiveTool = CaptureAnnotationTool.Operation;
     var sharedRecordingToolbarSession =
         (ICaptureAnnotationToolbarSession)sharedRecordingAnnotations;
     var recordingSelectButton = sharedRecordingAnnotations.Toolbar.Controls.OfType<Button>()
@@ -3959,7 +4254,7 @@ LongCapturePreparationTests.Run();
 BidirectionalLongCaptureTests.Run();
 LongCaptureWindowTests.Run();
 
-Console.WriteLine("首次与更新启动工作台、GitHub 软件更新、截图搜索排序、贴图悬浮窗、OCR 离线识别模块、二维码扫描模块、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、普通元素八手柄与箭头端点缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 临时移动、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
+Console.WriteLine("首次与更新启动工作台、GitHub 软件更新、截图搜索排序、贴图悬浮窗、OCR 离线识别模块、二维码扫描模块、可选录屏模块、实时批注、图片命名、文字重编辑、重叠元素轮换、粗细记忆、旋转与缩放、普通元素八手柄与箭头端点缩放、Ctrl 固定步长、元素吸附与双击 Ctrl、Ctrl+A 分级扩展、Alt 移动模式、Ctrl 多选、框选与整组操作、透明文字、重新框选、模块热加载、长截图拼接、保存通知与文件定位测试全部通过。");
 return;
 
 SelectionResizeEdges Hit(int x, int y) =>
@@ -4045,12 +4340,12 @@ static void VerifyPaddleOcrModule(
     {
         CreatePaddleOcrModelPlaceholders(moduleDirectory, variant);
         AssertEqual(
-            new Version(1, 11, 0),
+            new Version(1, 11, 6),
             PaddleOcrModuleBase.MinimumHostVersion,
             $"{expectedDisplayName}最低主程序版本");
         AssertEqual(expectedModuleId, module.Id, $"{expectedDisplayName}模块 ID");
         AssertEqual(expectedDisplayName, module.DisplayName, $"{expectedDisplayName}显示名称");
-        AssertEqual(new Version(1, 0, 0), module.Version, $"{expectedDisplayName}模块版本");
+        AssertEqual(new Version(1, 1, 0), module.Version, $"{expectedDisplayName}模块版本");
 
         var incompatibleRejected = false;
         try
@@ -4077,6 +4372,10 @@ static void VerifyPaddleOcrModule(
         AssertEqual(1, commands.Count, $"{expectedDisplayName}只注册一个命令");
         AssertEqual(expectedCommandId, commands[0].Id, $"{expectedDisplayName}命令 ID");
         AssertEqual(expectedCommandText, commands[0].Text, $"{expectedDisplayName}命令文字");
+        AssertTrue(
+            feature is ICaptureToolbarCommandProgressProvider progressProvider &&
+            progressProvider.UsesIndeterminateProgress(expectedCommandId),
+            $"{expectedDisplayName}识别期间显示连续进度");
     }
     finally
     {
@@ -4131,6 +4430,11 @@ static void VerifyPaddleOcrModulePackage(
         var features = moduleHost.CreateCaptureFeatures();
         AssertEqual(1, features.Count, $"{packageName}创建截图功能实例");
         feature = features[0];
+        AssertTrue(
+            feature is ICaptureToolbarCommandProgressProvider progressProvider &&
+            progressProvider.UsesIndeterminateProgress(
+                ((ICaptureToolbarCommandProvider)feature).GetToolbarCommands().Single().Id),
+            $"{packageName}模块租约转发命令进度契约");
 
         Directory.Delete(packageDirectory, recursive: true);
         var removed = moduleHost.Refresh();
@@ -4533,6 +4837,23 @@ internal sealed class TestStartupEntryStore : IStartupEntryStore
     {
         Name = name;
         Value = null;
+    }
+}
+
+internal sealed class TestSettingsStore : ISettingsStore
+{
+    private AppSettings _settings = new();
+
+    public string ProfileId => "test";
+
+    public int SaveCount { get; private set; }
+
+    public AppSettings Load() => _settings;
+
+    public void Save(AppSettings settings)
+    {
+        _settings = settings;
+        SaveCount++;
     }
 }
 

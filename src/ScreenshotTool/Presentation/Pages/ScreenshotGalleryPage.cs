@@ -5,6 +5,7 @@ namespace ScreenshotTool.Presentation.Pages;
 
 internal sealed class ScreenshotGalleryPage : UserControl
 {
+    private readonly IClipboardService _clipboardService;
     private readonly IFileLocationService _fileLocationService;
     private readonly ISavedScreenshotService _savedScreenshotService;
     private readonly TableLayoutPanel _toolbar;
@@ -24,11 +25,13 @@ internal sealed class ScreenshotGalleryPage : UserControl
     public ScreenshotGalleryPage(
         string folderPath,
         IFileLocationService fileLocationService,
-        ISavedScreenshotService savedScreenshotService)
+        ISavedScreenshotService savedScreenshotService,
+        IClipboardService clipboardService)
     {
         _folderPath = folderPath;
         _fileLocationService = fileLocationService;
         _savedScreenshotService = savedScreenshotService;
+        _clipboardService = clipboardService;
         BackColor = AppTheme.Canvas;
 
         _toolbar = new TableLayoutPanel
@@ -163,24 +166,34 @@ internal sealed class ScreenshotGalleryPage : UserControl
         var editItem = _itemMenu.Items.Add("编辑");
         editItem.Name = "EditScreenshotMenuItem";
         editItem.Click += (_, _) => EditSelectedImage();
+        var copyItem = _itemMenu.Items.Add("复制");
+        copyItem.Name = "CopyScreenshotMenuItem";
+        copyItem.Click += (_, _) => CopySelectedImage();
         var deleteItem = _itemMenu.Items.Add("删除");
         deleteItem.Name = "DeleteScreenshotMenuItem";
         deleteItem.ForeColor = AppTheme.Danger;
-        deleteItem.Click += (_, _) => DeleteSelectedImage();
-        _itemMenu.Opening += (_, e) => e.Cancel = GetSelectedImagePath() is null;
+        deleteItem.Click += (_, _) => DeleteSelectedArtifact();
+        _itemMenu.Opening += (_, e) =>
+        {
+            var path = GetSelectedArtifactPath();
+            e.Cancel = path is null;
+            var isImage = path is not null && _savedScreenshotService.IsSupportedImage(path);
+            editItem.Visible = isImage;
+            copyItem.Visible = isImage;
+        };
         _listView.ContextMenuStrip = _itemMenu;
         _listView.MouseDown += (_, e) => SelectRightClickedItem(e);
-        _listView.DoubleClick += (_, _) => OpenSelectedImage();
+        _listView.DoubleClick += (_, _) => OpenSelectedArtifact();
         _listView.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
             {
-                OpenSelectedImage();
+                OpenSelectedArtifact();
                 e.SuppressKeyPress = true;
             }
             else if (e.KeyCode == Keys.Delete)
             {
-                DeleteSelectedImage();
+                DeleteSelectedArtifact();
                 e.SuppressKeyPress = true;
             }
         };
@@ -188,7 +201,7 @@ internal sealed class ScreenshotGalleryPage : UserControl
 
         _emptyLabel = new Label
         {
-            Text = "保存目录中还没有截图",
+            Text = "保存目录中还没有截图或视频",
             AutoSize = false,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
@@ -219,12 +232,14 @@ internal sealed class ScreenshotGalleryPage : UserControl
             _images.Images.Clear();
             if (!Directory.Exists(_folderPath))
             {
-                ShowEmpty("保存目录中还没有截图");
+                ShowEmpty("保存目录中还没有截图或视频");
                 return;
             }
 
             var entries = Directory.EnumerateFiles(_folderPath)
-                .Where(_savedScreenshotService.IsSupportedImage)
+                .Where(path =>
+                    _savedScreenshotService.IsSupportedImage(path) ||
+                    _savedScreenshotService.IsSupportedVideo(path))
                 .Select(path => new FileInfo(path))
                 .Select(file => new ScreenshotGalleryEntry(
                     file.FullName,
@@ -240,7 +255,9 @@ internal sealed class ScreenshotGalleryPage : UserControl
                 maximumCount: 60);
             foreach (var entry in result.Entries)
             {
-                var thumbnail = TryCreateThumbnail(entry.FullName);
+                var thumbnail = _savedScreenshotService.IsSupportedVideo(entry.FullName)
+                    ? CreateVideoThumbnail(entry.FullName)
+                    : TryCreateImageThumbnail(entry.FullName);
                 if (thumbnail is null)
                 {
                     continue;
@@ -264,8 +281,8 @@ internal sealed class ScreenshotGalleryPage : UserControl
                 _searchInput.Text);
             _emptyLabel.Visible = _listView.Items.Count == 0;
             _emptyLabel.Text = entries.Length == 0
-                ? "保存目录中还没有截图"
-                : "没有找到匹配的截图";
+                ? "保存目录中还没有截图或视频"
+                : "没有找到匹配的截图或视频";
             if (!_emptyLabel.Visible)
             {
                 _listView.BringToFront();
@@ -273,7 +290,7 @@ internal sealed class ScreenshotGalleryPage : UserControl
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            ShowEmpty("无法读取截图");
+            ShowEmpty("无法读取截图或视频");
             _countLabel.Text = $"读取失败：{exception.Message}";
         }
         finally
@@ -284,7 +301,7 @@ internal sealed class ScreenshotGalleryPage : UserControl
 
     private void ShowEmpty(string message)
     {
-        _countLabel.Text = "暂无截图";
+        _countLabel.Text = "暂无截图或视频";
         _emptyLabel.Text = message;
         _emptyLabel.Visible = true;
         _emptyLabel.BringToFront();
@@ -362,20 +379,20 @@ internal sealed class ScreenshotGalleryPage : UserControl
         int totalCount,
         string searchText)
     {
-        const string hint = "双击查看 · 右键编辑或删除";
+        const string hint = "双击查看 · 右键管理";
         if (totalCount == 0)
         {
-            return "暂无截图";
+            return "暂无截图或视频";
         }
         if (!string.IsNullOrWhiteSpace(searchText))
         {
             return matchCount == 0
-                ? $"未找到匹配截图 · {hint}"
-                : $"找到 {matchCount} 张，显示 {visibleCount} 张 · {hint}";
+                ? $"未找到匹配文件 · {hint}"
+                : $"找到 {matchCount} 个，显示 {visibleCount} 个 · {hint}";
         }
         return totalCount > visibleCount
-            ? $"共 {totalCount} 张，显示前 {visibleCount} 张 · {hint}"
-            : $"共 {visibleCount} 张截图 · {hint}";
+            ? $"共 {totalCount} 个，显示前 {visibleCount} 个 · {hint}"
+            : $"共 {visibleCount} 个文件 · {hint}";
     }
 
     private void OpenFolder()
@@ -392,9 +409,9 @@ internal sealed class ScreenshotGalleryPage : UserControl
         }
     }
 
-    private void OpenSelectedImage()
+    private void OpenSelectedArtifact()
     {
-        var path = GetSelectedImagePath();
+        var path = GetSelectedArtifactPath();
         if (path is null)
         {
             return;
@@ -406,15 +423,15 @@ internal sealed class ScreenshotGalleryPage : UserControl
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, $"无法打开截图：{exception.Message}", "打开失败",
+            MessageBox.Show(this, $"无法打开文件：{exception.Message}", "打开失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
     private void EditSelectedImage()
     {
-        var path = GetSelectedImagePath();
-        if (path is null)
+        var path = GetSelectedArtifactPath();
+        if (path is null || !_savedScreenshotService.IsSupportedImage(path))
         {
             return;
         }
@@ -422,18 +439,49 @@ internal sealed class ScreenshotGalleryPage : UserControl
         EditRequested?.Invoke(this, new ScreenshotEditRequestedEventArgs(path));
     }
 
-    private void DeleteSelectedImage()
+    private void CopySelectedImage()
     {
-        var path = GetSelectedImagePath();
+        var path = GetSelectedArtifactPath();
+        if (path is null || !_savedScreenshotService.IsSupportedImage(path))
+        {
+            return;
+        }
+
+        try
+        {
+            using var image = _savedScreenshotService.LoadForEditing(_folderPath, path);
+            _clipboardService.SetImage(image);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                ArgumentException or InvalidOperationException or
+                System.Runtime.InteropServices.ExternalException)
+        {
+            MessageBox.Show(
+                this,
+                $"无法复制截图：{exception.Message}",
+                "复制失败",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            RefreshScreenshots();
+        }
+    }
+
+    private void DeleteSelectedArtifact()
+    {
+        var path = GetSelectedArtifactPath();
         if (path is null)
         {
             return;
         }
 
+        var artifactName = _savedScreenshotService.IsSupportedVideo(path)
+            ? "视频"
+            : "截图";
         var choice = MessageBox.Show(
             this,
-            $"确定删除截图“{Path.GetFileName(path)}”吗？\n\n文件将移入回收站，可以从回收站恢复。",
-            "删除截图",
+            $"确定删除{artifactName}“{Path.GetFileName(path)}”吗？\n\n文件将移入回收站，可以从回收站恢复。",
+            $"删除{artifactName}",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning,
             MessageBoxDefaultButton.Button2);
@@ -453,7 +501,7 @@ internal sealed class ScreenshotGalleryPage : UserControl
         {
             MessageBox.Show(
                 this,
-                $"无法删除截图：{exception.Message}",
+                $"无法删除{artifactName}：{exception.Message}",
                 "删除失败",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -482,13 +530,13 @@ internal sealed class ScreenshotGalleryPage : UserControl
         item.Focused = true;
     }
 
-    private string? GetSelectedImagePath() =>
+    private string? GetSelectedArtifactPath() =>
         _listView.SelectedItems.Count > 0 &&
         _listView.SelectedItems[0].Tag is string path
             ? path
             : null;
 
-    private static Bitmap? TryCreateThumbnail(string path)
+    private static Bitmap? TryCreateImageThumbnail(string path)
     {
         try
         {
@@ -508,6 +556,52 @@ internal sealed class ScreenshotGalleryPage : UserControl
         {
             return null;
         }
+    }
+
+    private static Bitmap CreateVideoThumbnail(string path)
+    {
+        const int width = 168;
+        const int height = 104;
+        var target = new Bitmap(
+            width,
+            height,
+            System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(target);
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var backgroundBrush = new System.Drawing.Drawing2D.LinearGradientBrush(
+            new Rectangle(0, 0, width, height),
+            Color.FromArgb(30, 41, 59),
+            Color.FromArgb(51, 65, 85),
+            System.Drawing.Drawing2D.LinearGradientMode.Vertical);
+        graphics.FillRectangle(backgroundBrush, 0, 0, width, height);
+
+        using var playBackground = new SolidBrush(Color.FromArgb(230, 37, 99, 235));
+        graphics.FillEllipse(playBackground, 62, 25, 44, 44);
+        using var playBrush = new SolidBrush(Color.White);
+        graphics.FillPolygon(
+            playBrush,
+            new Point[]
+            {
+                new Point(79, 36),
+                new Point(79, 58),
+                new Point(96, 47)
+            });
+
+        var extension = Path.GetExtension(path).TrimStart('.').ToUpperInvariant();
+        using var extensionFont = AppTheme.CreateFont(8F, FontStyle.Bold);
+        using var extensionBrush = new SolidBrush(Color.FromArgb(203, 213, 225));
+        using var format = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center
+        };
+        graphics.DrawString(
+            string.IsNullOrEmpty(extension) ? "视频" : extension,
+            extensionFont,
+            extensionBrush,
+            new RectangleF(0, 75, width, 20),
+            format);
+        return target;
     }
 
     protected override void Dispose(bool disposing)

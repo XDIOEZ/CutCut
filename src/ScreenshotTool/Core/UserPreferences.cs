@@ -28,6 +28,9 @@ internal sealed class UserPreferences
     public int CtrlDragStepPixels { get; set; } =
         AnnotationLayoutOptions.DefaultCtrlDragStepPixels;
 
+    public AnnotationMoveActivationMode AnnotationMoveActivationMode { get; set; } =
+        AnnotationMoveActivationMode.HoldAlt;
+
     public RecordingRegionIndicatorStyle RecordingRegionIndicatorStyle { get; set; } =
         RecordingRegionIndicatorStyle.Dashed;
 
