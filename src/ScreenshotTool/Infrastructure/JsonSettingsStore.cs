@@ -156,9 +156,16 @@ internal sealed class JsonSettingsStore : ISettingsStore
         }
 
         settings.OutputFolder = Environment.ExpandEnvironmentVariables(settings.OutputFolder.Trim());
-        if (!settings.GetHotkey().IsValid)
+        if (settings.Hotkeys is null)
         {
-            settings.SetHotkey(HotkeyDefinition.Default);
+            var legacyHotkey = settings.GetHotkey();
+            settings.SetHotkeys(legacyHotkey.IsValid
+                ? [legacyHotkey]
+                : [HotkeyDefinition.Default]);
+        }
+        else
+        {
+            settings.SetHotkeys(settings.Hotkeys);
         }
 
         settings.LastLaunchedVersion = string.IsNullOrWhiteSpace(settings.LastLaunchedVersion)
@@ -166,6 +173,9 @@ internal sealed class JsonSettingsStore : ISettingsStore
             : settings.LastLaunchedVersion.Trim();
 
         settings.Preferences ??= new UserPreferences();
+        settings.Preferences.ScreenshotDateParentFolder =
+            Environment.ExpandEnvironmentVariables(
+                settings.Preferences.ScreenshotDateParentFolder?.Trim() ?? string.Empty);
         if (!Enum.IsDefined(settings.Preferences.StickerSelectionMoveMode))
         {
             settings.Preferences.StickerSelectionMoveMode = StickerSelectionMoveMode.FollowSelection;
@@ -204,6 +214,19 @@ internal sealed class JsonSettingsStore : ISettingsStore
             NormalizeNearest(
                 settings.Preferences.ScreenRecordingVideoBitrate,
                 [2_000_000, 4_000_000, 8_000_000, 12_000_000, 20_000_000]);
+        settings.Preferences.ModuleActivationPreferences =
+            new Dictionary<string, ModuleActivationPreference>(
+                (settings.Preferences.ModuleActivationPreferences ?? [])
+                    .Where(preference =>
+                        !string.IsNullOrWhiteSpace(preference.Key) &&
+                        preference.Value is not null)
+                    .GroupBy(
+                        preference => preference.Key.Trim(),
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => new KeyValuePair<string, ModuleActivationPreference>(
+                        group.Key,
+                        group.Last().Value)),
+                StringComparer.OrdinalIgnoreCase);
         settings.Preferences.ModuleBooleanPreferences = new Dictionary<string, bool>(
             settings.Preferences.ModuleBooleanPreferences ?? [],
             StringComparer.Ordinal);

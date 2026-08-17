@@ -144,8 +144,22 @@ internal sealed class PaddleOcrFeature :
             return;
         }
 
-        resultHost.ShowTextResult(_resultTitle, text);
+        ShowResult(resultHost, _resultTitle, text);
         artifactHost.CompleteCaptureSession();
+    }
+
+    private static void ShowResult(
+        ICaptureTextResultHost resultHost,
+        string title,
+        string text)
+    {
+        if (resultHost is ITranslatableCaptureTextResultHost translatableResultHost)
+        {
+            translatableResultHost.ShowTranslatableTextResult(title, text);
+            return;
+        }
+
+        resultHost.ShowTextResult(title, text);
     }
 
     private static void ShowMessage(string message, string title, MessageBoxIcon icon) =>

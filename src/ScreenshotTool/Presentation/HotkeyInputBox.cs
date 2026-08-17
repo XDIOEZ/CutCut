@@ -1,11 +1,12 @@
 using System.Runtime.InteropServices;
 using ScreenshotTool.Core;
+using ScreenshotTool.Presentation.Theme;
 
 namespace ScreenshotTool.Presentation;
 
 internal sealed class HotkeyInputBox : TextBox
 {
-    private HotkeyDefinition _hotkey = HotkeyDefinition.Default;
+    private HotkeyDefinition? _hotkey;
 
     public HotkeyInputBox()
     {
@@ -17,7 +18,7 @@ internal sealed class HotkeyInputBox : TextBox
         UpdateDisplay();
     }
 
-    public HotkeyDefinition Hotkey
+    public HotkeyDefinition? Hotkey
     {
         get => _hotkey;
         set
@@ -38,16 +39,31 @@ internal sealed class HotkeyInputBox : TextBox
         e.SuppressKeyPress = true;
         e.Handled = true;
 
-        var key = e.KeyCode;
+        TryApplyHotkey(e.KeyData);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (TryApplyHotkey(keyData))
+        {
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private bool TryApplyHotkey(Keys keyData)
+    {
+        var key = keyData & Keys.KeyCode;
         if (key is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin)
         {
-            return;
+            return false;
         }
 
         var modifiers = HotkeyModifiers.None;
-        if (e.Control) modifiers |= HotkeyModifiers.Control;
-        if (e.Shift) modifiers |= HotkeyModifiers.Shift;
-        if (e.Alt) modifiers |= HotkeyModifiers.Alt;
+        if (keyData.HasFlag(Keys.Control)) modifiers |= HotkeyModifiers.Control;
+        if (keyData.HasFlag(Keys.Shift)) modifiers |= HotkeyModifiers.Shift;
+        if (keyData.HasFlag(Keys.Alt)) modifiers |= HotkeyModifiers.Alt;
         if (IsKeyDown(Keys.LWin) || IsKeyDown(Keys.RWin))
         {
             modifiers |= HotkeyModifiers.Windows;
@@ -57,12 +73,16 @@ internal sealed class HotkeyInputBox : TextBox
         if (candidate.IsValid)
         {
             Hotkey = candidate;
+            return true;
         }
+
+        return false;
     }
 
     private void UpdateDisplay()
     {
-        Text = _hotkey.ToDisplayText();
+        Text = _hotkey?.ToDisplayText() ?? "未设置";
+        ForeColor = _hotkey is null ? AppTheme.MutedText : AppTheme.Text;
         SelectionStart = 0;
         SelectionLength = 0;
     }

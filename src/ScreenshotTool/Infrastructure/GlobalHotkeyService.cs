@@ -7,10 +7,10 @@ namespace ScreenshotTool.Infrastructure;
 
 internal sealed class GlobalHotkeyService : NativeWindow, IGlobalHotkeyService
 {
-    private const int HotkeyId = 0x5343;
+    private const int FirstHotkeyId = 0x5343;
     private const int WmHotkey = 0x0312;
     private const uint ModNoRepeat = 0x4000;
-    private bool _registered;
+    private readonly HashSet<int> _registeredHotkeyIds = [];
     private bool _disposed;
 
     public GlobalHotkeyService()
@@ -24,44 +24,66 @@ internal sealed class GlobalHotkeyService : NativeWindow, IGlobalHotkeyService
 
     public event EventHandler? Pressed;
 
-    public bool TryRegister(HotkeyDefinition hotkey, out string? error)
+    public bool TryRegister(IReadOnlyList<HotkeyDefinition> hotkeys, out string? error)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(hotkeys);
         error = null;
         Unregister();
 
-        if (!hotkey.IsValid)
+        if (hotkeys.Count > HotkeyBindings.MaximumCount)
+        {
+            error = $"最多只能绑定 {HotkeyBindings.MaximumCount} 个截图快捷键。";
+            return false;
+        }
+        if (hotkeys.Any(hotkey => !hotkey.IsValid))
         {
             error = "快捷键至少需要一个 Ctrl、Shift、Alt 或 Win 修饰键。";
             return false;
         }
-
-        var modifiers = (uint)hotkey.Modifiers | ModNoRepeat;
-        if (!RegisterHotKey(Handle, HotkeyId, modifiers, (uint)hotkey.VirtualKey))
+        if (hotkeys.Distinct().Count() != hotkeys.Count)
         {
+            error = "截图快捷键不能重复绑定。";
+            return false;
+        }
+
+        for (var index = 0; index < hotkeys.Count; index++)
+        {
+            var hotkey = hotkeys[index];
+            var hotkeyId = FirstHotkeyId + index;
+            var modifiers = (uint)hotkey.Modifiers | ModNoRepeat;
+            if (RegisterHotKey(Handle, hotkeyId, modifiers, (uint)hotkey.VirtualKey))
+            {
+                _registeredHotkeyIds.Add(hotkeyId);
+                continue;
+            }
+
             var nativeError = new Win32Exception(Marshal.GetLastWin32Error()).Message;
+            Unregister();
             error = $"快捷键 {hotkey.ToDisplayText()} 注册失败，可能已被其他程序占用。\n{nativeError}";
             return false;
         }
 
-        _registered = true;
         return true;
     }
 
     public void Unregister()
     {
-        if (!_registered || Handle == IntPtr.Zero)
+        if (_registeredHotkeyIds.Count == 0 || Handle == IntPtr.Zero)
         {
             return;
         }
 
-        UnregisterHotKey(Handle, HotkeyId);
-        _registered = false;
+        foreach (var hotkeyId in _registeredHotkeyIds)
+        {
+            UnregisterHotKey(Handle, hotkeyId);
+        }
+        _registeredHotkeyIds.Clear();
     }
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WmHotkey && m.WParam.ToInt32() == HotkeyId)
+        if (m.Msg == WmHotkey && _registeredHotkeyIds.Contains(m.WParam.ToInt32()))
         {
             Pressed?.Invoke(this, EventArgs.Empty);
         }

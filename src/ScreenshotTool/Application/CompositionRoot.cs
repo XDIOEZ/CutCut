@@ -10,17 +10,20 @@ internal sealed class CompositionRoot : IDisposable
     private readonly GlobalHotkeyService _hotkeyService;
     private readonly ModuleHost _moduleHost;
     private readonly IApplicationUpdateService _applicationUpdateService;
+    private readonly MyMemoryTextTranslationService _textTranslationService;
 
     private CompositionRoot(
         MainForm mainForm,
         GlobalHotkeyService hotkeyService,
         ModuleHost moduleHost,
-        IApplicationUpdateService applicationUpdateService)
+        IApplicationUpdateService applicationUpdateService,
+        MyMemoryTextTranslationService textTranslationService)
     {
         MainForm = mainForm;
         _hotkeyService = hotkeyService;
         _moduleHost = moduleHost;
         _applicationUpdateService = applicationUpdateService;
+        _textTranslationService = textTranslationService;
     }
 
     public MainForm MainForm { get; }
@@ -49,13 +52,18 @@ internal sealed class CompositionRoot : IDisposable
         var fileLocationService = new ExplorerFileLocationService();
         var savedScreenshotService = new SavedScreenshotService();
         var moduleImageHost = new ModuleImageHostProxy();
+        var moduleActivationPreferences = new UserPreferenceModuleActivationStore(
+            startupWorkspace.Settings,
+            settingsStore);
         var moduleHost = new ModuleHost(
             Path.Combine(AppContext.BaseDirectory, "Modules"),
-            moduleImageHost);
+            moduleImageHost,
+            moduleActivationPreferences);
         var applicationUpdateService = new GitHubReleaseApplicationUpdateService(
             currentVersion,
             AppContext.BaseDirectory,
             Environment.ProcessPath ?? System.Windows.Forms.Application.ExecutablePath);
+        var textTranslationService = new MyMemoryTextTranslationService();
         var pendingUpdateResult = applicationUpdateService.TakePendingApplyResult();
         var mainForm = new MainForm(
             settingsStore,
@@ -73,13 +81,15 @@ internal sealed class CompositionRoot : IDisposable
             initialSettings: startupWorkspace.Settings,
             startupWorkspaceReason: startupWorkspace.Reason,
             startInBackground: startInBackground,
-            startupRegistrationError: startupRegistrationError);
+            startupRegistrationError: startupRegistrationError,
+            textTranslationService: textTranslationService);
         moduleImageHost.Attach(mainForm);
         return new CompositionRoot(
             mainForm,
             hotkeyService,
             moduleHost,
-            applicationUpdateService);
+            applicationUpdateService,
+            textTranslationService);
     }
 
     public void Dispose()
@@ -88,5 +98,6 @@ internal sealed class CompositionRoot : IDisposable
         _moduleHost.Dispose();
         _hotkeyService.Dispose();
         _applicationUpdateService.Dispose();
+        _textTranslationService.Dispose();
     }
 }

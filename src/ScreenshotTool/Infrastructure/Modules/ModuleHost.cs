@@ -20,14 +20,29 @@ internal sealed class ModuleHost : IModuleManager
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PackageStamp> _nonModulePackages =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ModulePackageInfo> _disabledPackageInfo =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _fileChangesLock = new();
+    private readonly HashSet<string> _changedPackageDirectories =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly IModuleImageHost _imageHost;
+    private readonly IModuleActivationPreferenceStore _activationPreferences;
+    private readonly FileSystemWatcher _moduleWatcher;
+    private bool _rescanAllPackages;
     private string? _packageDirectoryState;
     private bool _disposed;
 
-    public ModuleHost(string modulesDirectory, IModuleImageHost? imageHost = null)
+    public ModuleHost(
+        string modulesDirectory,
+        IModuleImageHost? imageHost = null,
+        IModuleActivationPreferenceStore? activationPreferences = null)
     {
         ModulesDirectory = Path.GetFullPath(modulesDirectory);
         _imageHost = imageHost ?? UnavailableModuleImageHost.Instance;
+        _activationPreferences =
+            activationPreferences ?? new TransientModuleActivationPreferenceStore();
+        Directory.CreateDirectory(ModulesDirectory);
+        _moduleWatcher = CreateModuleWatcher();
     }
 
     public string ModulesDirectory { get; }
@@ -39,15 +54,19 @@ internal sealed class ModuleHost : IModuleManager
 
         var errors = new List<string>();
         var changed = false;
+        var changedPackageDirectories = ConsumeChangedPackageDirectories(
+            out var rescanAllPackages);
+        var reloadAllPackages = force || rescanAllPackages;
         var packageDirectories = Directory
             .EnumerateDirectories(ModulesDirectory, "*", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFullPath)
             .ToArray();
+        MigrateLegacyDisabledMarkers(packageDirectories, errors);
         var packageDirectoryState = string.Join(
             '\n',
             packageDirectories
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .Select(path => $"{path}|{File.Exists(GetDisabledMarkerPath(path))}"));
+                .Select(path => $"{path}|{IsPackageEnabled(path)}"));
         if (!string.Equals(
                 _packageDirectoryState,
                 packageDirectoryState,
@@ -57,7 +76,7 @@ internal sealed class ModuleHost : IModuleManager
             changed = true;
         }
         var packages = packageDirectories
-            .Where(path => !File.Exists(GetDisabledMarkerPath(path)))
+            .Where(IsPackageEnabled)
             .ToDictionary(
                 path => path,
                 PackageStamp.FromDirectory,
@@ -66,7 +85,8 @@ internal sealed class ModuleHost : IModuleManager
         foreach (var current in _packages.ToArray())
         {
             if (!packages.TryGetValue(current.Key, out var stamp) ||
-                force ||
+                reloadAllPackages ||
+                changedPackageDirectories.Contains(current.Key) ||
                 current.Value.Stamp != stamp)
             {
                 _packages.Remove(current.Key);
@@ -93,6 +113,12 @@ internal sealed class ModuleHost : IModuleManager
         {
             _nonModulePackages.Remove(ignored);
         }
+        foreach (var disabled in _disabledPackageInfo.Keys
+                     .Except(packageDirectories, StringComparer.OrdinalIgnoreCase)
+                     .ToArray())
+        {
+            _disabledPackageInfo.Remove(disabled);
+        }
 
         foreach (var package in packages)
         {
@@ -100,13 +126,15 @@ internal sealed class ModuleHost : IModuleManager
             {
                 continue;
             }
-            if (!force &&
+            if (!reloadAllPackages &&
+                !changedPackageDirectories.Contains(package.Key) &&
                 _failedPackages.TryGetValue(package.Key, out var failedStamp) &&
                 failedStamp == package.Value)
             {
                 continue;
             }
-            if (!force &&
+            if (!reloadAllPackages &&
+                !changedPackageDirectories.Contains(package.Key) &&
                 _nonModulePackages.TryGetValue(package.Key, out var ignoredStamp) &&
                 ignoredStamp == package.Value)
             {
@@ -193,19 +221,28 @@ internal sealed class ModuleHost : IModuleManager
 
         try
         {
-            var markerPath = GetDisabledMarkerPath(packageDirectory);
+            var currentPackage = GetInstalledPackage(packageDirectory);
+            if (!enabled && currentPackage is not null)
+            {
+                _disabledPackageInfo[packageDirectory] = currentPackage with
+                {
+                    State = ModulePackageState.Disabled,
+                    ErrorMessage = null
+                };
+            }
+
+            _activationPreferences.TryGet(packageName, out var previousPreference);
+            _activationPreferences.Set(
+                packageName,
+                new ModuleActivationPreference(
+                    enabled,
+                    currentPackage?.ModuleId ?? previousPreference?.ModuleId,
+                    currentPackage?.DisplayName ?? previousPreference?.DisplayName,
+                    currentPackage?.Version?.ToString() ?? previousPreference?.Version));
             if (enabled)
             {
-                if (File.Exists(markerPath))
-                {
-                    File.Delete(markerPath);
-                }
                 _failedPackages.Remove(packageDirectory);
                 _nonModulePackages.Remove(packageDirectory);
-            }
-            else
-            {
-                WriteDisabledMarker(packageDirectory);
             }
 
             var refresh = Refresh();
@@ -253,10 +290,20 @@ internal sealed class ModuleHost : IModuleManager
 
         try
         {
-            var displayName = GetInstalledPackage(packageDirectory)?.DisplayName ?? packageName;
-            WriteDisabledMarker(packageDirectory);
+            var currentPackage = GetInstalledPackage(packageDirectory);
+            var displayName = currentPackage?.DisplayName ?? packageName;
+            _activationPreferences.TryGet(packageName, out var previousPreference);
+            _activationPreferences.Set(
+                packageName,
+                new ModuleActivationPreference(
+                    Enabled: false,
+                    currentPackage?.ModuleId ?? previousPreference?.ModuleId,
+                    currentPackage?.DisplayName ?? previousPreference?.DisplayName,
+                    currentPackage?.Version?.ToString() ?? previousPreference?.Version));
             Refresh();
             Directory.Delete(packageDirectory, recursive: true);
+            _activationPreferences.Remove(packageName);
+            _disabledPackageInfo.Remove(packageDirectory);
             var refresh = Refresh();
             return new ModuleOperationResult(true, $"已永久删除“{displayName}”", refresh);
         }
@@ -306,6 +353,7 @@ internal sealed class ModuleHost : IModuleManager
         }
 
         _disposed = true;
+        _moduleWatcher.Dispose();
         foreach (var assembly in _packages.Values)
         {
             assembly.Retire();
@@ -313,7 +361,90 @@ internal sealed class ModuleHost : IModuleManager
         _packages.Clear();
         _failedPackages.Clear();
         _nonModulePackages.Clear();
+        _disabledPackageInfo.Clear();
         _packageDirectoryState = null;
+    }
+
+    private FileSystemWatcher CreateModuleWatcher()
+    {
+        var watcher = new FileSystemWatcher(ModulesDirectory)
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.FileName |
+                           NotifyFilters.DirectoryName |
+                           NotifyFilters.LastWrite |
+                           NotifyFilters.Size |
+                           NotifyFilters.CreationTime
+        };
+        watcher.Changed += HandleModulePathChanged;
+        watcher.Created += HandleModulePathChanged;
+        watcher.Deleted += HandleModulePathChanged;
+        watcher.Renamed += HandleModulePathRenamed;
+        watcher.Error += HandleModuleWatcherError;
+        watcher.EnableRaisingEvents = true;
+        return watcher;
+    }
+
+    private void HandleModulePathChanged(object sender, FileSystemEventArgs e) =>
+        TrackChangedPackageDirectory(e.FullPath);
+
+    private void HandleModulePathRenamed(object sender, RenamedEventArgs e)
+    {
+        TrackChangedPackageDirectory(e.OldFullPath);
+        TrackChangedPackageDirectory(e.FullPath);
+    }
+
+    private void HandleModuleWatcherError(object sender, ErrorEventArgs e)
+    {
+        lock (_fileChangesLock)
+        {
+            _rescanAllPackages = true;
+        }
+        Debug.WriteLine($"模块目录监听失败，下次刷新将重新扫描全部模块：{e.GetException()}");
+    }
+
+    private void TrackChangedPackageDirectory(string path)
+    {
+        var relativePath = Path.GetRelativePath(ModulesDirectory, path);
+        if (relativePath == "." ||
+            relativePath.StartsWith("..", StringComparison.Ordinal))
+        {
+            lock (_fileChangesLock)
+            {
+                _rescanAllPackages = true;
+            }
+            return;
+        }
+
+        var separatorIndex = relativePath.IndexOfAny(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+        var packageName = separatorIndex < 0
+            ? relativePath
+            : relativePath[..separatorIndex];
+        if (string.IsNullOrWhiteSpace(packageName))
+        {
+            return;
+        }
+
+        lock (_fileChangesLock)
+        {
+            _changedPackageDirectories.Add(
+                Path.GetFullPath(Path.Combine(ModulesDirectory, packageName)));
+        }
+    }
+
+    private HashSet<string> ConsumeChangedPackageDirectories(out bool rescanAllPackages)
+    {
+        lock (_fileChangesLock)
+        {
+            var changedPackageDirectories = new HashSet<string>(
+                _changedPackageDirectories,
+                StringComparer.OrdinalIgnoreCase);
+            _changedPackageDirectories.Clear();
+            rescanAllPackages = _rescanAllPackages;
+            _rescanAllPackages = false;
+            return changedPackageDirectories;
+        }
     }
 
     private ModulePackageInfo? GetInstalledPackage(string packageDirectory)
@@ -331,15 +462,28 @@ internal sealed class ModuleHost : IModuleManager
                 ModulePackageState.Enabled);
         }
 
-        var markerPath = GetDisabledMarkerPath(packageDirectory);
-        if (File.Exists(markerPath))
+        if (!IsPackageEnabled(packageDirectory))
         {
-            var marker = TryReadDisabledMarker(markerPath);
+            if (_disabledPackageInfo.TryGetValue(packageDirectory, out var disabledPackage))
+            {
+                return disabledPackage;
+            }
+            if (_activationPreferences.TryGet(packageName, out var preference))
+            {
+                return new ModulePackageInfo(
+                    packageName,
+                    preference.ModuleId ?? packageName,
+                    preference.DisplayName ?? packageName,
+                    Version.TryParse(preference.Version, out var version) ? version : null,
+                    packageDirectory,
+                    ModulePackageState.Disabled);
+            }
+
             return new ModulePackageInfo(
                 packageName,
-                marker?.ModuleId ?? packageName,
-                marker?.DisplayName ?? packageName,
-                Version.TryParse(marker?.Version, out var version) ? version : null,
+                packageName,
+                packageName,
+                null,
                 packageDirectory,
                 ModulePackageState.Disabled);
         }
@@ -359,29 +503,59 @@ internal sealed class ModuleHost : IModuleManager
         return null;
     }
 
-    private void WriteDisabledMarker(string packageDirectory)
+    private bool IsPackageEnabled(string packageDirectory)
     {
-        var current = GetInstalledPackage(packageDirectory);
-        var marker = new DisabledPackageMarker(
-            current?.ModuleId ?? Path.GetFileName(packageDirectory),
-            current?.DisplayName ?? Path.GetFileName(packageDirectory),
-            current?.Version?.ToString());
-        var markerPath = GetDisabledMarkerPath(packageDirectory);
-        var temporaryPath = Path.Combine(
-            packageDirectory,
-            $".{Guid.NewGuid():N}.module-state.tmp");
-        try
+        var packageName = Path.GetFileName(packageDirectory);
+        if (_activationPreferences.TryGet(packageName, out var preference))
         {
-            File.WriteAllText(
-                temporaryPath,
-                JsonSerializer.Serialize(marker, MarkerJsonOptions));
-            File.Move(temporaryPath, markerPath, overwrite: true);
+            return preference.Enabled;
         }
-        finally
+
+        return !File.Exists(GetDisabledMarkerPath(packageDirectory));
+    }
+
+    private void MigrateLegacyDisabledMarkers(
+        IReadOnlyList<string> packageDirectories,
+        ICollection<string> errors)
+    {
+        foreach (var packageDirectory in packageDirectories)
         {
-            if (File.Exists(temporaryPath))
+            var markerPath = GetDisabledMarkerPath(packageDirectory);
+            if (!File.Exists(markerPath))
             {
-                File.Delete(temporaryPath);
+                continue;
+            }
+
+            var packageName = Path.GetFileName(packageDirectory);
+            var marker = TryReadDisabledMarker(markerPath);
+            if (marker is not null)
+            {
+                _disabledPackageInfo[packageDirectory] = new ModulePackageInfo(
+                    packageName,
+                    marker.ModuleId,
+                    marker.DisplayName,
+                    Version.TryParse(marker.Version, out var version) ? version : null,
+                    packageDirectory,
+                    ModulePackageState.Disabled);
+            }
+
+            try
+            {
+                if (!_activationPreferences.TryGet(packageName, out _))
+                {
+                    _activationPreferences.Set(
+                        packageName,
+                        new ModuleActivationPreference(
+                            Enabled: false,
+                            marker?.ModuleId,
+                            marker?.DisplayName,
+                            marker?.Version));
+                }
+                File.Delete(markerPath);
+            }
+            catch (Exception exception) when (IsPackageOperationException(exception))
+            {
+                errors.Add($"{packageName}：迁移旧版插件启用状态失败：{exception.Message}");
             }
         }
     }
@@ -447,6 +621,22 @@ internal sealed class ModuleHost : IModuleManager
         string ModuleId,
         string DisplayName,
         string? Version);
+
+    private sealed class TransientModuleActivationPreferenceStore :
+        IModuleActivationPreferenceStore
+    {
+        private readonly Dictionary<string, ModuleActivationPreference> _preferences =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        public bool TryGet(string packageName, out ModuleActivationPreference preference) =>
+            _preferences.TryGetValue(packageName, out preference!);
+
+        public void Set(string packageName, ModuleActivationPreference preference) =>
+            _preferences[packageName] = preference;
+
+        public void Remove(string packageName) =>
+            _preferences.Remove(packageName);
+    }
 
     private readonly record struct PackageStamp(string Fingerprint)
     {

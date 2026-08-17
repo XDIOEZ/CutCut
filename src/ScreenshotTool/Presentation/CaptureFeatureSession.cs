@@ -8,6 +8,7 @@ internal sealed class CaptureFeatureSession : IDisposable
 {
     private readonly List<ICaptureFeature> _features = [];
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private bool _disposed;
 
     public CaptureFeatureSession(ICaptureFeatureCatalog catalog, ICaptureFeatureHost host)
     {
@@ -123,6 +124,12 @@ internal sealed class CaptureFeatureSession : IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _lifetimeCancellation.Cancel();
         foreach (var feature in _features)
         {

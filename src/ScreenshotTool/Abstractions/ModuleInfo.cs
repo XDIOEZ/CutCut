@@ -27,6 +27,12 @@ internal sealed record ModulePackageInfo(
     ModulePackageState State,
     string? ErrorMessage = null);
 
+internal sealed record ModuleActivationPreference(
+    bool Enabled,
+    string? ModuleId = null,
+    string? DisplayName = null,
+    string? Version = null);
+
 internal sealed record ModuleOperationResult(
     bool Succeeded,
     string Message,

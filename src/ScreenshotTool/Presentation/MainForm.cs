@@ -20,6 +20,7 @@ internal sealed class MainForm : Form, IModuleImageHost
     private readonly IScreenCaptureService _captureService;
     private readonly IImageSaveService _imageSaveService;
     private readonly IClipboardService _clipboardService;
+    private readonly ITextTranslationService? _textTranslationService;
     private readonly IWindowLocator _windowLocator;
     private readonly IFileLocationService _fileLocationService;
     private readonly ISavedScreenshotService _savedScreenshotService;
@@ -32,6 +33,7 @@ internal sealed class MainForm : Form, IModuleImageHost
     private readonly StickerBehaviorSettingsPage _stickerBehaviorPage;
     private readonly EditorSettingsPage _editorSettingsPage;
     private readonly DrawingCoefficientsSettingsPage _drawingCoefficientsPage;
+    private readonly GeneralSettingsPage _generalSettingsPage;
     private readonly ScreenshotSettingsPage _screenshotSettingsPage;
     private readonly SavePathSettingsPage _savePathPage;
     private readonly ModuleManagementPage _moduleManagementPage;
@@ -67,13 +69,15 @@ internal sealed class MainForm : Form, IModuleImageHost
         AppSettings? initialSettings = null,
         StartupWorkspaceReason startupWorkspaceReason = StartupWorkspaceReason.None,
         bool startInBackground = false,
-        string? startupRegistrationError = null)
+        string? startupRegistrationError = null,
+        ITextTranslationService? textTranslationService = null)
     {
         _settingsStore = settingsStore;
         _hotkeyService = hotkeyService;
         _captureService = captureService;
         _imageSaveService = imageSaveService;
         _clipboardService = clipboardService;
+        _textTranslationService = textTranslationService;
         _windowLocator = windowLocator;
         _fileLocationService = fileLocationService;
         _savedScreenshotService = savedScreenshotService;
@@ -109,21 +113,24 @@ internal sealed class MainForm : Form, IModuleImageHost
             _settings.Preferences.AnnotationMoveActivationMode);
         _drawingCoefficientsPage = new DrawingCoefficientsSettingsPage(
             _settings.Preferences.DrawingToolCoefficients);
-        _screenshotSettingsPage = new ScreenshotSettingsPage(
-            _settings.GetHotkey(),
+        _generalSettingsPage = new GeneralSettingsPage(
             _settings.StartMinimized,
-            _settings.StartWithWindows || ReadStartupRegistration(),
+            _settings.StartWithWindows || ReadStartupRegistration());
+        _screenshotSettingsPage = new ScreenshotSettingsPage(
+            _settings.GetHotkeys(),
             _settings.Preferences.DismissSaveNotificationBeforeCapture,
             _settings.Preferences.HideMainWindowDuringCapture);
         _savePathPage = new SavePathSettingsPage(
             _settings.OutputFolder,
-            _settings.Preferences.ScreenshotFileNameMode);
+            _settings.Preferences.ScreenshotFileNameMode,
+            _settings.Preferences.OrganizeScreenshotsByDate,
+            _settings.Preferences.ScreenshotDateParentFolder);
         _moduleManagementPage = new ModuleManagementPage(_moduleManager, _fileLocationService);
         _applicationUpdatePage = new ApplicationUpdatePage(
             typeof(MainForm).Assembly.GetName().Version ?? new Version(1, 0, 0),
             applicationUpdateService);
         _galleryPage = new ScreenshotGalleryPage(
-            _settings.OutputFolder,
+            _settings.GetScreenshotParentFolder(),
             _fileLocationService,
             _savedScreenshotService,
             _clipboardService);
@@ -156,6 +163,13 @@ internal sealed class MainForm : Form, IModuleImageHost
             "设置图片和文字贴纸在截图框移动时的行为",
             _stickerBehaviorPage,
             100));
+
+        _shell.AddPage(new AppPage(
+            "general-settings",
+            "通用设置",
+            "设置开机启动、启动后最小化等通用工作台行为",
+            _generalSettingsPage,
+            150));
 
         _shell.AddPage(new AppPage(
             ScreenshotSettingsPageId,
@@ -224,17 +238,19 @@ internal sealed class MainForm : Form, IModuleImageHost
         _stickerBehaviorPage.SaveRequested += SaveSettings;
         _editorSettingsPage.SaveRequested += SaveSettings;
         _drawingCoefficientsPage.SaveRequested += SaveSettings;
+        _generalSettingsPage.SaveRequested += SaveSettings;
         _screenshotSettingsPage.SaveRequested += SaveSettings;
         _screenshotSettingsPage.HotkeyInputEntered += (_, _) => _hotkeyService.Unregister();
         _screenshotSettingsPage.HotkeyInputLeft += (_, _) =>
         {
             if (!_isCapturing)
             {
-                _hotkeyService.TryRegister(_settings.GetHotkey(), out _);
+                _hotkeyService.TryRegister(_settings.GetHotkeys(), out _);
             }
         };
         _savePathPage.SaveRequested += SaveSettings;
         _savePathPage.BrowseRequested += BrowseFolder;
+        _savePathPage.DateParentBrowseRequested += BrowseDateParentFolder;
         _savePathPage.OpenRequested += OpenOutputFolder;
         _moduleManagementPage.OperationCompleted += HandleModuleOperationCompleted;
         _galleryPage.EditRequested += BeginEditingScreenshot;
@@ -255,7 +271,7 @@ internal sealed class MainForm : Form, IModuleImageHost
         var icon = new NotifyIcon
         {
             Icon = AppIcon.Shared,
-            Text = $"轻截（{_settings.GetHotkey().ToDisplayText()}）",
+            Text = GetTrayIconText(_settings.GetHotkeys()),
             Visible = visible,
             ContextMenuStrip = menu
         };
@@ -265,9 +281,14 @@ internal sealed class MainForm : Form, IModuleImageHost
 
     private void RegisterInitialHotkey()
     {
-        if (_hotkeyService.TryRegister(_settings.GetHotkey(), out var error))
+        var hotkeys = _settings.GetHotkeys();
+        if (_hotkeyService.TryRegister(hotkeys, out var error))
         {
-            _shell.ShowStatus($"后台监听：{_settings.GetHotkey().ToDisplayText()}", AppTheme.Success);
+            _shell.ShowStatus(
+                hotkeys.Count == 0
+                    ? "当前未绑定全局截图快捷键"
+                    : $"后台监听：{HotkeyBindings.ToDisplayText(hotkeys)}",
+                AppTheme.Success);
             return;
         }
 
@@ -284,9 +305,16 @@ internal sealed class MainForm : Form, IModuleImageHost
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+        var dateParentFolder = _savePathPage.DateParentFolder.Trim();
+        if (_savePathPage.OrganizeByDate && string.IsNullOrWhiteSpace(dateParentFolder))
+        {
+            MessageBox.Show(this, "请选择日期分类父文件夹。", "设置不完整",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
-        var oldHotkey = _settings.GetHotkey();
-        var newHotkey = _screenshotSettingsPage.Hotkey;
+        var oldHotkeys = _settings.GetHotkeys();
+        var newHotkeys = _screenshotSettingsPage.Hotkeys;
 
         try
         {
@@ -294,10 +322,8 @@ internal sealed class MainForm : Form, IModuleImageHost
             var candidate = new AppSettings
             {
                 OutputFolder = Path.GetFullPath(folder),
-                StartMinimized = _screenshotSettingsPage.StartMinimized,
-                StartWithWindows = _screenshotSettingsPage.StartWithWindows,
-                HotkeyModifiers = newHotkey.Modifiers,
-                HotkeyVirtualKey = newHotkey.VirtualKey,
+                StartMinimized = _generalSettingsPage.StartMinimized,
+                StartWithWindows = _generalSettingsPage.StartWithWindows,
                 LastLaunchedVersion = _settings.LastLaunchedVersion,
                 Preferences = new UserPreferences
                 {
@@ -312,6 +338,10 @@ internal sealed class MainForm : Form, IModuleImageHost
                     CtrlDragStepPixels = _editorSettingsPage.CtrlDragStepPixels,
                     AnnotationMoveActivationMode =
                         _editorSettingsPage.AnnotationMoveActivationMode,
+                    ModuleActivationPreferences =
+                        new Dictionary<string, ModuleActivationPreference>(
+                            _settings.Preferences.ModuleActivationPreferences,
+                            StringComparer.OrdinalIgnoreCase),
                     ModuleBooleanPreferences = new Dictionary<string, bool>(
                         _settings.Preferences.ModuleBooleanPreferences,
                         StringComparer.Ordinal),
@@ -322,6 +352,10 @@ internal sealed class MainForm : Form, IModuleImageHost
                         _settings.Preferences.ModuleStringPreferences,
                         StringComparer.Ordinal),
                     ScreenshotFileNameMode = _savePathPage.FileNameMode,
+                    OrganizeScreenshotsByDate = _savePathPage.OrganizeByDate,
+                    ScreenshotDateParentFolder = _savePathPage.OrganizeByDate
+                        ? Path.GetFullPath(dateParentFolder)
+                        : _settings.Preferences.ScreenshotDateParentFolder,
                     DismissSaveNotificationBeforeCapture =
                         _screenshotSettingsPage.DismissSaveNotificationBeforeCapture,
                     HideMainWindowDuringCapture =
@@ -329,7 +363,12 @@ internal sealed class MainForm : Form, IModuleImageHost
                     DrawingToolCoefficients = _drawingCoefficientsPage.Coefficients
                 }
             };
+            candidate.SetHotkeys(newHotkeys);
             Directory.CreateDirectory(candidate.OutputFolder);
+            if (candidate.Preferences.OrganizeScreenshotsByDate)
+            {
+                Directory.CreateDirectory(candidate.Preferences.ScreenshotDateParentFolder);
+            }
 
             IReadOnlyList<string> imagesToMove = [];
             if (!AreSameFolder(_settings.OutputFolder, candidate.OutputFolder))
@@ -355,19 +394,20 @@ internal sealed class MainForm : Form, IModuleImageHost
                 }
             }
 
-            if (!_hotkeyService.TryRegister(newHotkey, out var error))
+            if (!_hotkeyService.TryRegister(newHotkeys, out var error))
             {
-                _hotkeyService.TryRegister(oldHotkey, out _);
-                _screenshotSettingsPage.Hotkey = oldHotkey;
+                _hotkeyService.TryRegister(oldHotkeys, out _);
+                _screenshotSettingsPage.SetHotkeys(oldHotkeys);
                 MessageBox.Show(this, error, "快捷键不可用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             _settingsStore.Save(candidate);
-            _settings = candidate;
+            _settings.Apply(candidate);
             _savePathPage.FolderPath = candidate.OutputFolder;
-            _galleryPage.FolderPath = candidate.OutputFolder;
-            _trayIcon.Text = $"轻截（{newHotkey.ToDisplayText()}）";
+            _savePathPage.DateParentFolder = candidate.Preferences.ScreenshotDateParentFolder;
+            _galleryPage.FolderPath = candidate.GetScreenshotParentFolder();
+            _trayIcon.Text = GetTrayIconText(newHotkeys);
             var startupRegistrationError = TryApplyStartupRegistration();
             if (imagesToMove.Count > 0)
             {
@@ -404,11 +444,21 @@ internal sealed class MainForm : Form, IModuleImageHost
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            _hotkeyService.TryRegister(oldHotkey, out _);
+            _hotkeyService.TryRegister(oldHotkeys, out _);
             MessageBox.Show(this, $"设置保存失败：{exception.Message}", "保存失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
+
+    private static string GetTrayIconText(IReadOnlyList<HotkeyDefinition> hotkeys) =>
+        $"轻截（{HotkeyBindings.ToCompactDisplayText(hotkeys)}）";
+
+    private static string GetHotkeyInstruction(
+        IReadOnlyList<HotkeyDefinition> hotkeys,
+        string action) =>
+        hotkeys.Count == 0
+            ? "当前未绑定快捷键，可从托盘菜单立即截图"
+            : $"按 {HotkeyBindings.ToDisplayText(hotkeys)} {action}";
 
     private static bool AreSameFolder(string first, string second) => string.Equals(
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
@@ -432,7 +482,7 @@ internal sealed class MainForm : Form, IModuleImageHost
     {
         try
         {
-            _startupRegistrationService.SetEnabled(_screenshotSettingsPage.StartWithWindows);
+            _startupRegistrationService.SetEnabled(_generalSettingsPage.StartWithWindows);
             return null;
         }
         catch (Exception exception) when (IsStartupRegistrationException(exception))
@@ -462,13 +512,33 @@ internal sealed class MainForm : Form, IModuleImageHost
         }
     }
 
+    private void BrowseDateParentFolder(object? sender, EventArgs e)
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "选择日期分类父文件夹",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(_savePathPage.DateParentFolder)
+                ? _savePathPage.DateParentFolder
+                : _settings.GetScreenshotParentFolder(),
+            ShowNewFolderButton = true
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _savePathPage.DateParentFolder = dialog.SelectedPath;
+        }
+    }
+
     private void OpenOutputFolder(object? sender, EventArgs e)
     {
         try
         {
-            var folder = string.IsNullOrWhiteSpace(_savePathPage.FolderPath)
-                ? _settings.OutputFolder
-                : _savePathPage.FolderPath.Trim();
+            var configuredFolder = _savePathPage.OrganizeByDate
+                ? _savePathPage.DateParentFolder
+                : _savePathPage.FolderPath;
+            var folder = string.IsNullOrWhiteSpace(configuredFolder)
+                ? _settings.GetScreenshotParentFolder()
+                : configuredFolder.Trim();
             Directory.CreateDirectory(folder);
             _fileLocationService.OpenFolder(folder);
         }
@@ -614,8 +684,10 @@ internal sealed class MainForm : Form, IModuleImageHost
         ArgumentNullException.ThrowIfNull(image);
         var path = _imageSaveService.SavePng(
             image,
-            _settings.OutputFolder,
-            _settings.Preferences.ScreenshotFileNameMode);
+            _settings.GetScreenshotParentFolder(),
+            _settings.Preferences.ScreenshotFileNameMode,
+            imageTexts: null,
+            organizeByDate: _settings.Preferences.OrganizeScreenshotsByDate);
         HandleArtifactSaved(path);
         return path;
     }
@@ -668,7 +740,7 @@ internal sealed class MainForm : Form, IModuleImageHost
             if (savedScreenshotPath is not null && initialEditImage is null)
             {
                 initialEditImage = _savedScreenshotService.LoadForEditing(
-                    _settings.OutputFolder,
+                    _settings.GetScreenshotParentFolder(),
                     savedScreenshotPath);
             }
 
@@ -700,7 +772,7 @@ internal sealed class MainForm : Form, IModuleImageHost
                 annotationSessionFactory,
                 _settings.Preferences.ModuleBooleanPreferences,
                 _settings.Preferences.ModuleIntegerPreferences,
-                _settings.OutputFolder,
+                _settings.GetScreenshotParentFolder(),
                 _settings.Preferences.ScreenshotFileNameMode,
                 _settings.Preferences.DrawingToolCoefficients,
                 _settings.Preferences.AnnotationRotationStepDegrees,
@@ -709,9 +781,11 @@ internal sealed class MainForm : Form, IModuleImageHost
                 _settings.Preferences.AnnotationSnapThresholdPixels,
                 _settings.Preferences.CtrlDragStepPixels,
                 initialEditImage,
-                _settings.Preferences.AnnotationMoveActivationMode);
+                _settings.Preferences.AnnotationMoveActivationMode,
+                _textTranslationService,
+                _settings.Preferences.OrganizeScreenshotsByDate);
             overlay.ArtifactSaved += (_, path) => HandleArtifactSaved(path);
-            overlay.ShowDialog();
+            await CaptureOverlayPresenter.ShowAsync(overlay);
             SaveLastToolWidth(toolWidthController.Current);
         }
         catch (Exception exception)
@@ -834,9 +908,10 @@ internal sealed class MainForm : Form, IModuleImageHost
             BeginInvoke(() =>
             {
                 Hide();
-                _hotkeyService.TryRegister(_settings.GetHotkey(), out _);
+                var hotkeys = _settings.GetHotkeys();
+                _hotkeyService.TryRegister(hotkeys, out _);
                 _trayIcon.ShowBalloonTip(1800, "轻截正在后台运行",
-                    $"按 {_settings.GetHotkey().ToDisplayText()} 开始截图", ToolTipIcon.Info);
+                    GetHotkeyInstruction(hotkeys, "开始截图"), ToolTipIcon.Info);
             });
         }
     }
@@ -856,9 +931,10 @@ internal sealed class MainForm : Form, IModuleImageHost
 
         e.Cancel = true;
         Hide();
-        _hotkeyService.TryRegister(_settings.GetHotkey(), out _);
+        var hotkeys = _settings.GetHotkeys();
+        _hotkeyService.TryRegister(hotkeys, out _);
         _trayIcon.ShowBalloonTip(1600, "轻截仍在运行",
-            $"按 {_settings.GetHotkey().ToDisplayText()} 截图；右键托盘图标可退出。", ToolTipIcon.Info);
+            $"{GetHotkeyInstruction(hotkeys, "截图")}；右键托盘图标可退出。", ToolTipIcon.Info);
     }
 
     private void ShowFromTray()

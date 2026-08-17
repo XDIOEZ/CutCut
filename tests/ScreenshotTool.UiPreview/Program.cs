@@ -73,6 +73,11 @@ internal static class Program
             RunScreenshotSettingsPageSmoke(screenshotSettingsOutputPath);
             return 0;
         }
+        if (args is ["--general-settings-page-smoke", var generalSettingsOutputPath])
+        {
+            RunGeneralSettingsPageSmoke(generalSettingsOutputPath);
+            return 0;
+        }
         if (args is ["--notification-capture-policy-smoke"])
         {
             RunNotificationCapturePolicySmoke();
@@ -116,6 +121,21 @@ internal static class Program
         if (args is ["--existing-image-edit-smoke", var existingImageOutputPath])
         {
             RunExistingImageEditSmoke(existingImageOutputPath);
+            return 0;
+        }
+        if (args is ["--capture-outside-interaction-smoke", var outsideInteractionOutputPath])
+        {
+            RunCaptureOutsideInteractionSmoke(outsideInteractionOutputPath);
+            return 0;
+        }
+        if (args is ["--capture-background-refresh-smoke", var backgroundRefreshOutputPath])
+        {
+            RunCaptureBackgroundRefreshSmoke(backgroundRefreshOutputPath);
+            return 0;
+        }
+        if (args is ["--capture-dispose-smoke"])
+        {
+            RunCaptureDisposeSmoke();
             return 0;
         }
 
@@ -837,7 +857,8 @@ internal static class Program
             outputPath,
             "OCR 识别结果",
             "轻截文字识别\r\n\r\nThe quick brown fox jumps over the lazy dog.\r\n2026-07-22",
-            "OCR");
+            "OCR",
+            enableTranslation: true);
     }
 
     private static void RunQrCodeResultSmoke(string outputPath)
@@ -846,14 +867,16 @@ internal static class Program
             outputPath,
             "二维码扫描结果",
             "https://example.com/cutcut?source=qr\r\n\r\nWIFI:T:WPA;S:LightShot;P:12345678;;",
-            "二维码");
+            "二维码",
+            enableTranslation: false);
     }
 
     private static void RunTextResultSmoke(
         string outputPath,
         string title,
         string text,
-        string featureName)
+        string featureName,
+        bool enableTranslation)
     {
         var screen = Screen.PrimaryScreen ?? throw new InvalidOperationException("找不到主显示器。");
         var anchor = new Rectangle(
@@ -861,11 +884,16 @@ internal static class Program
             screen.WorkingArea.Top + 80,
             Math.Min(720, screen.WorkingArea.Width / 2),
             360);
+        const string translatedText = "轻截文字识别\r\n\r\n敏捷的棕色狐狸跳过了懒狗。\r\n2026-07-22";
+        var translationService = enableTranslation
+            ? new PreviewTextTranslationService(translatedText)
+            : null;
         using var resultWindow = new CaptureTextResultForm(
             title,
             text,
             anchor,
-            new PreviewClipboardService());
+            new PreviewClipboardService(),
+            translationService);
         resultWindow.Show();
         System.Windows.Forms.Application.DoEvents();
         Thread.Sleep(120);
@@ -878,11 +906,77 @@ internal static class Program
         {
             throw new InvalidOperationException($"{featureName} 结果窗口没有完整保留多行内容。");
         }
+        if (resultWindow.TranslationAvailable != enableTranslation)
+        {
+            throw new InvalidOperationException(
+                $"{featureName} 结果窗口的翻译按钮显示状态不正确。");
+        }
+
+        Button? translateButton = null;
+        if (enableTranslation)
+        {
+            translateButton = resultWindow.Controls
+                .Find("TranslateButton", searchAllChildren: true)
+                .OfType<Button>()
+                .Single();
+            translateButton.PerformClick();
+            System.Windows.Forms.Application.DoEvents();
+            if (!resultWindow.IsTranslated ||
+                !string.Equals(
+                    resultWindow.ResultText,
+                    translatedText,
+                    StringComparison.Ordinal) ||
+                !string.Equals(translateButton.Text, "显示原文", StringComparison.Ordinal) ||
+                translationService?.CallCount != 1 ||
+                !string.Equals(translationService.LastText, text, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("OCR 结果窗口没有切换到中文翻译结果。");
+            }
+        }
 
         using var captured = new Bitmap(resultWindow.Width, resultWindow.Height);
-        using (var graphics = Graphics.FromImage(captured))
+        resultWindow.DrawToBitmap(
+            captured,
+            new Rectangle(Point.Empty, captured.Size));
+        if (translateButton is not null)
         {
-            graphics.CopyFromScreen(resultWindow.Location, Point.Empty, resultWindow.Size);
+            translateButton.PerformClick();
+            System.Windows.Forms.Application.DoEvents();
+            if (resultWindow.IsTranslated ||
+                !string.Equals(resultWindow.ResultText, text, StringComparison.Ordinal) ||
+                translationService?.CallCount != 1)
+            {
+                throw new InvalidOperationException(
+                    "OCR 结果窗口再次点击翻译按钮后没有在本地恢复原文。");
+            }
+
+            translateButton.PerformClick();
+            System.Windows.Forms.Application.DoEvents();
+            if (!resultWindow.IsTranslated ||
+                !string.Equals(resultWindow.ResultText, translatedText, StringComparison.Ordinal) ||
+                translationService?.CallCount != 1)
+            {
+                throw new InvalidOperationException(
+                    "OCR 结果窗口没有复用已有译文进行双向切换。");
+            }
+
+            translateButton.PerformClick();
+            System.Windows.Forms.Application.DoEvents();
+            var editableResult = resultWindow.Controls.OfType<TextBox>().Single();
+            const string editedSource = "Edited source after restoring the original.";
+            editableResult.Text = editedSource;
+            translateButton.PerformClick();
+            System.Windows.Forms.Application.DoEvents();
+            if (!resultWindow.IsTranslated ||
+                translationService?.CallCount != 2 ||
+                !string.Equals(
+                    translationService.LastText,
+                    editedSource,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "OCR 原文被编辑后没有使用最新文字重新翻译。");
+            }
         }
         resultWindow.Close();
         System.Windows.Forms.Application.DoEvents();
@@ -1222,11 +1316,81 @@ internal static class Program
             throw new InvalidOperationException(
                 "已有截图粘贴文字提交后没有生成普通文字元素。");
         }
+        if (!textAnnotation.SupportsResize ||
+            !ReferenceEquals(annotationEditor.Selection.Primary, textAnnotation))
+        {
+            throw new InvalidOperationException(
+                "文字框提交并选中后没有启用缩放交互。");
+        }
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "BeginExistingTextEditor",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, [textAnnotation]);
+        var reeditInput = (TransparentTextEditorControl?)typeof(CaptureOverlayForm)
+            .GetField(
+                "_textEditor",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(overlay);
+        if (reeditInput is null || annotationEditor.Selection.Count != 0)
+        {
+            throw new InvalidOperationException(
+                "文字框进入编辑模式后没有关闭缩放交互。");
+        }
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "CancelTextEditor",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, [true]);
         if (!annotationEditor.Undo())
         {
             throw new InvalidOperationException("已有截图无法撤销粘贴文字验证元素。");
         }
         existingImageClipboard.Text = null;
+
+        using (var pastedImage = new Bitmap(24, 12))
+        {
+            using var pastedImageGraphics = Graphics.FromImage(pastedImage);
+            pastedImageGraphics.Clear(Color.LimeGreen);
+            existingImageClipboard.SetImage(pastedImage);
+        }
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "PasteClipboardContent",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, null);
+        var selectedImage = annotationEditor.Selection.Primary as StickerAnnotation;
+        if (selectedImage is null)
+        {
+            throw new InvalidOperationException("已有截图没有选中刚粘贴的图片元素。");
+        }
+        selectedImage.SetBounds(new Rectangle(
+            selectedImage.Bounds.X,
+            selectedImage.Bounds.Y,
+            72,
+            36));
+        var copyImageShortcut = new KeyEventArgs(Keys.Control | Keys.C);
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "HandleKeyDown",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, [overlay, copyImageShortcut]);
+        if (!copyImageShortcut.SuppressKeyPress ||
+            existingImageClipboard.CopiedImage?.Size != selectedImage.Bounds.Size ||
+            overlay.IsDisposed)
+        {
+            throw new InvalidOperationException(
+                "选中图片时 Ctrl+C 没有只复制当前图片并保持编辑窗口打开。");
+        }
+        if (!annotationEditor.Undo())
+        {
+            throw new InvalidOperationException("已有截图无法撤销粘贴图片验证元素。");
+        }
 
         using (var recognitionInput = featureHost.CopyDesktopSelection())
         {
@@ -1361,7 +1525,9 @@ internal static class Program
         };
         using var page = new SavePathSettingsPage(
             @"C:\Users\User\Pictures\轻截",
-            ScreenshotFileNameMode.ImageText)
+            ScreenshotFileNameMode.ImageText,
+            organizeByDate: true,
+            dateParentFolder: @"D:\截图归档")
         {
             Location = new Point(18, 18),
             Size = new Size(724, 554)
@@ -1378,6 +1544,14 @@ internal static class Program
         {
             throw new InvalidOperationException("保存设置页面没有恢复图片文字命名规则。");
         }
+        if (!page.OrganizeByDate)
+        {
+            throw new InvalidOperationException("保存设置页面没有恢复按日期分类开关。");
+        }
+        if (!string.Equals(page.DateParentFolder, @"D:\截图归档", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("保存设置页面没有恢复用户绑定的日期父文件夹。");
+        }
         using var captured = new Bitmap(form.Width, form.Height);
         form.DrawToBitmap(captured, new Rectangle(Point.Empty, form.Size));
         var fullOutputPath = Path.GetFullPath(outputPath);
@@ -1387,6 +1561,844 @@ internal static class Program
         System.Windows.Forms.Application.DoEvents();
 
     }
+
+    private static void RunGeneralSettingsPageSmoke(string outputPath)
+    {
+        using var form = new Form
+        {
+            Text = "轻截 - 通用设置",
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(80, 80),
+            ClientSize = new Size(760, 480),
+            BackColor = Color.FromArgb(244, 247, 252),
+            ShowInTaskbar = false,
+            TopMost = true
+        };
+        using var page = new GeneralSettingsPage(
+            startMinimized: true,
+            startWithWindows: true)
+        {
+            Location = new Point(18, 18),
+            Size = new Size(724, 444)
+        };
+        form.Controls.Add(page);
+        form.Show();
+        form.Activate();
+        form.BringToFront();
+        System.Windows.Forms.Application.DoEvents();
+        Thread.Sleep(120);
+        System.Windows.Forms.Application.DoEvents();
+
+        if (!page.StartMinimized || !page.StartWithWindows)
+        {
+            throw new InvalidOperationException(
+                "通用设置页面没有恢复开机启动与启动后最小化选项。");
+        }
+        var settingRows = page.Controls
+            .OfType<Panel>()
+            .SelectMany(panel => panel.Controls.OfType<Panel>())
+            .Where(panel => string.Equals(
+                panel.Tag as string,
+                "SettingRow",
+                StringComparison.Ordinal))
+            .ToArray();
+        if (settingRows.Length != 2 || settingRows.Any(row =>
+                row.Controls.Cast<Control>().Count(control =>
+                    control is CheckBox or TextBox) != 1))
+        {
+            throw new InvalidOperationException(
+                "通用设置页面没有使用两行单列设置项。");
+        }
+
+        using var captured = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(captured, new Rectangle(Point.Empty, form.Size));
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+        captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+        form.Close();
+        System.Windows.Forms.Application.DoEvents();
+    }
+
+    private static void RunCaptureOutsideInteractionSmoke(string outputPath)
+    {
+        var screen = Screen.PrimaryScreen ??
+                     throw new InvalidOperationException("找不到主显示器。");
+        var bounds = new Rectangle(
+            screen.WorkingArea.Left + 40,
+            screen.WorkingArea.Top + 40,
+            Math.Min(1100, screen.WorkingArea.Width - 80),
+            Math.Min(620, screen.WorkingArea.Height - 80));
+        if (bounds.Width < 900 || bounds.Height < 420)
+        {
+            throw new InvalidOperationException("主显示器空间不足，无法验证截图框外鼠标穿透。");
+        }
+
+        var originalPointer = Cursor.Position;
+        using var backingForm = new Form
+        {
+            Bounds = bounds,
+            StartPosition = FormStartPosition.Manual,
+            FormBorderStyle = FormBorderStyle.None,
+            BackColor = Color.FromArgb(15, 23, 42),
+            TopMost = true,
+            ShowInTaskbar = false
+        };
+        backingForm.Show();
+
+        var pinnedBounds = new Rectangle(
+            bounds.Left + 20,
+            bounds.Top + 20,
+            140,
+            96);
+        var pinnedLeftDownCount = 0;
+        var pinnedCopyMenuOpened = false;
+        var pinnedCopyInvoked = false;
+        using var pinnedMenu = new ContextMenuStrip();
+        var pinnedCopy = pinnedMenu.Items.Add(
+            "复制",
+            null,
+            (_, _) => pinnedCopyInvoked = true);
+        pinnedCopy.Name = "CopyPinnedImageMenuItem";
+        pinnedMenu.Opened += (_, _) => pinnedCopyMenuOpened = true;
+        using var pinnedForm = new Form
+        {
+            Bounds = pinnedBounds,
+            StartPosition = FormStartPosition.Manual,
+            FormBorderStyle = FormBorderStyle.None,
+            BackColor = Color.FromArgb(30, 64, 175),
+            ContextMenuStrip = pinnedMenu,
+            TopMost = true,
+            ShowInTaskbar = false
+        };
+        pinnedForm.MouseDown += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                pinnedLeftDownCount++;
+            }
+        };
+        pinnedForm.Show();
+
+        using var snapshotImage = new Bitmap(bounds.Width, bounds.Height);
+        using (var graphics = Graphics.FromImage(snapshotImage))
+        {
+            graphics.Clear(backingForm.BackColor);
+            using var brush = new SolidBrush(Color.FromArgb(30, 41, 59));
+            graphics.FillRectangle(brush, new Rectangle(0, 0, bounds.Width, 84));
+        }
+        using var snapshot = new DesktopSnapshot((Bitmap)snapshotImage.Clone(), bounds);
+        var width = new ToolWidthController(ToolWidthRange.Create(1, 32), 4);
+        var annotations = new LiveAnnotationSessionFactory(
+            new PreviewClipboardService(),
+            new DrawingToolCoefficients(),
+            AnnotationRotationStep.DefaultDegrees,
+            DrawingCursorShape.Circle);
+        var overlay = new CaptureOverlayForm(
+            snapshot,
+            new PreviewImageSaveService(),
+            new PreviewClipboardService(),
+            new PreviewWindowLocator(),
+            new PreviewModuleManager(),
+            SelectionMoveAnnotationStrategyFactory.Create(StickerSelectionMoveMode.FollowSelection),
+            width,
+            annotations,
+            new Dictionary<string, bool>(),
+            new Dictionary<string, int>(),
+            Path.GetTempPath(),
+            ScreenshotFileNameMode.DateTime);
+
+        Task? overlaySession = null;
+        try
+        {
+            overlaySession = CaptureOverlayPresenter.ShowAsync(overlay);
+            System.Windows.Forms.Application.DoEvents();
+
+            typeof(CaptureOverlayForm)
+                .GetMethod(
+                    "BeginManualSelection",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay, [new Point(190, 130), Rectangle.Empty]);
+            typeof(CaptureOverlayForm)
+                .GetMethod(
+                    "HandleMouseMove",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay,
+                [
+                    overlay,
+                    new MouseEventArgs(MouseButtons.Left, 0, 520, 320, 0)
+                ]);
+            typeof(CaptureOverlayForm)
+                .GetMethod(
+                    "HandleMouseUp",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay,
+                [
+                    overlay,
+                    new MouseEventArgs(MouseButtons.Left, 1, 520, 320, 0)
+                ]);
+            System.Windows.Forms.Application.DoEvents();
+
+            var expectedInitialSelection = Rectangle.FromLTRB(190, 130, 520, 320);
+            var actualInitialSelection = ((ICaptureFeatureHost)overlay).Selection;
+            if (actualInitialSelection != expectedInitialSelection ||
+                overlay.Region is null)
+            {
+                throw new InvalidOperationException(
+                    $"初始截图完成后覆盖层没有收缩到编辑框和工具栏。" +
+                    $"Expected={expectedInitialSelection}, Actual={actualInitialSelection}, " +
+                    $"Region={overlay.Region is not null}");
+            }
+
+            if (!pinnedForm.Enabled)
+            {
+                throw new InvalidOperationException(
+                    "截图浮层显示后禁用了已有贴图窗口。");
+            }
+
+            var outsidePoint = new Point(
+                pinnedBounds.Left + pinnedBounds.Width / 2,
+                pinnedBounds.Top + pinnedBounds.Height / 2);
+            MovePointer(outsidePoint);
+            System.Windows.Forms.Application.DoEvents();
+            var outsideHitWindow = WindowFromPoint(outsidePoint);
+            var outsideHitRoot = GetAncestor(outsideHitWindow, GetRootAncestor);
+            if (outsideHitRoot != pinnedForm.Handle)
+            {
+                throw new InvalidOperationException(
+                    "截图框外没有命中已有贴图窗口。" +
+                    $"Expected={pinnedForm.Handle}, Actual={outsideHitRoot}");
+            }
+
+            MouseEvent(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+            MouseEvent(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+            System.Windows.Forms.Application.DoEvents();
+            if (pinnedLeftDownCount != 1)
+            {
+                throw new InvalidOperationException(
+                    "截图框外的已有贴图没有收到左键操作。");
+            }
+
+            MouseEvent(MouseEventRightDown, 0, 0, 0, UIntPtr.Zero);
+            MouseEvent(MouseEventRightUp, 0, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(50);
+            System.Windows.Forms.Application.DoEvents();
+            pinnedCopy.PerformClick();
+            if (!pinnedCopyMenuOpened || !pinnedCopyInvoked)
+            {
+                throw new InvalidOperationException(
+                    "截图框外无法打开已有贴图的右键菜单并执行复制。");
+            }
+
+            var redrawStart = new Point(bounds.Left + 650, bounds.Top + 70);
+            var redrawEnd = new Point(bounds.Left + 790, bounds.Top + 170);
+            KeybdEvent(VirtualKeyControl, 0, 0, UIntPtr.Zero);
+            MovePointer(redrawStart);
+            MouseEvent(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+            MovePointer(redrawEnd);
+            MouseEvent(MouseEventMove | MouseEventMoveNoCoalesce, 0, 0, 0, UIntPtr.Zero);
+            MouseEvent(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+            KeybdEvent(VirtualKeyControl, 0, KeyEventKeyUp, UIntPtr.Zero);
+            System.Windows.Forms.Application.DoEvents();
+
+            var expectedRedrawSelection = Rectangle.FromLTRB(650, 70, 790, 170);
+            var actualRedrawSelection = ((ICaptureFeatureHost)overlay).Selection;
+            if (actualRedrawSelection != expectedRedrawSelection)
+            {
+                throw new InvalidOperationException(
+                    $"Ctrl 加框外左键拖动没有重新框选。" +
+                    $"Expected={expectedRedrawSelection}, Actual={actualRedrawSelection}");
+            }
+
+            var toolbar = (CaptureEditorToolbar)typeof(CaptureOverlayForm)
+                .GetField(
+                    "_toolbar",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            var toolbarCenter = new Point(
+                toolbar.Left + toolbar.Width / 2,
+                toolbar.Top + toolbar.Height / 2);
+            if (!toolbar.Visible ||
+                overlay.Region is null ||
+                !overlay.Region.IsVisible(toolbarCenter))
+            {
+                throw new InvalidOperationException(
+                    "重新框选完成后工具栏没有保留在覆盖层交互区域中。");
+            }
+            Thread.Sleep(120);
+            System.Windows.Forms.Application.DoEvents();
+
+            using var captured = new Bitmap(bounds.Width, bounds.Height);
+            using (var graphics = Graphics.FromImage(captured))
+            {
+                graphics.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
+            }
+            var fullOutputPath = Path.GetFullPath(outputPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+            captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        finally
+        {
+            KeybdEvent(VirtualKeyControl, 0, KeyEventKeyUp, UIntPtr.Zero);
+            overlay.Close();
+            System.Windows.Forms.Application.DoEvents();
+            overlaySession?.GetAwaiter().GetResult();
+            pinnedForm.Close();
+            backingForm.Close();
+            Cursor.Position = originalPointer;
+            System.Windows.Forms.Application.DoEvents();
+        }
+    }
+
+    private static void RunCaptureBackgroundRefreshSmoke(string outputPath)
+    {
+        var screen = Screen.PrimaryScreen ??
+                     throw new InvalidOperationException("找不到主显示器。");
+        var bounds = new Rectangle(
+            screen.WorkingArea.Left + 40,
+            screen.WorkingArea.Top + 40,
+            Math.Min(1100, screen.WorkingArea.Width - 80),
+            Math.Min(620, screen.WorkingArea.Height - 80));
+        if (bounds.Width < 900 || bounds.Height < 420)
+        {
+            throw new InvalidOperationException("主显示器空间不足，无法验证截图背景刷新。");
+        }
+
+        var originalPointer = Cursor.Position;
+        var initialColor = Color.FromArgb(91, 33, 42);
+        var firstRefreshColor = Color.FromArgb(30, 64, 175);
+        var blockedRefreshColor = Color.FromArgb(202, 138, 4);
+        var secondRefreshColor = Color.FromArgb(5, 150, 105);
+        var editingRefreshColor = Color.FromArgb(126, 34, 206);
+        var backingShortcutCount = 0;
+        using var backingForm = new Form
+        {
+            Bounds = bounds,
+            StartPosition = FormStartPosition.Manual,
+            FormBorderStyle = FormBorderStyle.None,
+            BackColor = initialColor,
+            TopMost = false,
+            ShowInTaskbar = false,
+            KeyPreview = true
+        };
+        backingForm.KeyDown += (_, e) =>
+        {
+            if (e.Control && !e.Alt && !e.Shift && e.KeyCode == Keys.R)
+            {
+                backingShortcutCount++;
+            }
+        };
+        backingForm.Show();
+        backingForm.Activate();
+
+        using var snapshotImage = new Bitmap(bounds.Width, bounds.Height);
+        using (var graphics = Graphics.FromImage(snapshotImage))
+        {
+            graphics.Clear(initialColor);
+        }
+        using var snapshot = new DesktopSnapshot((Bitmap)snapshotImage.Clone(), bounds);
+        var width = new ToolWidthController(ToolWidthRange.Create(1, 32), 4);
+        var annotations = new LiveAnnotationSessionFactory(
+            new PreviewClipboardService(),
+            new DrawingToolCoefficients(),
+            AnnotationRotationStep.DefaultDegrees,
+            DrawingCursorShape.Circle);
+        var overlay = new CaptureOverlayForm(
+            snapshot,
+            new PreviewImageSaveService(),
+            new PreviewClipboardService(),
+            new PreviewWindowLocator(),
+            new PreviewModuleManager(),
+            SelectionMoveAnnotationStrategyFactory.Create(StickerSelectionMoveMode.FollowSelection),
+            width,
+            annotations,
+            new Dictionary<string, bool>(),
+            new Dictionary<string, int>(),
+            Path.GetTempPath(),
+            ScreenshotFileNameMode.DateTime);
+
+        Task? overlaySession = null;
+        try
+        {
+            overlaySession = CaptureOverlayPresenter.ShowAsync(overlay);
+            System.Windows.Forms.Application.DoEvents();
+
+            var expectedSelection = Rectangle.FromLTRB(190, 130, 560, 350);
+            CompleteOverlaySelection(
+                overlay,
+                expectedSelection.Location,
+                new Point(expectedSelection.Right, expectedSelection.Bottom));
+            System.Windows.Forms.Application.DoEvents();
+
+            var editor = (CaptureAnnotationEditor)typeof(CaptureOverlayForm)
+                .GetField(
+                    "_annotationEditor",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(overlay)!;
+            var shape = new ShapeAnnotation(
+                EditorTool.Rectangle,
+                new Rectangle(
+                    expectedSelection.Left + 120,
+                    expectedSelection.Top + 70,
+                    110,
+                    70),
+                Color.Magenta,
+                5F);
+            var text = new TextAnnotation(
+                new Rectangle(
+                    expectedSelection.Left + 45,
+                    expectedSelection.Top + 35,
+                    80,
+                    32),
+                "刷新保留",
+                Color.Yellow,
+                18F);
+            editor.Document.Add(shape);
+            editor.Document.Add(text);
+            editor.Selection.SelectOnly(shape);
+            overlay.Invalidate(expectedSelection);
+            System.Windows.Forms.Application.DoEvents();
+
+            var originalShapeBounds = shape.Bounds;
+            var originalTextBounds = text.Bounds;
+            AssertSelectionPrimary(editor, shape, "添加标注后");
+            using (var originalBackground = ((ICaptureFeatureHost)overlay).CopyDesktopSelection())
+            {
+                AssertBitmapSolidColor(
+                    originalBackground,
+                    initialColor,
+                    "刷新前截图背景不是最初的静态画面");
+            }
+
+            var outsidePoint = new Point(bounds.Left + 60, bounds.Top + 60);
+            MovePointer(outsidePoint);
+            System.Windows.Forms.Application.DoEvents();
+            AssertSelectionPrimary(editor, shape, "移动到框外后");
+            MouseEvent(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+            MouseEvent(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+            System.Windows.Forms.Application.DoEvents();
+            AssertSelectionPrimary(editor, shape, "点击框外后");
+            backingForm.Activate();
+            backingForm.Focus();
+            System.Windows.Forms.Application.DoEvents();
+            AssertSelectionPrimary(editor, shape, "底层窗口激活后");
+
+            SetBackingColor(backingForm, firstRefreshColor);
+            PressControlRInside(
+                overlay,
+                new Point(
+                    bounds.Left + expectedSelection.Left + 20,
+                    bounds.Top + expectedSelection.Top + 20),
+                "首次刷新前");
+            AssertRefreshStatePreserved(
+                overlay,
+                editor,
+                expectedSelection,
+                shape,
+                originalShapeBounds,
+                text,
+                originalTextBounds);
+            using (var firstBackground = ((ICaptureFeatureHost)overlay).CopyDesktopSelection())
+            {
+                AssertBitmapSolidColor(
+                    firstBackground,
+                    firstRefreshColor,
+                    "框内 Ctrl+R 没有采集到当前桌面，或把边框、工具栏、标注层截入了底图");
+            }
+            using (var firstComposite = ((ICaptureArtifactHost)overlay).RenderSelection())
+            {
+                var localShapeBounds = new Rectangle(
+                    shape.Bounds.X - expectedSelection.X,
+                    shape.Bounds.Y - expectedSelection.Y,
+                    shape.Bounds.Width,
+                    shape.Bounds.Height);
+                if (!ContainsColorNear(firstComposite, localShapeBounds, Color.Magenta, 8))
+                {
+                    throw new InvalidOperationException("刷新后的最终合成没有保留原矩形标注。");
+                }
+            }
+
+            SetBackingColor(backingForm, blockedRefreshColor);
+            PressControlROutside(overlay, backingForm, outsidePoint);
+            if (backingShortcutCount != 1)
+            {
+                throw new InvalidOperationException(
+                    $"鼠标位于截图框外时 Ctrl+R 没有交还底层窗口。Count={backingShortcutCount}");
+            }
+            using (var unchangedBackground = ((ICaptureFeatureHost)overlay).CopyDesktopSelection())
+            {
+                AssertBitmapSolidColor(
+                    unchangedBackground,
+                    firstRefreshColor,
+                    "鼠标位于截图框外时仍然错误刷新了截图背景");
+            }
+
+            SetBackingColor(backingForm, secondRefreshColor);
+            PressControlRInside(
+                overlay,
+                new Point(
+                    bounds.Left + expectedSelection.Left + 30,
+                    bounds.Top + expectedSelection.Top + 30),
+                "连续刷新前");
+
+            AssertRefreshStatePreserved(
+                overlay,
+                editor,
+                expectedSelection,
+                shape,
+                originalShapeBounds,
+                text,
+                originalTextBounds);
+            using (var secondBackground = ((ICaptureFeatureHost)overlay).CopyDesktopSelection())
+            {
+                AssertBitmapSolidColor(
+                    secondBackground,
+                    secondRefreshColor,
+                    "连续第二次刷新没有得到最新桌面画面");
+            }
+
+            typeof(CaptureOverlayForm)
+                .GetMethod(
+                    "BeginExistingTextEditor",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay, [text]);
+            var activeTextEditor = (TransparentTextEditorControl?)typeof(CaptureOverlayForm)
+                .GetField(
+                    "_textEditor",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(overlay) ??
+                throw new InvalidOperationException("无法进入文字重新编辑状态。");
+            activeTextEditor.Text = "刷新保留-编辑中";
+            activeTextEditor.SelectText(2, 4);
+            var editorBoundsBeforeRefresh = activeTextEditor.Bounds;
+
+            SetBackingColor(backingForm, editingRefreshColor);
+            PressControlRInside(
+                overlay,
+                new Point(
+                    bounds.Left + expectedSelection.Right - 30,
+                    bounds.Top + expectedSelection.Bottom - 30),
+                "文字编辑刷新前");
+
+            var textEditorAfterRefresh = (TransparentTextEditorControl?)typeof(CaptureOverlayForm)
+                .GetField(
+                    "_textEditor",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(overlay);
+            if (!ReferenceEquals(textEditorAfterRefresh, activeTextEditor) ||
+                activeTextEditor.IsDisposed ||
+                activeTextEditor.Text != "刷新保留-编辑中" ||
+                activeTextEditor.SelectionStart != 2 ||
+                activeTextEditor.SelectionLength != 4 ||
+                activeTextEditor.Bounds != editorBoundsBeforeRefresh ||
+                !ReferenceEquals(editor.ActiveTextEditAnnotation, text))
+            {
+                throw new InvalidOperationException(
+                    "刷新没有保持文字输入框、未提交内容、文本选区或编辑位置。");
+            }
+            if (((ICaptureFeatureHost)overlay).Selection != expectedSelection)
+            {
+                throw new InvalidOperationException("文字编辑期间刷新改变了截图框位置或尺寸。");
+            }
+            using (var editingBackground = ((ICaptureFeatureHost)overlay).CopyDesktopSelection())
+            {
+                AssertBitmapSolidColor(
+                    editingBackground,
+                    editingRefreshColor,
+                    "文字编辑期间 Ctrl+R 没有刷新纯背景层");
+            }
+
+            Thread.Sleep(120);
+            System.Windows.Forms.Application.DoEvents();
+            using var captured = new Bitmap(bounds.Width, bounds.Height);
+            using (var graphics = Graphics.FromImage(captured))
+            {
+                graphics.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
+            }
+            var fullOutputPath = Path.GetFullPath(outputPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+            captured.Save(fullOutputPath, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        finally
+        {
+            KeybdEvent(VirtualKeyR, 0, KeyEventKeyUp, UIntPtr.Zero);
+            KeybdEvent(VirtualKeyControl, 0, KeyEventKeyUp, UIntPtr.Zero);
+            overlay.Close();
+            System.Windows.Forms.Application.DoEvents();
+            overlaySession?.GetAwaiter().GetResult();
+            backingForm.Close();
+            Cursor.Position = originalPointer;
+            System.Windows.Forms.Application.DoEvents();
+        }
+    }
+
+    private static void RunCaptureDisposeSmoke()
+    {
+        var screen = Screen.PrimaryScreen ??
+                     throw new InvalidOperationException("找不到主显示器。");
+        var bounds = new Rectangle(screen.Bounds.Location, new Size(320, 200));
+        using var snapshotImage = new Bitmap(bounds.Width, bounds.Height);
+        using var snapshot = new DesktopSnapshot((Bitmap)snapshotImage.Clone(), bounds);
+        var overlay = new CaptureOverlayForm(
+            snapshot,
+            new PreviewImageSaveService(),
+            new PreviewClipboardService(),
+            new PreviewWindowLocator(),
+            new PreviewModuleManager(includeScreenRecording: false),
+            SelectionMoveAnnotationStrategyFactory.Create(StickerSelectionMoveMode.FollowSelection),
+            new ToolWidthController(ToolWidthRange.Create(1, 32), 4),
+            new LiveAnnotationSessionFactory(
+                new PreviewClipboardService(),
+                new DrawingToolCoefficients(),
+                AnnotationRotationStep.DefaultDegrees,
+                DrawingCursorShape.Circle),
+            new Dictionary<string, bool>(),
+            new Dictionary<string, int>(),
+            Path.GetTempPath(),
+            ScreenshotFileNameMode.DateTime);
+
+        var overlaySession = CaptureOverlayPresenter.ShowAsync(overlay);
+        System.Windows.Forms.Application.DoEvents();
+        overlay.Close();
+        System.Windows.Forms.Application.DoEvents();
+        overlaySession.GetAwaiter().GetResult();
+
+        // A modeless Form disposes itself when closed. MainForm's using scope then
+        // disposes it again, so this second call is the production regression case.
+        overlay.Dispose();
+    }
+
+    private static void CompleteOverlaySelection(
+        CaptureOverlayForm overlay,
+        Point start,
+        Point end)
+    {
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "BeginManualSelection",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, [start, Rectangle.Empty]);
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "HandleMouseMove",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay,
+            [
+                overlay,
+                new MouseEventArgs(MouseButtons.Left, 0, end.X, end.Y, 0)
+            ]);
+        typeof(CaptureOverlayForm)
+            .GetMethod(
+                "HandleMouseUp",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay,
+            [
+                overlay,
+                new MouseEventArgs(MouseButtons.Left, 1, end.X, end.Y, 0)
+            ]);
+    }
+
+    private static void SetBackingColor(Form backingForm, Color color)
+    {
+        backingForm.BackColor = color;
+        backingForm.Refresh();
+        System.Windows.Forms.Application.DoEvents();
+    }
+
+    private static void PressControlR()
+    {
+        KeybdEvent(VirtualKeyControl, 0, 0, UIntPtr.Zero);
+        KeybdEvent(VirtualKeyR, 0, 0, UIntPtr.Zero);
+        KeybdEvent(VirtualKeyR, 0, KeyEventKeyUp, UIntPtr.Zero);
+        KeybdEvent(VirtualKeyControl, 0, KeyEventKeyUp, UIntPtr.Zero);
+    }
+
+    private static void PressControlRInside(
+        CaptureOverlayForm overlay,
+        Point screenPoint,
+        string stage)
+    {
+        var previousClip = Cursor.Clip;
+        try
+        {
+            Cursor.Clip = new Rectangle(screenPoint, new Size(1, 1));
+            MovePointer(screenPoint);
+            MouseEvent(MouseEventMove | MouseEventMoveNoCoalesce, 0, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(120);
+            System.Windows.Forms.Application.DoEvents();
+            AssertBackgroundRefreshHotkeyReady(overlay, stage);
+            PressControlR();
+            System.Windows.Forms.Application.DoEvents();
+        }
+        finally
+        {
+            Cursor.Clip = previousClip;
+        }
+    }
+
+    private static void PressControlROutside(
+        CaptureOverlayForm overlay,
+        Form backingForm,
+        Point screenPoint)
+    {
+        var previousClip = Cursor.Clip;
+        try
+        {
+            Cursor.Clip = new Rectangle(screenPoint, new Size(1, 1));
+            MovePointer(screenPoint);
+            MouseEvent(MouseEventMove | MouseEventMoveNoCoalesce, 0, 0, 0, UIntPtr.Zero);
+            MouseEvent(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+            MouseEvent(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(120);
+            System.Windows.Forms.Application.DoEvents();
+            backingForm.Activate();
+            backingForm.Focus();
+            System.Windows.Forms.Application.DoEvents();
+
+            var hotkey = (CaptureBackgroundRefreshHotkeyRegistration?)typeof(CaptureOverlayForm)
+                .GetField(
+                    "_backgroundRefreshHotkey",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(overlay);
+            if (hotkey?.IsRegistered == true)
+            {
+                throw new InvalidOperationException("鼠标位于截图框外时仍然占用了 Ctrl+R。");
+            }
+
+            PressControlR();
+            System.Windows.Forms.Application.DoEvents();
+        }
+        finally
+        {
+            Cursor.Clip = previousClip;
+        }
+    }
+
+    private static void AssertBackgroundRefreshHotkeyReady(
+        CaptureOverlayForm overlay,
+        string stage)
+    {
+        var hotkey = (CaptureBackgroundRefreshHotkeyRegistration?)typeof(CaptureOverlayForm)
+            .GetField(
+                "_backgroundRefreshHotkey",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(overlay);
+        var pointer = overlay.PointToClient(Cursor.Position);
+        var canRefresh = (bool)typeof(CaptureOverlayForm)
+            .GetMethod(
+                "CanRefreshCaptureBackground",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(overlay, [pointer])!;
+        if (hotkey is null || !hotkey.IsRegistered)
+        {
+            throw new InvalidOperationException(
+                $"{stage}动态 Ctrl+R 没有注册。CanRefresh={canRefresh}, " +
+                $"Pointer={pointer}, Selection={((ICaptureFeatureHost)overlay).Selection}, " +
+                $"Capture={overlay.Capture}, Visible={overlay.Visible}, " +
+                $"Win32Error={hotkey?.LastError}");
+        }
+    }
+
+    private static void AssertRefreshStatePreserved(
+        CaptureOverlayForm overlay,
+        CaptureAnnotationEditor editor,
+        Rectangle expectedSelection,
+        ShapeAnnotation shape,
+        Rectangle expectedShapeBounds,
+        TextAnnotation text,
+        Rectangle expectedTextBounds)
+    {
+        var actualSelection = ((ICaptureFeatureHost)overlay).Selection;
+        if (actualSelection != expectedSelection)
+        {
+            throw new InvalidOperationException(
+                $"刷新改变了截图框位置或尺寸。Expected={expectedSelection}, Actual={actualSelection}");
+        }
+        if (editor.Document.Count != 2 ||
+            !editor.Document.Contains(shape) ||
+            !editor.Document.Contains(text))
+        {
+            throw new InvalidOperationException("刷新清空或替换了原有编辑文档。");
+        }
+        if (!ReferenceEquals(editor.Selection.Primary, shape))
+        {
+            throw new InvalidOperationException("刷新改变了编辑元素的选中状态。");
+        }
+        if (shape.Bounds != expectedShapeBounds ||
+            text.Bounds != expectedTextBounds ||
+            shape.Color.ToArgb() != Color.Magenta.ToArgb() ||
+            text.Color.ToArgb() != Color.Yellow.ToArgb() ||
+            text.Text != "刷新保留")
+        {
+            throw new InvalidOperationException("刷新改变了编辑元素的位置、大小、颜色或内容。");
+        }
+    }
+
+    private static void AssertSelectionPrimary(
+        CaptureAnnotationEditor editor,
+        MovableAnnotation expected,
+        string stage)
+    {
+        if (!ReferenceEquals(editor.Selection.Primary, expected))
+        {
+            throw new InvalidOperationException(
+                $"{stage}编辑元素的选中状态已改变。" +
+                $"Count={editor.Selection.Count}, Primary={editor.Selection.Primary?.GetType().Name ?? "null"}");
+        }
+    }
+
+    private static void AssertBitmapSolidColor(Bitmap bitmap, Color expected, string message)
+    {
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                if (!ColorsAreNear(bitmap.GetPixel(x, y), expected, 2))
+                {
+                    throw new InvalidOperationException(
+                        $"{message} Pixel=({x},{y}), Expected={expected}, Actual={bitmap.GetPixel(x, y)}");
+                }
+            }
+        }
+    }
+
+    private static bool ContainsColorNear(
+        Bitmap bitmap,
+        Rectangle bounds,
+        Color expected,
+        int tolerance)
+    {
+        bounds.Intersect(new Rectangle(Point.Empty, bitmap.Size));
+        for (var y = bounds.Top; y < bounds.Bottom; y++)
+        {
+            for (var x = bounds.Left; x < bounds.Right; x++)
+            {
+                if (ColorsAreNear(bitmap.GetPixel(x, y), expected, tolerance))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static bool ColorsAreNear(Color actual, Color expected, int tolerance) =>
+        Math.Abs(actual.R - expected.R) <= tolerance &&
+        Math.Abs(actual.G - expected.G) <= tolerance &&
+        Math.Abs(actual.B - expected.B) <= tolerance;
 
     private static void RunScreenshotSettingsPageSmoke(string outputPath)
     {
@@ -1401,9 +2413,14 @@ internal static class Program
             TopMost = true
         };
         using var page = new ScreenshotSettingsPage(
-            new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q),
-            startMinimized: true,
-            startWithWindows: true,
+            [
+                new HotkeyDefinition(
+                    HotkeyModifiers.Control | HotkeyModifiers.Alt,
+                    (int)Keys.Q),
+                new HotkeyDefinition(
+                    HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                    (int)Keys.A)
+            ],
             dismissSaveNotificationBeforeCapture: false,
             hideMainWindowDuringCapture: true)
         {
@@ -1418,14 +2435,45 @@ internal static class Program
         Thread.Sleep(120);
         System.Windows.Forms.Application.DoEvents();
 
-        if (page.Hotkey !=
-                new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q) ||
-            !page.StartMinimized ||
-            !page.StartWithWindows ||
+        var thirdHotkeyInput = page.Controls
+            .Find("ScreenshotHotkeyInput3", searchAllChildren: true)
+            .OfType<HotkeyInputBox>()
+            .Single();
+        var processCmdKey = typeof(HotkeyInputBox).GetMethod(
+            "ProcessCmdKey",
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            [typeof(Message).MakeByRefType(), typeof(Keys)],
+            modifiers: null) ?? throw new InvalidOperationException(
+                "快捷键输入框没有提供命令键处理入口。");
+        object?[] commandArguments =
+        [
+            Message.Create(thirdHotkeyInput.Handle, 0, IntPtr.Zero, IntPtr.Zero),
+            Keys.Control | Keys.Shift | Keys.X
+        ];
+        var commandHandled = (bool)(processCmdKey.Invoke(
+            thirdHotkeyInput,
+            commandArguments) ?? false);
+
+        if (!page.Hotkeys.SequenceEqual(
+            [
+                new HotkeyDefinition(
+                    HotkeyModifiers.Control | HotkeyModifiers.Alt,
+                    (int)Keys.Q),
+                new HotkeyDefinition(
+                    HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                    (int)Keys.A),
+                HotkeyDefinition.Default
+            ]) ||
+            !commandHandled ||
             page.DismissSaveNotificationBeforeCapture ||
             !page.HideMainWindowDuringCapture)
         {
-            throw new InvalidOperationException("截图设置页面没有恢复快捷键、启动方式或截图行为选项。");
+            throw new InvalidOperationException(
+                $"截图设置页面没有恢复快捷键或截图行为选项。当前绑定：" +
+                HotkeyBindings.ToDisplayText(page.Hotkeys) +
+                $"；命令键已处理：{commandHandled}");
         }
         var settingRows = page.Controls
             .OfType<Panel>()
@@ -1437,7 +2485,8 @@ internal static class Program
             .ToArray();
         if (settingRows.Length != 5 || settingRows.Any(row =>
                 row.Controls.Cast<Control>().Count(control =>
-                    control is CheckBox or TextBox) != 1))
+                    control is CheckBox or TextBox ||
+                    string.Equals(control.Tag as string, "SettingInput", StringComparison.Ordinal)) != 1))
         {
             throw new InvalidOperationException("截图设置页面没有使用五行单列设置项。");
         }
@@ -1525,7 +2574,8 @@ internal static class Program
         {
             throw new InvalidOperationException("未安装长截图模块时仍显示了长截图设置入口。");
         }
-        if (!navigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
+        if (!navigationTexts.Contains("通用设置", StringComparer.Ordinal) ||
+            !navigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
             !navigationTexts.Contains("插件模块", StringComparer.Ordinal) ||
             !navigationTexts.Contains("软件更新", StringComparer.Ordinal) ||
             navigationTexts.Contains("快捷键设置", StringComparer.Ordinal) ||
@@ -1535,7 +2585,7 @@ internal static class Program
         }
         if (!navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
             shell.SelectedPageId != "screenshot-tool.screen-recording.settings" ||
-            !shell.VersionText.Equals("v1.11.6", StringComparison.Ordinal))
+            !shell.VersionText.Equals("v1.11.7", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"主界面没有正确显示录屏分页或版本号，当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");
@@ -1581,7 +2631,8 @@ internal static class Program
         {
             throw new InvalidOperationException("未安装录屏和长截图模块时仍显示了模块设置入口。");
         }
-        if (!emptyNavigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
+        if (!emptyNavigationTexts.Contains("通用设置", StringComparer.Ordinal) ||
+            !emptyNavigationTexts.Contains("截图设置", StringComparer.Ordinal) ||
             !emptyNavigationTexts.Contains("插件模块", StringComparer.Ordinal) ||
             !emptyNavigationTexts.Contains("软件更新", StringComparer.Ordinal) ||
             emptyNavigationTexts.Contains("快捷键设置", StringComparer.Ordinal) ||
@@ -2035,10 +3086,16 @@ internal static class Program
 
     private const uint MouseEventLeftDown = 0x0002;
     private const uint MouseEventLeftUp = 0x0004;
+    private const uint MouseEventRightDown = 0x0008;
+    private const uint MouseEventRightUp = 0x0010;
     private const uint MouseEventMove = 0x0001;
     private const uint MouseEventMoveNoCoalesce = 0x2000;
     private const uint WindowMessageLeftButtonDown = 0x0201;
     private const uint WindowMessageLeftButtonUp = 0x0202;
+    private const byte VirtualKeyControl = 0x11;
+    private const byte VirtualKeyR = 0x52;
+    private const uint KeyEventKeyUp = 0x0002;
+    private const uint GetRootAncestor = 2;
     private static void MovePointer(Point screenPoint) => Cursor.Position = screenPoint;
 
     [DllImport("user32.dll", EntryPoint = "mouse_event")]
@@ -2049,8 +3106,18 @@ internal static class Program
         uint data,
         UIntPtr extraInfo);
 
+    [DllImport("user32.dll", EntryPoint = "keybd_event")]
+    private static extern void KeybdEvent(
+        byte virtualKey,
+        byte scanCode,
+        uint flags,
+        UIntPtr extraInfo);
+
     [DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(Point point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern IntPtr SendMessage(
@@ -2094,7 +3161,7 @@ internal sealed class PreviewHotkeyService : IGlobalHotkeyService
         remove { }
     }
 
-    public bool TryRegister(HotkeyDefinition hotkey, out string? error)
+    public bool TryRegister(IReadOnlyList<HotkeyDefinition> hotkeys, out string? error)
     {
         error = null;
         return true;
@@ -2144,7 +3211,8 @@ internal sealed class PreviewImageSaveService : IImageSaveService
         Bitmap image,
         string outputFolder,
         ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime,
-        IReadOnlyList<string>? imageTexts = null) =>
+        IReadOnlyList<string>? imageTexts = null,
+        bool organizeByDate = false) =>
         throw new NotSupportedException("界面预览不保存截图。");
 }
 
@@ -2160,6 +3228,24 @@ internal sealed class PreviewClipboardService : IClipboardService
 
     public void SetText(string text)
     {
+    }
+}
+
+internal sealed class PreviewTextTranslationService(string translatedText) :
+    ITextTranslationService
+{
+    public int CallCount { get; private set; }
+
+    public string? LastText { get; private set; }
+
+    public Task<string> TranslateToSimplifiedChineseAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        LastText = text;
+        return Task.FromResult(translatedText);
     }
 }
 

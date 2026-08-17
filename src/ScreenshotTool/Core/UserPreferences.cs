@@ -1,3 +1,4 @@
+using ScreenshotTool.Abstractions;
 using ScreenshotTool.Contracts;
 
 namespace ScreenshotTool.Core;
@@ -51,6 +52,9 @@ internal sealed class UserPreferences
 
     public bool LongCaptureSafetyChecksEnabled { get; set; }
 
+    public Dictionary<string, ModuleActivationPreference> ModuleActivationPreferences { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public Dictionary<string, bool> ModuleBooleanPreferences { get; set; } =
         new(StringComparer.Ordinal);
 
@@ -62,6 +66,10 @@ internal sealed class UserPreferences
 
     public ScreenshotFileNameMode ScreenshotFileNameMode { get; set; } =
         ScreenshotFileNameMode.DateTime;
+
+    public bool OrganizeScreenshotsByDate { get; set; }
+
+    public string ScreenshotDateParentFolder { get; set; } = string.Empty;
 
     public bool DismissSaveNotificationBeforeCapture { get; set; } = true;
 

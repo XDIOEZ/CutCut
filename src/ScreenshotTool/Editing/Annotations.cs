@@ -277,6 +277,8 @@ internal sealed class TextAnnotation : MovableAnnotation
 
     public override AnnotationCategory Category => AnnotationCategory.Sticker;
 
+    public override bool SupportsResize => true;
+
     public override void SetBounds(Rectangle bounds)
     {
         FontSize = AnnotationScaling.ScaleFontSize(FontSize, Bounds, bounds);

@@ -1,0 +1,4 @@
+interface:
+  display_name: "轻截识别结果导航"
+  short_description: "快速定位并安全修改轻截的文字识别、二维码与结果展示系统"
+  default_prompt: "使用 $navigate-ocr-results 定位并修改轻截的识别与结果系统，同时检查模块联动并更新滚动日志。"

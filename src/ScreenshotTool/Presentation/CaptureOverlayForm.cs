@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using ScreenshotTool.Abstractions;
 using ScreenshotTool.Contracts;
 using ScreenshotTool.Core;
@@ -10,15 +11,17 @@ namespace ScreenshotTool.Presentation;
 internal sealed class CaptureOverlayForm : Form,
     ILiveCaptureFeatureHost,
     ICaptureArtifactHost,
-    ICaptureTextResultHost,
+    ITranslatableCaptureTextResultHost,
     IConfigurableCaptureAnnotationHost
 {
     private readonly DesktopSnapshot _snapshot;
-    private readonly Bitmap _dimmedImage;
+    private readonly CaptureBackgroundLayer _backgroundLayer;
     private readonly IImageSaveService _imageSaveService;
     private readonly IClipboardService _clipboardService;
+    private readonly ITextTranslationService? _textTranslationService;
     private readonly IWindowLocator _windowLocator;
     private readonly CaptureFeatureSession _featureSession;
+    private bool _resourcesDisposed;
     private readonly ISelectionMoveAnnotationStrategy _selectionMoveAnnotationStrategy;
     private readonly ToolWidthController _toolWidthController;
     private readonly int _annotationRotationStepDegrees;
@@ -30,9 +33,17 @@ internal sealed class CaptureOverlayForm : Form,
     private readonly IReadOnlyDictionary<string, bool> _booleanFeaturePreferences;
     private readonly IReadOnlyDictionary<string, int> _integerFeaturePreferences;
     private readonly ScreenshotFileNameMode _screenshotFileNameMode;
-    private readonly SelectionRedrawGuard _selectionRedrawGuard = new();
+    private readonly bool _organizeScreenshotsByDate;
     private readonly CaptureAnnotationEditor _annotationEditor;
     private readonly LiveAnnotationSessionFactory _annotationSessionFactory;
+    private readonly LiveAnnotationPointerHook _outsidePointerHook;
+    // The pointer hook updates immediately; this timer reconciles synthetic pointer moves
+    // and focus transitions so Ctrl+R is never left registered outside the selection.
+    private readonly System.Windows.Forms.Timer _backgroundRefreshHotkeyTimer = new()
+    {
+        Interval = 100
+    };
+    private CaptureBackgroundRefreshHotkeyRegistration? _backgroundRefreshHotkey;
     private AnnotationSelection _annotationSelection => _annotationEditor.Selection;
     private readonly string _outputFolder;
     private AnnotationDocument _document => _annotationEditor.Document;
@@ -83,6 +94,8 @@ internal sealed class CaptureOverlayForm : Form,
     private Rectangle _replacementFrameOrigin;
     private bool _featureCommandRunning;
     private bool _liveCaptureOverlayParked;
+    private bool _updatingInteractionRegion;
+    private bool _backgroundRefreshInProgress;
     private bool _annotationSnappingEnabled;
     private bool _finished;
 
@@ -107,12 +120,15 @@ internal sealed class CaptureOverlayForm : Form,
         int ctrlDragStepPixels = AnnotationLayoutOptions.DefaultCtrlDragStepPixels,
         Bitmap? initialEditImage = null,
         AnnotationMoveActivationMode annotationMoveActivationMode =
-            AnnotationMoveActivationMode.HoldAlt)
+            AnnotationMoveActivationMode.HoldAlt,
+        ITextTranslationService? textTranslationService = null,
+        bool organizeScreenshotsByDate = false)
     {
         _snapshot = snapshot;
-        _dimmedImage = CreateDimmedImage(snapshot.Image);
+        _backgroundLayer = new CaptureBackgroundLayer(snapshot.Image);
         _imageSaveService = imageSaveService;
         _clipboardService = clipboardService;
+        _textTranslationService = textTranslationService;
         _windowLocator = windowLocator;
         _selectionMoveAnnotationStrategy = selectionMoveAnnotationStrategy;
         _toolWidthController = toolWidthController;
@@ -120,6 +136,7 @@ internal sealed class CaptureOverlayForm : Form,
         _annotationRotationStepDegrees = AnnotationRotationStep.Normalize(
             annotationRotationStepDegrees);
         _annotationEditor = new CaptureAnnotationEditor(drawingToolCoefficients);
+        _outsidePointerHook = new LiveAnnotationPointerHook(HandleOutsidePointerHookEvent);
         _drawingCursorIndicator = new DrawingCursorIndicator(drawingCursorShape);
         _annotationSnappingEnabled = annotationSnappingEnabled;
         _annotationSnapThresholdPixels = AnnotationLayoutOptions.NormalizeSnapThreshold(
@@ -137,6 +154,7 @@ internal sealed class CaptureOverlayForm : Form,
             StringComparer.Ordinal);
         _outputFolder = outputFolder;
         _screenshotFileNameMode = screenshotFileNameMode;
+        _organizeScreenshotsByDate = organizeScreenshotsByDate;
 
         Text = "轻截 - 选择截图区域";
         FormBorderStyle = FormBorderStyle.None;
@@ -163,6 +181,9 @@ internal sealed class CaptureOverlayForm : Form,
         _toolbar.Visible = false;
         _widthButton = (Button)_toolbar.Controls.Find("WidthButton", false)[0];
         _toolbar.MouseEnter += HandleEditorSurfaceLeave;
+        _toolbar.VisibleChanged += (_, _) => UpdateInteractionRegion();
+        _toolbar.LocationChanged += (_, _) => UpdateInteractionRegion();
+        _toolbar.SizeChanged += (_, _) => UpdateInteractionRegion();
         foreach (Control control in _toolbar.Controls)
         {
             control.MouseEnter += HandleEditorSurfaceLeave;
@@ -176,10 +197,15 @@ internal sealed class CaptureOverlayForm : Form,
         MouseUp += HandleMouseUp;
         MouseWheel += HandleEditorMouseWheel;
         MouseLeave += HandleEditorSurfaceLeave;
+        _backgroundRefreshHotkeyTimer.Tick += (_, _) =>
+            UpdateBackgroundRefreshHotkeyRegistration();
         Deactivate += (_, _) =>
         {
             HideDrawingCursorIndicator();
-            CancelTextEditor(commit: true);
+            if (!_backgroundRefreshInProgress)
+            {
+                CancelTextEditor(commit: true);
+            }
         };
 
         if (initialEditImage is not null)
@@ -217,6 +243,21 @@ internal sealed class CaptureOverlayForm : Form,
 
     void ICaptureTextResultHost.ShowTextResult(string title, string text)
     {
+        ShowTextResult(title, text, textTranslationService: null);
+    }
+
+    void ITranslatableCaptureTextResultHost.ShowTranslatableTextResult(
+        string title,
+        string text)
+    {
+        ShowTextResult(title, text, _textTranslationService);
+    }
+
+    private void ShowTextResult(
+        string title,
+        string text,
+        ITextTranslationService? textTranslationService)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(text);
 
@@ -229,7 +270,8 @@ internal sealed class CaptureOverlayForm : Form,
             title,
             text,
             selectionScreenBounds,
-            _clipboardService);
+            _clipboardService,
+            textTranslationService);
         resultWindow.Show();
     }
 
@@ -252,9 +294,120 @@ internal sealed class CaptureOverlayForm : Form,
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        _backgroundRefreshHotkey ??= new CaptureBackgroundRefreshHotkeyRegistration(Handle);
+        _backgroundRefreshHotkeyTimer.Start();
+        _outsidePointerHook.Start();
         Activate();
         Focus();
         UpdateHoverWindowSelection(PointToClient(Cursor.Position), force: true);
+        UpdateInteractionRegion();
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        UpdateInteractionRegion();
+    }
+
+    internal bool HandleOutsidePointerHookEvent(LiveAnnotationPointerEvent pointerEvent)
+    {
+        if (_finished || IsDisposed || !IsHandleCreated || !Visible)
+        {
+            return false;
+        }
+
+        var pointer = PointToClient(pointerEvent.ScreenLocation);
+        UpdateBackgroundRefreshHotkeyRegistration(pointer);
+        var interactiveAreas = GetInteractiveAreas();
+        if (!CaptureOverlayInteractionLayout.ShouldStartSelectionRedraw(
+                _hasSelection,
+                CaptureSelectionRedrawPolicy.AllowsSelectionRedraw(
+                    _replacementCaptureImage is not null) &&
+                !_liveCaptureOverlayParked,
+                IsControlPhysicallyPressed(),
+                pointerEvent.Kind == LiveAnnotationPointerEventKind.LeftDown,
+                ClientRectangle,
+                interactiveAreas,
+                pointer))
+        {
+            return false;
+        }
+
+        _controlDoubleTapDetector.CancelCurrentTap();
+        CancelTextEditor(commit: true);
+        Activate();
+        Focus();
+        BeginManualSelection(Geometry.Clamp(pointer, ClientRectangle), _selection);
+        return true;
+    }
+
+    private IReadOnlyList<Rectangle> GetInteractiveAreas()
+    {
+        var margin = Math.Max(
+            GetStickerHandleSize() + 3,
+            Math.Max(6, DeviceDpi * 6 / 96) + 2);
+        return CaptureOverlayInteractionLayout.GetInteractiveAreas(
+            ClientRectangle,
+            _selection,
+            margin,
+            _toolbar.Bounds,
+            _toolbar.Visible,
+            _textEditor?.Bounds ?? Rectangle.Empty,
+            GetSizeBadgeBounds());
+    }
+
+    private Rectangle GetSizeBadgeBounds()
+    {
+        if (!_hasSelection || _selection.IsEmpty)
+        {
+            return Rectangle.Empty;
+        }
+
+        var captureSize = _replacementCaptureImage?.Size ?? _selection.Size;
+        var text = $"{captureSize.Width} × {captureSize.Height}";
+        using var font = new Font("Segoe UI", 9F, FontStyle.Bold);
+        return GetSizeBadgeBounds(_selection, text, font);
+    }
+
+    private void UpdateInteractionRegion()
+    {
+        if (_updatingInteractionRegion || !IsHandleCreated || IsDisposed)
+        {
+            return;
+        }
+
+        _updatingInteractionRegion = true;
+        try
+        {
+            var constrainToEditor = _hasSelection &&
+                                    !_selection.IsEmpty &&
+                                    !Capture &&
+                                    !_isSelecting &&
+                                    !_isPendingWindowSelection &&
+                                    !_liveCaptureOverlayParked;
+            Region? nextRegion = null;
+            if (constrainToEditor)
+            {
+                var areas = GetInteractiveAreas();
+                if (areas.Count > 0)
+                {
+                    nextRegion = new Region(areas[0]);
+                    foreach (var area in areas.Skip(1))
+                    {
+                        nextRegion.Union(area);
+                    }
+                }
+            }
+
+            var previousRegion = Region;
+            Region = nextRegion;
+            previousRegion?.Dispose();
+        }
+        finally
+        {
+            _updatingInteractionRegion = false;
+        }
+        UpdateBackgroundRefreshHotkeyRegistration();
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -300,7 +453,7 @@ internal sealed class CaptureOverlayForm : Form,
             else
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                _annotationEditor.Render(e.Graphics, _snapshot.Image);
+                _annotationEditor.Render(e.Graphics, _backgroundLayer.Source);
                 _featureSession.Render(e.Graphics, CaptureRenderTarget.Preview);
                 RenderDraft(e.Graphics);
                 DrawMovableSelection(e.Graphics);
@@ -328,11 +481,15 @@ internal sealed class CaptureOverlayForm : Form,
                 continue;
             }
 
-            graphics.DrawImage(_dimmedImage, paintArea, paintArea, GraphicsUnit.Pixel);
+            graphics.DrawImage(_backgroundLayer.Dimmed, paintArea, paintArea, GraphicsUnit.Pixel);
             var selectedArea = Rectangle.Intersect(GetDisplaySelection(), paintArea);
             if (selectedArea.Width > 0 && selectedArea.Height > 0)
             {
-                graphics.DrawImage(_snapshot.Image, selectedArea, selectedArea, GraphicsUnit.Pixel);
+                graphics.DrawImage(
+                    _backgroundLayer.Source,
+                    selectedArea,
+                    selectedArea,
+                    GraphicsUnit.Pixel);
             }
         }
     }
@@ -340,19 +497,6 @@ internal sealed class CaptureOverlayForm : Form,
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         // OnPaint always covers the invalid region with the cached desktop image.
-    }
-
-    private static Bitmap CreateDimmedImage(Bitmap source)
-    {
-        var dimmed = new Bitmap(source.Width, source.Height,
-            System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-        using var graphics = Graphics.FromImage(dimmed);
-        graphics.CompositingMode = CompositingMode.SourceCopy;
-        graphics.DrawImageUnscaled(source, Point.Empty);
-        graphics.CompositingMode = CompositingMode.SourceOver;
-        using var shade = new SolidBrush(Color.FromArgb(118, 0, 0, 0));
-        graphics.FillRectangle(shade, new Rectangle(Point.Empty, source.Size));
-        return dimmed;
     }
 
     private void InitializeExistingImageEdit(Bitmap image)
@@ -411,7 +555,7 @@ internal sealed class CaptureOverlayForm : Form,
         ? _selection
         : new Rectangle(Point.Empty, _replacementCaptureImage.Size);
 
-    private Bitmap EditingSource => _replacementCaptureImage ?? _snapshot.Image;
+    private Bitmap EditingSource => _replacementCaptureImage ?? _backgroundLayer.Source;
 
     private Point ToEditingPoint(Point clientPoint)
     {
@@ -530,6 +674,7 @@ internal sealed class CaptureOverlayForm : Form,
         }
 
         _featureCommandRunning = true;
+        UpdateBackgroundRefreshHotkeyRegistration();
         button.Enabled = false;
         IDisposable? progressScope = null;
         if (command.UsesIndeterminateProgress &&
@@ -554,6 +699,7 @@ internal sealed class CaptureOverlayForm : Form,
         {
             progressScope?.Dispose();
             _featureCommandRunning = false;
+            UpdateBackgroundRefreshHotkeyRegistration();
             if (!IsDisposed && !button.IsDisposed)
             {
                 button.Enabled = true;
@@ -637,16 +783,6 @@ internal sealed class CaptureOverlayForm : Form,
 
         CancelTextEditor(commit: true);
         var editingPoint = ToEditingPoint(e.Location);
-        if (CaptureSelectionRedrawPolicy.AllowsSelectionRedraw(
-            _replacementCaptureImage is not null) &&
-            _hasSelection &&
-            _selectionRedrawGuard.IsRedrawRequested)
-        {
-            _selectionRedrawGuard.TryBeginRedraw(_document.Count > 0);
-            BeginManualSelection(Geometry.Clamp(e.Location, ClientRectangle), _selection);
-            return;
-        }
-
         var selectionWasCleared = false;
         if (_hasSelection)
         {
@@ -737,19 +873,10 @@ internal sealed class CaptureOverlayForm : Form,
                 return;
             }
 
-            if (selectionWasCleared && !_selectionRedrawGuard.IsRedrawRequested)
+            if (selectionWasCleared)
             {
                 UpdateIdleCursor(e.Location);
-                return;
             }
-
-            if (!_selectionRedrawGuard.TryBeginRedraw(_document.Count > 0))
-            {
-                ShowSelectionRedrawStartHint(e.Location);
-                return;
-            }
-
-            BeginManualSelection(Geometry.Clamp(e.Location, ClientRectangle), _selection);
             return;
         }
 
@@ -828,6 +955,8 @@ internal sealed class CaptureOverlayForm : Form,
 
     private void HandleMouseMove(object? sender, MouseEventArgs e)
     {
+        UpdateBackgroundRefreshHotkeyRegistration(e.Location);
+
         if (_isMovingReplacementFrame)
         {
             var previous = _selection;
@@ -1613,8 +1742,14 @@ internal sealed class CaptureOverlayForm : Form,
 
     private static bool IsControlPressed() => (ModifierKeys & Keys.Control) == Keys.Control;
 
+    private static bool IsControlPhysicallyPressed() =>
+        (GetAsyncKeyState((int)Keys.ControlKey) & 0x8000) != 0;
+
     private static bool IsControlKey(Keys keyCode) =>
         keyCode is Keys.ControlKey or Keys.LControlKey or Keys.RControlKey;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
 
     private StickerHitTarget HitTestMovable(MovableAnnotation annotation, Point point) =>
         AnnotationHandleLayout.HitTest(
@@ -2052,23 +2187,22 @@ internal sealed class CaptureOverlayForm : Form,
             UpdateIdleCursor(PointToClient(Cursor.Position));
         }
 
+        if (CaptureBackgroundRefreshPolicy.IsShortcut(
+                e.KeyCode,
+                e.Control,
+                e.Alt,
+                e.Shift) &&
+            TryRefreshCaptureBackground())
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+
         if (e.KeyCode == Keys.Escape)
         {
             e.SuppressKeyPress = true;
             HandleEscape();
-            return;
-        }
-
-        if (e.Control && e.KeyCode == Keys.W)
-        {
-            e.SuppressKeyPress = true;
-            if (!CaptureSelectionRedrawPolicy.AllowsSelectionRedraw(
-                    _replacementCaptureImage is not null))
-            {
-                return;
-            }
-            CancelTextEditor(commit: true);
-            StartSelectionRedraw();
             return;
         }
 
@@ -2082,7 +2216,13 @@ internal sealed class CaptureOverlayForm : Form,
 
         if (_textEditor is not null)
         {
-            if (e.Control && !e.Alt && e.KeyCode == Keys.Z)
+            if (TextEditorShortcutPolicy.Resolve(e.KeyCode, e.Control) ==
+                TextEditorShortcutAction.SaveScreenshot)
+            {
+                e.SuppressKeyPress = true;
+                SaveSelectionAndClose();
+            }
+            else if (e.Control && !e.Alt && e.KeyCode == Keys.Z)
             {
                 _textEditor.UndoTextChange();
                 e.SuppressKeyPress = true;
@@ -2150,7 +2290,10 @@ internal sealed class CaptureOverlayForm : Form,
         else if (e.Control && e.KeyCode == Keys.C)
         {
             e.SuppressKeyPress = true;
-            CopySelectionAndClose();
+            if (!TryCopySelectedImage())
+            {
+                CopySelectionAndClose();
+            }
         }
         else if (e.Control && e.KeyCode == Keys.V && _hasSelection)
         {
@@ -2559,6 +2702,7 @@ internal sealed class CaptureOverlayForm : Form,
         y = Math.Clamp(y, 8, Math.Max(8, ClientSize.Height - preferred.Height - 8));
         _toolbar.Location = new Point(x, y);
         _toolbar.BringToFront();
+        UpdateInteractionRegion();
     }
 
     private void BeginTextEditor(Point location)
@@ -2636,45 +2780,6 @@ internal sealed class CaptureOverlayForm : Form,
         _textEditor.Focus();
     }
 
-    private void StartSelectionRedraw()
-    {
-        if (!_hasSelection)
-        {
-            return;
-        }
-
-        var marqueeBounds = _annotationMarqueeBounds;
-        _isPendingAnnotationMarquee = false;
-        _isSelectingAnnotations = false;
-        _annotationMarqueeBounds = Rectangle.Empty;
-        Capture = false;
-        InvalidateAnnotationMarqueeTransition(marqueeBounds, Rectangle.Empty);
-        _selectionRedrawGuard.RequestRedraw();
-        _isDrawing = false;
-        _draftPoints.Clear();
-        ClearAnnotationSelection();
-        SelectTool(EditorTool.None);
-        var pointer = Geometry.Clamp(PointToClient(Cursor.Position), ClientRectangle);
-        _toolTip.Show(
-            "已启动重新框选，请按住左键拖动选择新区域。",
-            this,
-            pointer.X + 12,
-            pointer.Y + 18,
-            2200);
-        Cursor = Cursors.Cross;
-    }
-
-    private void ShowSelectionRedrawStartHint(Point pointer)
-    {
-        _toolTip.Show(
-            "如需重新框选，请按 Ctrl+W 启动，再按住左键拖动。",
-            this,
-            pointer.X + 12,
-            pointer.Y + 18,
-            2200);
-        Cursor = Cursors.Default;
-    }
-
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if ((keyData & Keys.KeyCode) == Keys.Escape && (keyData & Keys.Modifiers) == Keys.None)
@@ -2684,6 +2789,128 @@ internal sealed class CaptureOverlayForm : Form,
         }
 
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        if (_backgroundRefreshHotkey?.Matches(message) == true)
+        {
+            _controlDoubleTapDetector.CancelCurrentTap();
+            TryRefreshCaptureBackground();
+            message.Result = nint.Zero;
+            return;
+        }
+
+        base.WndProc(ref message);
+    }
+
+    private bool TryRefreshCaptureBackground()
+    {
+        var pointer = PointToClient(Cursor.Position);
+        if (!CanRefreshCaptureBackground(pointer))
+        {
+            UpdateBackgroundRefreshHotkeyRegistration(pointer);
+            return false;
+        }
+
+        RefreshCaptureBackground();
+        return true;
+    }
+
+    private bool CanRefreshCaptureBackground(Point pointer) =>
+        CaptureBackgroundRefreshPolicy.CanRefresh(
+            _hasSelection,
+            _replacementCaptureImage is null,
+            Visible && IsHandleCreated && !IsDisposed && !_finished && !_liveCaptureOverlayParked,
+            IsBackgroundRefreshInteractionIdle(),
+            _backgroundRefreshInProgress,
+            _selection,
+            pointer);
+
+    private bool IsBackgroundRefreshInteractionIdle() =>
+        !Capture &&
+        !_isSelecting &&
+        !_isPendingWindowSelection &&
+        _activeResizeEdges == SelectionResizeEdges.None &&
+        !_isMovingSelection &&
+        !_isPendingAnnotationMarquee &&
+        !_isSelectingAnnotations &&
+        _activeMovableTarget == StickerHitTarget.None &&
+        !_isDrawing &&
+        !_isPanningReplacement &&
+        !_isMovingReplacementFrame &&
+        !_featureCommandRunning;
+
+    private void UpdateBackgroundRefreshHotkeyRegistration(Point? pointer = null)
+    {
+        if (_backgroundRefreshHotkey is null)
+        {
+            return;
+        }
+
+        var clientPointer = pointer ?? PointToClient(Cursor.Position);
+        _backgroundRefreshHotkey.SetEnabled(CanRefreshCaptureBackground(clientPointer));
+    }
+
+    private void RefreshCaptureBackground()
+    {
+        _backgroundRefreshInProgress = true;
+        UpdateBackgroundRefreshHotkeyRegistration();
+        var selection = _selection;
+        var previousActiveControl = ActiveControl;
+        var overlayParked = false;
+        Exception? failure = null;
+        try
+        {
+            overlayParked = true;
+            ((ILiveCaptureFeatureHost)this).SetOverlayVisible(false);
+            DwmFlush();
+            using var refreshed = ((ILiveCaptureFeatureHost)this).CaptureLiveSelection();
+            _backgroundLayer.Replace(selection, refreshed);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+        finally
+        {
+            if (overlayParked)
+            {
+                try
+                {
+                    ((ILiveCaptureFeatureHost)this).SetOverlayVisible(true);
+                    DwmFlush();
+                }
+                catch (Exception exception)
+                {
+                    failure ??= exception;
+                }
+            }
+
+            _backgroundRefreshInProgress = false;
+            UpdateBackgroundRefreshHotkeyRegistration();
+        }
+
+        if (failure is not null)
+        {
+            MessageBox.Show(
+                this,
+                $"刷新截图内容失败：{failure.Message}",
+                "刷新失败",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
+        }
+
+        if (previousActiveControl is { IsDisposed: false, CanFocus: true })
+        {
+            previousActiveControl.Focus();
+        }
+        else
+        {
+            Focus();
+        }
+        Invalidate(selection, false);
     }
 
     private void HandleEscape()
@@ -2840,14 +3067,14 @@ internal sealed class CaptureOverlayForm : Form,
         try
         {
             using var graphics = Graphics.FromImage(result);
-            graphics.DrawImage(_snapshot.Image,
+            graphics.DrawImage(_backgroundLayer.Source,
                 new Rectangle(Point.Empty, _selection.Size),
                 _selection,
                 GraphicsUnit.Pixel);
             graphics.TranslateTransform(-_selection.X, -_selection.Y);
             graphics.SetClip(_selection);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            _document.Render(graphics, _snapshot.Image);
+            _document.Render(graphics, _backgroundLayer.Source);
             _featureSession.Render(graphics, CaptureRenderTarget.Export);
             return result;
         }
@@ -2872,7 +3099,8 @@ internal sealed class CaptureOverlayForm : Form,
                 image,
                 _outputFolder,
                 _screenshotFileNameMode,
-                _document.GetVisibleTextContents(EditingBounds));
+                _document.GetVisibleTextContents(EditingBounds),
+                _organizeScreenshotsByDate);
             try
             {
                 _clipboardService.SetImage(image);
@@ -2922,6 +3150,32 @@ internal sealed class CaptureOverlayForm : Form,
         {
             MessageBox.Show(this, $"复制截图失败：{exception.Message}", "复制失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private bool TryCopySelectedImage()
+    {
+        Bitmap? image = null;
+        try
+        {
+            image = _annotationEditor.RenderSelectedImage();
+            if (image is null)
+            {
+                return false;
+            }
+
+            _clipboardService.SetImage(image);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, $"复制图片失败：{exception.Message}", "复制失败",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return true;
+        }
+        finally
+        {
+            image?.Dispose();
         }
     }
 
@@ -2997,14 +3251,20 @@ internal sealed class CaptureOverlayForm : Form,
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_resourcesDisposed)
         {
+            _resourcesDisposed = true;
+            _backgroundRefreshHotkeyTimer.Stop();
+            _backgroundRefreshHotkeyTimer.Dispose();
+            _backgroundRefreshHotkey?.Dispose();
+            _backgroundRefreshHotkey = null;
+            _outsidePointerHook.Dispose();
             _drawingCursorIndicator.Dispose();
             _featureSession.Dispose();
             _annotationEditor.Dispose();
             _toolTip.Dispose();
             _replacementCaptureImage?.Dispose();
-            _dimmedImage.Dispose();
+            _backgroundLayer.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -3065,7 +3325,7 @@ internal sealed class CaptureOverlayForm : Form,
         var bitmap = new Bitmap(_selection.Width, _selection.Height,
             System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
         using var graphics = Graphics.FromImage(bitmap);
-        graphics.DrawImage(_snapshot.Image,
+        graphics.DrawImage(_backgroundLayer.Source,
             new Rectangle(Point.Empty, _selection.Size),
             _selection,
             GraphicsUnit.Pixel);
@@ -3091,9 +3351,11 @@ internal sealed class CaptureOverlayForm : Form,
             PositionToolbar();
             _toolbar.Visible = _hasSelection;
             Invalidate();
+            UpdateBackgroundRefreshHotkeyRegistration();
         }
         else
         {
+            _backgroundRefreshHotkey?.SetEnabled(false);
             _toolbar.Visible = false;
             Capture = false;
             TopMost = false;
@@ -3106,8 +3368,8 @@ internal sealed class CaptureOverlayForm : Form,
                     var restored = RestoreLiveCaptureOverlay();
                     throw new InvalidOperationException(
                         restored
-                            ? "无法把截图遮罩安全移出虚拟桌面，长截图已停止。"
-                            : "截图遮罩无法安全移出或恢复，长截图已停止。");
+                            ? "无法把截图覆盖层安全移出虚拟桌面，实时采集已停止。"
+                            : "截图覆盖层无法安全移出或恢复，实时采集已停止。");
                 }
             }
         }
@@ -3131,7 +3393,9 @@ internal sealed class CaptureOverlayForm : Form,
         Activate();
         PositionToolbar();
         _toolbar.Visible = _hasSelection;
+        UpdateInteractionRegion();
         Invalidate();
+        UpdateBackgroundRefreshHotkeyRegistration();
         return Bounds == _snapshot.Bounds;
     }
 
@@ -3197,7 +3461,11 @@ internal sealed class CaptureOverlayForm : Form,
         Text = "轻截 - 长截图编辑";
         PositionToolbar();
         _toolbar.Visible = true;
+        UpdateBackgroundRefreshHotkeyRegistration();
         Invalidate();
     }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmFlush();
 
 }

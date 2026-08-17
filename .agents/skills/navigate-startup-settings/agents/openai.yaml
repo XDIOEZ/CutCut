@@ -1,0 +1,4 @@
+interface:
+  display_name: "轻截启动设置导航"
+  short_description: "快速定位并安全修改轻截的启动、设置、快捷键与软件更新系统"
+  default_prompt: "使用 $navigate-startup-settings 定位并修改轻截的启动、设置、快捷键或软件更新系统，同时检查联动并维护导航。"

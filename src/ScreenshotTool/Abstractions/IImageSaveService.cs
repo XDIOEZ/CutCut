@@ -8,5 +8,6 @@ internal interface IImageSaveService
         Bitmap image,
         string outputFolder,
         ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime,
-        IReadOnlyList<string>? imageTexts = null);
+        IReadOnlyList<string>? imageTexts = null,
+        bool organizeByDate = false);
 }

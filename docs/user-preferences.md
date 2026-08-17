@@ -18,6 +18,12 @@
     "outputFolder": "C:\\Users\\User\\Pictures\\轻截",
     "hotkeyModifiers": "control, shift",
     "hotkeyVirtualKey": 88,
+    "hotkeys": [
+      {
+        "modifiers": "control, shift",
+        "virtualKey": 88
+      }
+    ],
     "startMinimized": false,
     "startWithWindows": false,
     "lastLaunchedVersion": "1.10.0",
@@ -59,7 +65,7 @@
 }
 ```
 
-`hotkeyModifiers`、`hotkeyVirtualKey`、`startMinimized` 和 `startWithWindows` 统一在“截图设置”分页中配置。快捷键输入框获得焦点时会暂时取消全局监听，保存新组合键失败时恢复原快捷键；`startMinimized` 为 `true` 时，程序启动后直接进入系统托盘。
+`startMinimized` 和 `startWithWindows` 在“通用设置”分页中配置；`hotkeys` 保存零至三组截图快捷键，空数组表示用户不绑定全局快捷键。`hotkeyModifiers` 和 `hotkeyVirtualKey` 继续作为旧版单快捷键兼容字段，旧配置首次读取时会迁移到 `hotkeys` 第一项。任一快捷键输入框获得焦点时会暂时取消全局监听；保存多组组合键时会整体注册，任意一组被其他程序占用都会恢复原有全部快捷键。`startMinimized` 为 `true` 时，程序启动后直接进入系统托盘。
 
 开启“开机自动启动”后，程序在
 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` 中维护名为 `LightShotCN` 的值，命令使用带引号的当前 EXE 绝对路径和 `--background` 参数；登录 Windows 后会安静进入托盘，即使“手动启动后最小化”处于关闭状态也不会弹出工作台。该启动项只影响当前用户且无需管理员权限。关闭开关会删除该值。

@@ -7,20 +7,31 @@ internal sealed class CaptureTextResultForm : Form
 {
     private const int WindowGap = 12;
     private readonly IClipboardService _clipboardService;
+    private readonly ITextTranslationService? _textTranslationService;
     private readonly TextBox _textBox;
     private readonly Label _statusLabel;
+    private readonly Button? _translateButton;
+    private readonly ToolTip _toolTip = new();
+    private readonly CancellationTokenSource _translationCancellation = new();
+    private string? _originalTextBeforeTranslation;
+    private string? _translatedText;
+    private bool _isTranslated;
+    private bool _translationInProgress;
+    private bool _resourcesDisposed;
 
     public CaptureTextResultForm(
         string title,
         string text,
         Rectangle anchorScreenBounds,
-        IClipboardService clipboardService)
+        IClipboardService clipboardService,
+        ITextTranslationService? textTranslationService = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(clipboardService);
 
         _clipboardService = clipboardService;
+        _textTranslationService = textTranslationService;
 
         Text = title;
         AccessibleName = title;
@@ -32,7 +43,7 @@ internal sealed class CaptureTextResultForm : Form
         Icon = AppIcon.Shared;
         MaximizeBox = false;
         MinimizeBox = false;
-        MinimumSize = new Size(340, 240);
+        MinimumSize = new Size(380, 240);
         ShowInTaskbar = true;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
@@ -84,9 +95,29 @@ internal sealed class CaptureTextResultForm : Form
         closeButton.Size = new Size(88, 34);
         closeButton.Click += (_, _) => Close();
 
+        if (_textTranslationService is not null)
+        {
+            _translateButton = AppTheme.CreateButton("翻译");
+            _translateButton.AccessibleName = "联网翻译为中文";
+            _translateButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            _translateButton.Location = new Point(
+                ClientSize.Width - 312,
+                ClientSize.Height - 48);
+            _translateButton.Name = "TranslateButton";
+            _translateButton.Size = new Size(88, 34);
+            _translateButton.Click += HandleTranslateButtonClick;
+            _toolTip.SetToolTip(
+                _translateButton,
+                "联网将当前文字发送到 MyMemory 并翻译为中文，再次点击可恢复原文");
+        }
+
         Controls.Add(header);
         Controls.Add(_statusLabel);
         Controls.Add(_textBox);
+        if (_translateButton is not null)
+        {
+            Controls.Add(_translateButton);
+        }
         Controls.Add(closeButton);
         Controls.Add(copyButton);
 
@@ -103,6 +134,10 @@ internal sealed class CaptureTextResultForm : Form
     }
 
     internal string ResultText => _textBox.Text;
+
+    internal bool TranslationAvailable => _translateButton is not null;
+
+    internal bool IsTranslated => _isTranslated;
 
     internal static Point CalculateLocation(
         Rectangle anchor,
@@ -160,5 +195,133 @@ internal sealed class CaptureTextResultForm : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
+    }
+
+    private async void HandleTranslateButtonClick(object? sender, EventArgs e)
+    {
+        if (_translationInProgress ||
+            _translateButton is null ||
+            _textTranslationService is null)
+        {
+            return;
+        }
+
+        if (_isTranslated)
+        {
+            _textBox.Text = _originalTextBeforeTranslation ?? string.Empty;
+            _isTranslated = false;
+            _translateButton.Text = "翻译";
+            _translateButton.AccessibleName = "联网翻译为中文";
+            _statusLabel.Text = "已恢复翻译前的原文。";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_textBox.Text))
+        {
+            System.Media.SystemSounds.Beep.Play();
+            _statusLabel.Text = "没有可翻译的文字。";
+            return;
+        }
+
+        var originalText = _textBox.Text;
+        if (string.Equals(
+                originalText,
+                _originalTextBeforeTranslation,
+                StringComparison.Ordinal) &&
+            _translatedText is not null)
+        {
+            _textBox.Text = _translatedText;
+            _isTranslated = true;
+            _translateButton.Text = "显示原文";
+            _translateButton.AccessibleName = "恢复翻译前的原文";
+            _statusLabel.Text = "已切换到中文翻译；再次点击可恢复原文。";
+            return;
+        }
+
+        _translationInProgress = true;
+        _translateButton.Enabled = false;
+        _translateButton.Text = "翻译中…";
+        _textBox.ReadOnly = true;
+        _statusLabel.Text = "正在联网翻译为中文…";
+
+        try
+        {
+            var translatedText =
+                await _textTranslationService.TranslateToSimplifiedChineseAsync(
+                    originalText,
+                    _translationCancellation.Token);
+            if (IsDisposed || Disposing)
+            {
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(translatedText))
+            {
+                throw new InvalidOperationException("在线翻译服务没有返回文字。");
+            }
+
+            _originalTextBeforeTranslation = originalText;
+            _translatedText = NormalizeLineEndings(translatedText);
+            _textBox.Text = _translatedText;
+            _isTranslated = true;
+            _translateButton.Text = "显示原文";
+            _translateButton.AccessibleName = "恢复翻译前的原文";
+            _statusLabel.Text = "已联网翻译为中文；再次点击可恢复原文。";
+        }
+        catch (OperationCanceledException) when (_translationCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            _statusLabel.Text = "翻译失败，仍显示原文。";
+            MessageBox.Show(
+                this,
+                exception.Message,
+                "无法翻译",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _translationInProgress = false;
+            if (!IsDisposed && !Disposing && !_isTranslated)
+            {
+                _textBox.ReadOnly = false;
+                _translateButton.Enabled = true;
+                _translateButton.Text = "翻译";
+                _translateButton.AccessibleName = "联网翻译为中文";
+            }
+            else if (!IsDisposed && !Disposing)
+            {
+                _textBox.ReadOnly = false;
+                _translateButton.Enabled = true;
+            }
+        }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_resourcesDisposed)
+        {
+            _translationCancellation.Cancel();
+        }
+        base.OnFormClosing(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !_resourcesDisposed)
+        {
+            _resourcesDisposed = true;
+            _translationCancellation.Cancel();
+            _translationCancellation.Dispose();
+            _toolTip.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }

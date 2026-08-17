@@ -47,8 +47,8 @@ CaptureOverlayForm             提供受控宿主能力
 3. 每次开始截图时，已加载模块分别创建新的 `ICaptureFeature`，按 `Order` 和 `Id` 排序后组合。
 4. 模块可以处理键盘、鼠标，并分别参与预览和最终导出渲染。
 5. 实现 `IModuleSettingsPageProvider` 的模块可创建自己的设置页；宿主只按通用元数据把页面加入导航，不引用具体页面类型。
-6. 设置工作台通过模块文件夹内的 `.lightshot-module-disabled.json` 保存禁用状态；禁用会退役当前程序集但保留全部文件，重新启用时删除标记并重新加载。标记同时保留模块 ID、名称和版本，因此重启后无需加载 DLL 也能展示禁用项。
-7. 模块文件夹或其中任一文件更新、禁用、删除后，宿主立即移除并释放对应设置页，也不再给新截图创建旧功能；已经打开的截图继续使用原实例。永久删除会先写入禁用标记并退役程序集，再递归删除该模块自己的一级文件夹。
+6. 设置工作台把每个模块包的启用状态和显示元数据保存到当前用户配置的 `preferences.moduleActivationPreferences`；禁用会退役当前程序集但保留全部文件，重新启用时按同一偏好键重新加载。旧版模块目录中的 `.lightshot-module-disabled.json` 只用于首次启动迁移，迁移成功后会被删除。
+7. 模块文件夹或其中任一文件更新、禁用、删除后，宿主立即移除并释放对应设置页，也不再给新截图创建旧功能；已经打开的截图继续使用原实例。永久删除会先把用户偏好切换为禁用并退役程序集，再递归删除该模块自己的一级文件夹，最后清理对应偏好。
 8. 最后一个活动功能或设置页租约释放后，宿主释放模块对象并调用 `AssemblyLoadContext.Unload()`。
 
 ## 模块自带设置页
@@ -72,8 +72,8 @@ CaptureOverlayForm             提供受控宿主能力
 需要重新读取真实屏幕内容的模块可检测宿主是否实现 `ILiveCaptureFeatureHost`：
 
 - `SelectionScreenBounds` 是物理屏幕坐标，可包含多显示器的负坐标。
-- `SetOverlayVisible(false)` 用于在实时采集前移除遮罩和工具栏；宿主保持模态窗体可见状态，
-  仅把它停放到虚拟桌面之外，避免 `Hide()` 提前结束 `ShowDialog()`；模块必须在 `finally` 中恢复。
+- `SetOverlayVisible(false)` 用于在实时采集前移除遮罩和工具栏；宿主把截图浮层停放到虚拟桌面
+  之外并临时取消置顶，实时采集完成后恢复；模块必须在 `finally` 中恢复。
 - `CaptureLiveSelection()` 每次返回一张由模块负责释放的新位图。
 - `ReplaceCaptureResult()` 成功后接管传入位图的所有权；调用失败时仍由模块释放。
 - `HasEdits` 用于阻止会破坏既有编辑坐标的采集流程。
@@ -126,22 +126,24 @@ CaptureOverlayForm             提供受控宿主能力
 
 ## 三种可选 OCR 模块
 
-`ScreenshotTool.Ocr` 1.2.0 要求轻截 1.11.6 或更高版本，并作为截图会话功能提供“OCR 本地”工具栏命令。用户框选区域后点击命令，模块通过
+`ScreenshotTool.Ocr` 1.3.0 要求轻截 1.11.7 或更高版本，并作为截图会话功能提供“OCR 本地”工具栏命令。用户框选区域后点击命令，模块通过
 `ICaptureFeatureHost.CopyDesktopSelection()` 取得由自己负责释放的选区位图，并调用 Windows 自带的
 离线 OCR。识别前会构造原图、高清放大、自动对比度灰度增强和 Otsu 二值化四种候选图，在同一个
 PowerShell/WinRT 工作进程内依次识别，并按有效文字、词数、行数和异常字符情况选择最完整的结果。
 模块不上传图片、不保存识别历史，也不携带大型模型；可识别语言由系统已安装的语言组件决定。
 
-识别成功后，模块通过通用 `ICaptureTextResultHost` 把标题和纯文本交给宿主，并通过
+识别成功后，模块通过 `ITranslatableCaptureTextResultHost` 把标题和纯文本交给宿主，并通过
 `ICaptureArtifactHost.CompleteCaptureSession()` 结束冻结的截图界面。宿主在原选区右侧优先放置独立的
 可编辑结果小窗；右侧空间不足时改放左侧，两侧都不足时限制在当前显示器工作区内。结果窗由宿主拥有，
-因此截图功能租约可以立即释放，OCR 模块随后仍可安全禁用、替换或删除；结果窗支持继续编辑和一键复制。
+因此截图功能租约可以立即释放，OCR 模块随后仍可安全禁用、替换或删除；结果窗支持继续编辑、一键复制，
+以及把当前文字发送到 MyMemory 联网翻译为简体中文。原文和译文缓存于结果窗，重复切换不再联网；在
+原文状态编辑后才重新翻译。翻译服务和网络依赖只位于宿主，三个 OCR 模块仍不上传图片，也不增加模型包体。
 
 Windows Runtime 的完整 .NET 投影会显著增加轻量包体，因此 OCR 模块通过隐藏的系统 Windows PowerShell
 进程调用同一套系统 OCR 接口。辅助脚本以内嵌资源随模块 DLL 加载，输入只使用会话级临时 PNG；会话取消
 时模块终止辅助进程，完成或失败后删除全部候选临时文件。模块包仍只有 `ScreenshotTool.Ocr.dll` 一个入口文件。
 
-`ScreenshotTool.PaddleOcr.Tiny` 与 `ScreenshotTool.PaddleOcr.Small` 1.1.0 同样要求轻截 1.11.6
+`ScreenshotTool.PaddleOcr.Tiny` 与 `ScreenshotTool.PaddleOcr.Small` 1.2.0 同样要求轻截 1.11.7
 或更高版本，分别提供 `OCR Tiny` 与 `OCR Small` 命令。两个入口模块只保存稳定元数据，每次截图会话
 各自创建识别器；共用代码位于 `ScreenshotTool.PaddleOcr.dll`，通过 RapidOcrNet 调用 PP-OCRv6 的
 检测、方向分类和识别 ONNX 模型。Tiny 使用较小的检测/识别模型以平衡体积和速度，Small 使用较大的
@@ -165,7 +167,7 @@ Windows Runtime 的完整 .NET 投影会显著增加轻量包体，因此 OCR �
 
 扫描成功后，模块通过现有 `ICaptureTextResultHost` 把原始内容交给宿主，并通过
 `ICaptureArtifactHost.CompleteCaptureSession()` 结束冻结的截图界面。宿主复用 OCR 的通用侧边结果窗，
-但标题、复制按钮和状态文案保持结果类型无关；同一选区识别到多个二维码时，各项内容以空行分隔。
+但二维码使用普通结果契约，不显示 OCR 的翻译按钮；同一选区识别到多个二维码时，各项内容以空行分隔。
 模块释放时会取消活动扫描，新扫描不可再进入；从 `Modules\QrCode` 删除入口 DLL、`zxing.dll` 和许可
 文本后，新截图会话立即失去入口，已经打开的会话则由模块租约安全延迟释放。
 
@@ -183,6 +185,10 @@ Windows Runtime 的完整 .NET 投影会显著增加轻量包体，因此 OCR �
 保持原比例缩放，按住 `Shift` 时切换为独立宽高缩放。右键菜单固定提供删除、复制、保存和编辑：
 复制与保存通过 `IModuleImageHost` 复用宿主剪贴板、命名、输出目录和保存通知；编辑会先隐藏贴图，
 再把当前像素交给宿主现有图片编辑入口，避免桌面重新采集时把贴图自身截入底图。
+
+截图浮层由 `CaptureOverlayPresenter` 以非模态会话显示并异步等待关闭，不禁用同一 UI 线程上的贴图
+窗口。完成框选后，覆盖层窗口区域只保留截图框、工具栏等交互区域，因此框外的既有贴图仍能接收
+左键拖动、边缘缩放和右键复制输入；框外 `Ctrl + 左键拖动` 由宿主低层指针监听保留为重新框选。
 
 模块维护自己创建的全部活动窗口。用户关闭窗口时立即移除记录；模块禁用、删除、替换或宿主退出时，
 `Dispose` 会关闭窗口并释放位图、菜单和句柄。模块入口及独立恢复包分别位于

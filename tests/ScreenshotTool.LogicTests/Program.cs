@@ -785,6 +785,18 @@ AssertEqual(
     TextEditorEnterAction.InsertLineBreak,
     TextEditorEnterPolicy.Resolve(controlPressed: true),
     "文字输入时只有 Ctrl+回车插入换行");
+AssertEqual(
+    TextEditorShortcutAction.SaveScreenshot,
+    TextEditorShortcutPolicy.Resolve(Keys.S, controlPressed: true),
+    "文字输入时 Ctrl+S 仍触发截图保存");
+AssertEqual(
+    TextEditorShortcutAction.None,
+    TextEditorShortcutPolicy.Resolve(Keys.S, controlPressed: false),
+    "文字输入时普通 S 保持文字输入");
+AssertEqual(
+    TextEditorShortcutAction.None,
+    TextEditorShortcutPolicy.Resolve(Keys.Z, controlPressed: true),
+    "文字输入时其他 Ctrl 组合键不会误触发截图保存");
 
 using (var textEditorHost = new Panel
 {
@@ -922,6 +934,18 @@ using (var hiddenTextPreview = CreateSolidBitmap(new Size(320, 220), Color.Black
             new Rectangle(20, 20, 210, 120),
             Color.Black),
         "重新编辑期间隐藏原文字预览以避免重影");
+
+    using (var editingSelectionPreview = CreateSolidBitmap(new Size(320, 220), Color.Black))
+    using (var graphics = Graphics.FromImage(editingSelectionPreview))
+    {
+        textReeditEditor.DrawSelection(graphics, 10);
+        AssertTrue(
+            !ContainsPixelDifferentFrom(
+                editingSelectionPreview,
+                new Rectangle(20, 20, 210, 120),
+                Color.Black),
+            "文字编辑模式下即使仍保留选中状态也不显示缩放手柄");
+    }
 
     var updated = textReeditEditor.EndTextEdit(
         commit: true,
@@ -1103,20 +1127,199 @@ AssertEqual(
         new Rectangle(0, 0, 360, 220)),
     "编辑中的文字框拖动限制在截图范围内");
 
-var redrawGuard = new SelectionRedrawGuard();
-AssertTrue(redrawGuard.TryBeginRedraw(hasEdits: false), "没有编辑时允许左键重新框选");
-AssertTrue(!redrawGuard.TryBeginRedraw(hasEdits: true), "产生编辑后等待显式启动重新框选");
-redrawGuard.RequestRedraw();
-AssertTrue(redrawGuard.IsRedrawRequested, "Ctrl+W 启动重新框选");
-AssertTrue(redrawGuard.TryBeginRedraw(hasEdits: true), "启动后允许重新框选");
-AssertTrue(!redrawGuard.IsRedrawRequested, "开始重新框选后结束启动状态");
-AssertTrue(!redrawGuard.TryBeginRedraw(hasEdits: true), "未再次启动时不会误清空编辑");
+var overlayClientBounds = new Rectangle(0, 0, 800, 600);
+var overlaySelection = new Rectangle(200, 150, 300, 200);
+var overlayToolbar = new Rectangle(260, 360, 240, 36);
+var overlayInteractiveAreas = CaptureOverlayInteractionLayout.GetInteractiveAreas(
+    overlayClientBounds,
+    overlaySelection,
+    10,
+    overlayToolbar,
+    toolbarVisible: true,
+    Rectangle.Empty,
+    new Rectangle(200, 122, 80, 22));
+AssertTrue(
+    CaptureOverlayInteractionLayout.Contains(overlayInteractiveAreas, new Point(195, 145)),
+    "截图框缩放手柄外沿仍由编辑层接管");
+AssertTrue(
+    CaptureOverlayInteractionLayout.Contains(overlayInteractiveAreas, new Point(300, 370)),
+    "截图工具栏位于截图框外时仍可交互");
+AssertTrue(
+    !CaptureOverlayInteractionLayout.Contains(overlayInteractiveAreas, new Point(40, 40)),
+    "截图框和工具栏之外不再屏蔽底层窗口鼠标");
+AssertTrue(
+    CaptureOverlayInteractionLayout.ShouldStartSelectionRedraw(
+        hasSelection: true,
+        selectionRedrawAllowed: true,
+        controlPressed: true,
+        leftButtonDown: true,
+        overlayClientBounds,
+        overlayInteractiveAreas,
+        new Point(40, 40)),
+    "Ctrl 加框外左键明确启动重新框选");
+AssertTrue(
+    !CaptureOverlayInteractionLayout.ShouldStartSelectionRedraw(
+        hasSelection: true,
+        selectionRedrawAllowed: true,
+        controlPressed: false,
+        leftButtonDown: true,
+        overlayClientBounds,
+        overlayInteractiveAreas,
+        new Point(40, 40)),
+    "框外普通左键保留给底层窗口");
+AssertTrue(
+    !CaptureOverlayInteractionLayout.ShouldStartSelectionRedraw(
+        hasSelection: true,
+        selectionRedrawAllowed: true,
+        controlPressed: true,
+        leftButtonDown: true,
+        overlayClientBounds,
+        overlayInteractiveAreas,
+        new Point(300, 200)),
+    "截图框内 Ctrl 加左键继续用于元素多选而非重新框选");
 AssertTrue(
     CaptureSelectionRedrawPolicy.AllowsSelectionRedraw(isLongCaptureEditing: false),
-    "普通截图允许主动启动重新框选");
+    "普通截图允许 Ctrl 加框外左键重新框选");
 AssertTrue(
     !CaptureSelectionRedrawPolicy.AllowsSelectionRedraw(isLongCaptureEditing: true),
     "长截图编辑模式始终禁止重新框选");
+
+AssertTrue(
+    CaptureBackgroundRefreshPolicy.IsShortcut(
+        Keys.R,
+        controlPressed: true,
+        altPressed: false,
+        shiftPressed: false),
+    "Ctrl+R 被识别为截图背景刷新快捷键");
+AssertTrue(
+    !CaptureBackgroundRefreshPolicy.IsShortcut(
+        Keys.R,
+        controlPressed: true,
+        altPressed: false,
+        shiftPressed: true),
+    "Ctrl+Shift+R 不会误触发截图背景刷新");
+AssertTrue(
+    !CaptureBackgroundRefreshPolicy.IsShortcut(
+        Keys.R,
+        controlPressed: false,
+        altPressed: false,
+        shiftPressed: false),
+    "未按 Ctrl 时 R 不会触发截图背景刷新");
+
+var refreshSelection = new Rectangle(100, 80, 320, 180);
+AssertTrue(
+    CaptureBackgroundRefreshPolicy.CanRefresh(
+        hasSelection: true,
+        hasLiveScreenBackground: true,
+        overlayAvailable: true,
+        interactionIdle: true,
+        refreshInProgress: false,
+        refreshSelection,
+        new Point(200, 120)),
+    "普通截图完成且鼠标位于框内时允许刷新背景");
+AssertTrue(
+    !CaptureBackgroundRefreshPolicy.CanRefresh(
+        hasSelection: true,
+        hasLiveScreenBackground: true,
+        overlayAvailable: true,
+        interactionIdle: true,
+        refreshInProgress: false,
+        refreshSelection,
+        new Point(60, 50)),
+    "鼠标位于截图框外时禁止刷新背景");
+AssertTrue(
+    !CaptureBackgroundRefreshPolicy.CanRefresh(
+        hasSelection: true,
+        hasLiveScreenBackground: false,
+        overlayAvailable: true,
+        interactionIdle: true,
+        refreshInProgress: false,
+        refreshSelection,
+        new Point(200, 120)),
+    "已有图片或长截图编辑模式不刷新桌面背景");
+AssertTrue(
+    !CaptureBackgroundRefreshPolicy.CanRefresh(
+        hasSelection: true,
+        hasLiveScreenBackground: true,
+        overlayAvailable: true,
+        interactionIdle: false,
+        refreshInProgress: false,
+        refreshSelection,
+        new Point(200, 120)),
+    "框选、拖动或绘制交互进行中时禁止刷新背景");
+AssertTrue(
+    !CaptureBackgroundRefreshPolicy.CanRefresh(
+        hasSelection: true,
+        hasLiveScreenBackground: true,
+        overlayAvailable: true,
+        interactionIdle: true,
+        refreshInProgress: true,
+        refreshSelection,
+        new Point(200, 120)),
+    "刷新进行中不会重入截图背景刷新");
+
+using (var refreshSource = CreateSolidBitmap(new Size(12, 10), Color.DarkRed))
+using (var backgroundLayer = new CaptureBackgroundLayer(refreshSource))
+using (var firstRefresh = CreateSolidBitmap(new Size(6, 5), Color.CornflowerBlue))
+using (var secondRefresh = CreateSolidBitmap(new Size(6, 5), Color.SeaGreen))
+using (var refreshEditor = new CaptureAnnotationEditor())
+{
+    var target = new Rectangle(3, 2, 6, 5);
+    var shape = new ShapeAnnotation(
+        EditorTool.Rectangle,
+        new Rectangle(4, 3, 3, 2),
+        Color.Magenta,
+        1F);
+    var text = new TextAnnotation(
+        new Rectangle(4, 4, 4, 2),
+        "R",
+        Color.Yellow,
+        10F);
+    refreshEditor.Document.Add(shape);
+    refreshEditor.Document.Add(text);
+    refreshEditor.Selection.SelectOnly(shape);
+
+    var originalShapeBounds = shape.Bounds;
+    var originalTextBounds = text.Bounds;
+    backgroundLayer.Replace(target, firstRefresh);
+
+    AssertEqual(
+        Color.CornflowerBlue.ToArgb(),
+        backgroundLayer.Source.GetPixel(target.Left + 1, target.Top + 1).ToArgb(),
+        "首次刷新只替换截图背景层的目标区域");
+    AssertEqual(
+        Color.DarkRed.ToArgb(),
+        backgroundLayer.Source.GetPixel(0, 0).ToArgb(),
+        "刷新截图背景不会改动目标区域之外的虚拟桌面快照");
+    AssertTrue(
+        backgroundLayer.Dimmed.GetPixel(target.Left + 1, target.Top + 1).ToArgb() !=
+        Color.CornflowerBlue.ToArgb(),
+        "背景刷新后同步维护框外遮罩缓存");
+
+    backgroundLayer.Replace(target, secondRefresh);
+    AssertEqual(
+        Color.SeaGreen.ToArgb(),
+        backgroundLayer.Source.GetPixel(target.Left + 1, target.Top + 1).ToArgb(),
+        "连续刷新复用同一背景层并写入最新画面");
+    AssertEqual(2, refreshEditor.Document.Count, "连续刷新不会清空编辑文档");
+    AssertTrue(refreshEditor.Document.Contains(shape), "刷新后矩形标注仍在编辑文档中");
+    AssertTrue(refreshEditor.Document.Contains(text), "刷新后文字标注仍在编辑文档中");
+    AssertTrue(
+        ReferenceEquals(refreshEditor.Selection.Primary, shape),
+        "刷新后保持原有元素选中状态");
+    AssertEqual(originalShapeBounds, shape.Bounds, "刷新后保持矩形标注位置和大小");
+    AssertEqual(originalTextBounds, text.Bounds, "刷新后保持文字标注位置和大小");
+    AssertEqual(Color.Magenta.ToArgb(), shape.Color.ToArgb(), "刷新后保持标注颜色");
+    AssertEqual("R", text.Text, "刷新后保持文字内容");
+
+    using var refreshedComposite = refreshEditor.RenderResult(backgroundLayer.Source);
+    AssertTrue(
+        ContainsPixelDifferentFrom(
+            refreshedComposite,
+            shape.Bounds,
+            Color.SeaGreen),
+        "最终合成使用新背景并继续渲染原有标注");
+}
 
 var longCaptureFrame = new Rectangle(200, 120, 360, 500);
 var longCaptureBadge = LongCaptureEditorFrameLayout.GetSizeBadgeBounds(
@@ -1365,6 +1568,20 @@ AssertEqual(
 
 var namingTimestamp = new DateTime(2026, 7, 21, 15, 6, 7, 123);
 AssertEqual(
+    Path.Combine("C:\\截图", "2026-07-21"),
+    ScreenshotOutputFolderPolicy.Resolve(
+        "C:\\截图",
+        organizeByDate: true,
+        capturedAt: namingTimestamp),
+    "按日期保存时解析当天子文件夹");
+AssertEqual(
+    "C:\\截图",
+    ScreenshotOutputFolderPolicy.Resolve(
+        "C:\\截图",
+        organizeByDate: false,
+        capturedAt: namingTimestamp),
+    "关闭按日期保存时继续使用父文件夹");
+AssertEqual(
     "截图_2026-07-21_15-06-07-123.png",
     ScreenshotFileNamePolicy.CreateFileName(
         ScreenshotFileNameMode.DateTime,
@@ -1459,6 +1676,15 @@ try
         ScreenshotFileNameMode.ImageText,
         ["发布:成功"]);
     AssertEqual("发布_成功_1.png", Path.GetFileName(duplicateTextPath), "重复图片文字名称追加序号");
+    var datedPath = new PngImageSaveService().SavePng(
+        namingBitmap,
+        namingSaveDirectory,
+        organizeByDate: true);
+    AssertEqual(
+        DateTime.Today.ToString(ScreenshotOutputFolderPolicy.DateFolderFormat),
+        Path.GetFileName(Path.GetDirectoryName(datedPath)!),
+        "实际保存时自动创建并使用当天子文件夹");
+    AssertTrue(File.Exists(datedPath), "日期子文件夹中的截图真实落盘");
 }
 finally
 {
@@ -1722,20 +1948,42 @@ AssertEqual(-15F, AnnotationRotation.GetWheelDeltaDegrees(-120, 15), "滚轮向�
 AssertEqual(30F, AnnotationRotation.GetWheelDeltaDegrees(240, 15), "连续滚轮格数按配置速度累加");
 AssertEqual(1, AnnotationRotationStep.Normalize(-20), "旋转速度配置限制最小值");
 AssertEqual(90, AnnotationRotationStep.Normalize(200), "旋转速度配置限制最大值");
-using (var screenshotSettingsPage = new ScreenshotSettingsPage(
-           new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q),
+using (var generalSettingsPage = new GeneralSettingsPage(
            startMinimized: true,
-           startWithWindows: true,
+           startWithWindows: true))
+{
+    AssertSingleColumnSettings(generalSettingsPage, 2, "通用设置页");
+    AssertTrue(generalSettingsPage.StartMinimized, "通用设置页显示启动后最小化选项");
+    AssertTrue(generalSettingsPage.StartWithWindows, "通用设置页显示开机自动启动选项");
+    generalSettingsPage.StartMinimized = false;
+    generalSettingsPage.StartWithWindows = false;
+    AssertTrue(!generalSettingsPage.StartMinimized, "通用设置页可关闭启动后最小化");
+    AssertTrue(!generalSettingsPage.StartWithWindows, "通用设置页可关闭开机自动启动");
+}
+using (var screenshotSettingsPage = new ScreenshotSettingsPage(
+           [
+               new HotkeyDefinition(
+                   HotkeyModifiers.Control | HotkeyModifiers.Alt,
+                   (int)Keys.Q),
+               new HotkeyDefinition(
+                   HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                   (int)Keys.A)
+           ],
            dismissSaveNotificationBeforeCapture: false,
            hideMainWindowDuringCapture: true))
 {
     AssertSingleColumnSettings(screenshotSettingsPage, 5, "截图设置页");
-    AssertEqual(
-        new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q),
-        screenshotSettingsPage.Hotkey,
-        "截图设置页显示全局快捷键");
-    AssertTrue(screenshotSettingsPage.StartMinimized, "截图设置页显示启动后最小化选项");
-    AssertTrue(screenshotSettingsPage.StartWithWindows, "截图设置页显示开机自动启动选项");
+    AssertTrue(
+        screenshotSettingsPage.Hotkeys.SequenceEqual(
+        [
+            new HotkeyDefinition(
+                HotkeyModifiers.Control | HotkeyModifiers.Alt,
+                (int)Keys.Q),
+            new HotkeyDefinition(
+                HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                (int)Keys.A)
+        ]),
+        "截图设置页显示多组全局快捷键");
     AssertTrue(
         !screenshotSettingsPage.DismissSaveNotificationBeforeCapture,
         "截图设置页显示保留保存提示的选择");
@@ -1744,12 +1992,18 @@ using (var screenshotSettingsPage = new ScreenshotSettingsPage(
         "截图设置页显示隐藏主界面的选择");
     screenshotSettingsPage.DismissSaveNotificationBeforeCapture = true;
     screenshotSettingsPage.HideMainWindowDuringCapture = false;
-    screenshotSettingsPage.Hotkey = HotkeyDefinition.Default;
-    screenshotSettingsPage.StartMinimized = false;
-    screenshotSettingsPage.StartWithWindows = false;
-    AssertEqual(HotkeyDefinition.Default, screenshotSettingsPage.Hotkey, "截图设置页可修改快捷键");
-    AssertTrue(!screenshotSettingsPage.StartMinimized, "截图设置页可关闭启动后最小化");
-    AssertTrue(!screenshotSettingsPage.StartWithWindows, "截图设置页可关闭开机自动启动");
+    var deleteFirstHotkeyButton = screenshotSettingsPage.Controls
+        .Find("DeleteScreenshotHotkeyButton1", searchAllChildren: true)
+        .OfType<Button>()
+        .Single();
+    deleteFirstHotkeyButton.PerformClick();
+    AssertEqual(1, screenshotSettingsPage.Hotkeys.Count, "截图设置页可清空单个快捷键槽位");
+    screenshotSettingsPage.SetHotkeys([HotkeyDefinition.Default]);
+    AssertTrue(
+        screenshotSettingsPage.Hotkeys.SequenceEqual([HotkeyDefinition.Default]),
+        "截图设置页不要求填满三个快捷键槽位");
+    deleteFirstHotkeyButton.PerformClick();
+    AssertEqual(0, screenshotSettingsPage.Hotkeys.Count, "截图设置页允许清空全部快捷键");
     AssertTrue(
         screenshotSettingsPage.DismissSaveNotificationBeforeCapture,
         "截图设置页可开启截图前关闭提示");
@@ -1967,7 +2221,19 @@ using (var movableImage = new Bitmap(20, 20))
 
     AssertTrue(imageAnnotation.SupportsResize, "图片贴纸保留四角缩放能力");
     AssertTrue(imageAnnotation.PreserveAspectRatioWhenResizing, "图片缩放继续保持宽高比");
-    AssertTrue(!firstText.SupportsResize && !secondText.SupportsResize, "文字框只显示拖动交互");
+    AssertTrue(firstText.SupportsResize && secondText.SupportsResize, "选中文字框后显示缩放交互");
+    AssertEqual(
+        StickerHitTarget.BottomRight,
+        AnnotationHandleLayout.HitTest(firstText, firstText.Bounds.Location + firstText.Bounds.Size, 10, 6),
+        "文字框右下角缩放手柄可命中");
+    var originalTextFontSize = firstText.FontSize;
+    firstText.SetBounds(AnnotationResizeLayout.Resize(
+        firstText.Bounds,
+        StickerHitTarget.BottomRight,
+        new Point(330, 220),
+        selection));
+    AssertEqual(new Rectangle(180, 140, 150, 80), firstText.Bounds, "文字框可通过缩放手柄调整宽高");
+    AssertTrue(firstText.FontSize > originalTextFontSize, "调整文字框缩放时同步缩放字号");
     AssertTrue(ReferenceEquals(secondText, movableDocument.FindTopMovableAt(new Point(230, 190))), "第二段文字参与可移动标注命中");
     AssertTrue(ReferenceEquals(firstText, movableDocument.FindTopMovableAt(new Point(190, 150))), "第一段文字参与可移动标注命中");
     AssertTrue(!imageAnnotation.CanMove(altPressed: false), "图片不能只用鼠标左键移动");
@@ -2198,6 +2464,28 @@ using (var groupTransformDocument = new AnnotationDocument())
     AssertTrue(secondSelected.Bounds.X > 140, "多选缩放保持远端元素的相对布局");
     AssertTrue(Math.Abs(secondSelected.FontSize - 19.8F) < 0.001F, "多选缩放同步调整选中文字字体");
     AssertEqual(new Rectangle(10, 180, 20, 20), outsideSelection.Bounds, "多选缩放不影响未选中元素");
+}
+
+using (var selectedImageEditor = new CaptureAnnotationEditor())
+using (var selectedImageSource = CreateSolidBitmap(new Size(16, 8), Color.LimeGreen))
+{
+    var selectedImage = selectedImageEditor.AddAndSelect(new StickerAnnotation(
+        (Bitmap)selectedImageSource.Clone(),
+        new Rectangle(80, 60, 64, 32)));
+    selectedImage.RotateBy(90F);
+    using var copiedImage = selectedImageEditor.RenderSelectedImage();
+    AssertTrue(copiedImage is not null, "单独选中图片时可生成图片剪贴板内容");
+    AssertEqual(selectedImage.VisualBounds.Size, copiedImage!.Size, "复制图片保留当前缩放和旋转后的视觉尺寸");
+    AssertTrue(copiedImage.GetPixel(copiedImage.Width / 2, copiedImage.Height / 2).A > 0, "复制图片包含当前图片像素");
+
+    selectedImageEditor.Selection.Clear();
+    AssertTrue(selectedImageEditor.RenderSelectedImage() is null, "没有选中图片时不覆盖整张截图复制语义");
+    selectedImageEditor.AddAndSelect(new ShapeAnnotation(
+        EditorTool.Rectangle,
+        new Rectangle(10, 10, 40, 30),
+        Color.Red,
+        3F));
+    AssertTrue(selectedImageEditor.RenderSelectedImage() is null, "选中普通标注时不作为图片复制");
 }
 
 using (var drawingMoveDocument = new AnnotationDocument())
@@ -2624,6 +2912,12 @@ try
         LastLaunchedVersion = " 1.9.3 ",
         HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
         HotkeyVirtualKey = (int)Keys.Q,
+        Hotkeys =
+        [
+            new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Alt, (int)Keys.Q),
+            new HotkeyDefinition(HotkeyModifiers.Control | HotkeyModifiers.Shift, (int)Keys.A),
+            new HotkeyDefinition(HotkeyModifiers.Alt | HotkeyModifiers.Shift, (int)Keys.Z)
+        ],
         Preferences = new UserPreferences
         {
             StickerSelectionMoveMode = StickerSelectionMoveMode.KeepScreenPosition,
@@ -2643,11 +2937,22 @@ try
             ScreenRecordingFramesPerSecond = 60,
             ScreenRecordingVideoBitrate = 20_000_000,
             LongCaptureSafetyChecksEnabled = true,
+            ModuleActivationPreferences = new Dictionary<string, ModuleActivationPreference>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                ["Ocr"] = new(
+                    false,
+                    "screenshot-tool.ocr",
+                    "Local OCR",
+                    "1.2.0")
+            },
             ModuleStringPreferences = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["tests.module.caption"] = "模块自带设置"
             },
             ScreenshotFileNameMode = ScreenshotFileNameMode.ImageText,
+            OrganizeScreenshotsByDate = true,
+            ScreenshotDateParentFolder = Path.Combine(settingsTestDirectory, "dated-captures"),
             DismissSaveNotificationBeforeCapture = false,
             HideMainWindowDuringCapture = true,
             DrawingToolCoefficients = configuredCoefficients
@@ -2659,14 +2964,19 @@ try
     AssertTrue(savedJson.Contains("\"profileId\": \"account-demo\"", StringComparison.Ordinal), "JSON 保存配置身份");
     AssertTrue(savedJson.Contains("\"lastLaunchedVersion\": \"1.9.3\"", StringComparison.Ordinal), "JSON 保存并规范化上次启动版本");
     AssertTrue(savedJson.Contains("\"startWithWindows\": true", StringComparison.Ordinal), "JSON 保存开机自启动选择");
+    AssertTrue(savedJson.Contains("\"hotkeys\"", StringComparison.Ordinal), "JSON 保存多组截图快捷键");
+    AssertTrue(!savedJson.Contains("\"isValid\"", StringComparison.Ordinal), "JSON 不保存快捷键派生状态");
     AssertTrue(savedJson.Contains("\"preferences\"", StringComparison.Ordinal), "JSON 独立保存用户偏好");
     AssertTrue(savedJson.Contains("\"keepScreenPosition\"", StringComparison.Ordinal), "JSON 使用可读的贴纸模式");
     AssertTrue(savedJson.Contains("\"longCaptureSafetyChecksEnabled\": true", StringComparison.Ordinal), "JSON 保存长截图安全开关");
     AssertTrue(
+        savedJson.Contains("\"moduleActivationPreferences\"", StringComparison.Ordinal) &&
         savedJson.Contains("\"moduleBooleanPreferences\"", StringComparison.Ordinal) &&
         savedJson.Contains("\"moduleStringPreferences\"", StringComparison.Ordinal),
         "JSON 保存通用模块偏好字典");
     AssertTrue(savedJson.Contains("\"screenshotFileNameMode\": \"imageText\"", StringComparison.Ordinal), "JSON 保存图片命名规则");
+    AssertTrue(savedJson.Contains("\"organizeScreenshotsByDate\": true", StringComparison.Ordinal), "JSON 保存按日期分类开关");
+    AssertTrue(savedJson.Contains("\"screenshotDateParentFolder\"", StringComparison.Ordinal), "JSON 保存日期分类父文件夹");
     AssertTrue(savedJson.Contains("\"dismissSaveNotificationBeforeCapture\": false", StringComparison.Ordinal), "JSON 保存截图前关闭提示开关");
     AssertTrue(savedJson.Contains("\"hideMainWindowDuringCapture\": true", StringComparison.Ordinal), "JSON 保存截图时隐藏主界面开关");
     AssertTrue(savedJson.Contains("\"annotationSnappingEnabled\": false", StringComparison.Ordinal), "JSON 保存元素吸附开关");
@@ -2718,6 +3028,11 @@ try
     AssertEqual(11, loadedSettings.Preferences.LastToolWidth, "JSON 恢复上次使用的粗细");
     AssertTrue(loadedSettings.Preferences.LongCaptureSafetyChecksEnabled, "JSON 恢复长截图安全开关");
     AssertEqual(ScreenshotFileNameMode.ImageText, loadedSettings.Preferences.ScreenshotFileNameMode, "JSON 恢复图片文字命名规则");
+    AssertTrue(loadedSettings.Preferences.OrganizeScreenshotsByDate, "JSON 恢复按日期分类开关");
+    AssertEqual(
+        Path.Combine(settingsTestDirectory, "dated-captures"),
+        loadedSettings.GetScreenshotParentFolder(),
+        "启用日期分类后使用用户绑定的独立父文件夹");
     AssertTrue(!loadedSettings.Preferences.DismissSaveNotificationBeforeCapture, "JSON 恢复保留保存提示的选择");
     AssertTrue(loadedSettings.Preferences.HideMainWindowDuringCapture, "JSON 恢复截图时隐藏主界面开关");
     AssertTrue(!loadedSettings.Preferences.AnnotationSnappingEnabled, "JSON 恢复元素吸附开关");
@@ -2739,6 +3054,9 @@ try
     AssertEqual(60, loadedSettings.Preferences.ScreenRecordingFramesPerSecond, "JSON 恢复录屏帧率");
     AssertEqual(20_000_000, loadedSettings.Preferences.ScreenRecordingVideoBitrate, "JSON 恢复录屏码率");
     AssertTrue(
+        !loadedSettings.Preferences.ModuleActivationPreferences["ocr"].Enabled,
+        "JSON restores case-insensitive module activation preferences");
+    AssertTrue(
         loadedSettings.Preferences.ModuleBooleanPreferences[
             LongCapturePreferences.SafetyChecksId],
         "旧版长截图偏好迁移到通用模块设置");
@@ -2756,6 +3074,16 @@ try
         loadedSettings.LastLaunchedVersion ?? string.Empty,
         "JSON 恢复上次启动版本");
     AssertEqual((int)Keys.Q, loadedSettings.HotkeyVirtualKey, "JSON 恢复快捷键");
+    AssertEqual(3, loadedSettings.GetHotkeys().Count, "JSON 恢复三组截图快捷键");
+    AssertTrue(
+        loadedSettings.GetHotkeys().SequenceEqual(configuredSettings.GetHotkeys()),
+        "JSON 保持多组截图快捷键的顺序");
+
+    var emptyHotkeyStore = new JsonSettingsStore(settingsTestDirectory, "no-hotkeys");
+    var emptyHotkeySettings = new AppSettings();
+    emptyHotkeySettings.SetHotkeys([]);
+    emptyHotkeyStore.Save(emptyHotkeySettings);
+    AssertEqual(0, emptyHotkeyStore.Load().GetHotkeys().Count, "JSON 保持用户未绑定快捷键的选择");
 
     AssertEqual(12, loadedSettings.Preferences.AnnotationRotationStepDegrees, "JSON 恢复编辑元素旋转速度");
     AssertEqual(DrawingCursorShape.Square, loadedSettings.Preferences.DrawingCursorShape, "JSON 恢复绘制光标形状");
@@ -2834,6 +3162,11 @@ try
     AssertEqual(5, migratedSettings.Preferences.LastToolWidth, "旧 JSON 使用范围内默认粗细");
     AssertTrue(!migratedSettings.Preferences.LongCaptureSafetyChecksEnabled, "旧 JSON 默认迁移为宽松长截图");
     AssertEqual(ScreenshotFileNameMode.DateTime, migratedSettings.Preferences.ScreenshotFileNameMode, "旧 JSON 默认迁移为日期时间命名");
+    AssertTrue(!migratedSettings.Preferences.OrganizeScreenshotsByDate, "旧 JSON 默认不启用按日期分类");
+    AssertEqual(
+        migratedSettings.OutputFolder,
+        migratedSettings.GetScreenshotParentFolder(),
+        "旧 JSON 缺少日期父文件夹时继续使用原保存目录");
     AssertTrue(migratedSettings.Preferences.DismissSaveNotificationBeforeCapture, "旧 JSON 默认在截图前关闭保存提示");
     AssertTrue(!migratedSettings.Preferences.HideMainWindowDuringCapture, "旧 JSON 默认保留轻截主界面");
     AssertTrue(migratedSettings.Preferences.AnnotationSnappingEnabled, "旧 JSON 默认开启元素吸附");
@@ -3192,10 +3525,10 @@ using (var pinnedImageModule = new PinnedImageModule(pinnedImageWindowFactory))
 
 using (var ocrModule = new OcrModule())
 {
-    AssertEqual(new Version(1, 11, 6), OcrModule.MinimumHostVersion, "OCR 模块最低主程序版本");
+    AssertEqual(new Version(1, 11, 7), OcrModule.MinimumHostVersion, "OCR 模块最低主程序版本");
     AssertEqual("screenshot-tool.ocr", ocrModule.Id, "OCR 模块 ID 保持稳定");
     AssertEqual("本地 OCR 文字识别", ocrModule.DisplayName, "OCR 模块显示名称");
-    AssertEqual(new Version(1, 2, 0), ocrModule.Version, "OCR 模块版本");
+    AssertEqual(new Version(1, 3, 0), ocrModule.Version, "OCR 模块版本");
 
     var incompatibleOcrModuleRejected = false;
     try
@@ -3332,6 +3665,7 @@ using (var ocrFeature = new OcrFeature(new TestOcrRecognizer("第一行\nSecond 
         .GetResult();
     AssertEqual("本地 OCR 识别结果", ocrHost.ResultTitle ?? string.Empty, "OCR 使用通用宿主打开结果窗口");
     AssertEqual("第一行\nSecond line", ocrHost.ResultText ?? string.Empty, "OCR 结果保留识别换行");
+    AssertTrue(ocrHost.TranslatableResultShown, "本地 OCR 请求可翻译的结果窗口");
     AssertTrue(ocrHost.Completed, "OCR 成功后结束冻结的截图会话");
     AssertTrue(ocrHost.SelectionCopied, "OCR 识别宿主提供的当前选区位图");
 }
@@ -3389,6 +3723,7 @@ using (var paddleFeature = new PaddleOcrFeature(
         .GetResult();
     AssertEqual("PP-OCR 测试结果", paddleHost.ResultTitle ?? string.Empty, "PP-OCR 使用通用结果窗口");
     AssertEqual("第一行\nMixed 2026", paddleHost.ResultText ?? string.Empty, "PP-OCR 保留中英混排结果");
+    AssertTrue(paddleHost.TranslatableResultShown, "PP-OCR Tiny/Small 请求可翻译的结果窗口");
     AssertTrue(paddleHost.Completed, "PP-OCR 成功后结束截图会话");
 }
 
@@ -3463,6 +3798,7 @@ using (var qrCodeFeature = new QrCodeFeature(
         $"https://example.com/one{Environment.NewLine}{Environment.NewLine}第二个二维码",
         qrCodeHost.ResultText ?? string.Empty,
         "多个二维码结果按块分隔并保留原始内容");
+    AssertTrue(!qrCodeHost.TranslatableResultShown, "二维码结果窗口不显示 OCR 翻译按钮");
     AssertTrue(qrCodeHost.Completed, "二维码扫描成功后结束冻结的截图会话");
     AssertTrue(qrCodeHost.SelectionCopied, "二维码扫描宿主提供的当前选区位图");
 }
@@ -3485,6 +3821,100 @@ catch (OperationCanceledException)
     qrCodeDisposeCancelledScan = true;
 }
 AssertTrue(qrCodeDisposeCancelledScan, "二维码功能释放时取消活动扫描任务");
+
+AssertEqual(
+    "en",
+    MyMemoryTextTranslationService.DetectSourceLanguage("Compacted conversation"),
+    "联网翻译默认识别英文 OCR 文本");
+AssertEqual(
+    "ja",
+    MyMemoryTextTranslationService.DetectSourceLanguage("会話を翻訳します"),
+    "联网翻译通过假名识别日文");
+AssertEqual(
+    "ko",
+    MyMemoryTextTranslationService.DetectSourceLanguage("대화를 번역합니다"),
+    "联网翻译识别韩文");
+AssertEqual(
+    "zh-CN",
+    MyMemoryTextTranslationService.DetectSourceLanguage("识别后的中文文本"),
+    "联网翻译识别已是中文的文本");
+AssertEqual(
+    "und",
+    MyMemoryTextTranslationService.DetectSourceLanguage("2026-07-28 😀"),
+    "只有数字、符号和表情时无需联网翻译");
+AssertEqual(
+    "fr",
+    MyMemoryTextTranslationService.DetectSourceLanguage("Bonjour, le monde avec une image."),
+    "联网翻译识别常见法文 OCR 文本");
+
+var splitTranslationSource =
+    string.Concat(Enumerable.Repeat("English 中文 😀 sentence. ", 80));
+var splitTranslationSegments =
+    MyMemoryTextTranslationService.SplitByUtf8ByteCount(splitTranslationSource, 480);
+AssertEqual(
+    splitTranslationSource,
+    string.Concat(splitTranslationSegments),
+    "联网翻译分段不会丢失或改写原文字符");
+AssertTrue(
+    splitTranslationSegments.Count > 1 &&
+    splitTranslationSegments.All(segment => Encoding.UTF8.GetByteCount(segment) <= 480),
+    "联网翻译分段遵守 MyMemory 单段 UTF-8 字节上限且不拆坏表情字符");
+
+var successfulTranslationHandler = new RecordingTranslationHttpMessageHandler(
+    (_, requestIndex) => requestIndex == 0 ? "压缩的对话" : $"译文 {requestIndex + 1}");
+using (var translationClient = new HttpClient(successfulTranslationHandler))
+using (var translationService = new MyMemoryTextTranslationService(translationClient))
+{
+    var translated = await translationService.TranslateToSimplifiedChineseAsync(
+        "Compacted conversation",
+        CancellationToken.None);
+    AssertEqual("压缩的对话", translated, "联网翻译读取中文结果");
+    AssertTrue(
+        successfulTranslationHandler.Requests.Count == 1 &&
+        successfulTranslationHandler.Requests[0].Query.Contains(
+            "langpair=en%7Czh-CN",
+            StringComparison.OrdinalIgnoreCase),
+        "联网翻译向固定 HTTPS 服务发送英文到简体中文的请求");
+
+    var requestCountBeforeChinese = successfulTranslationHandler.Requests.Count;
+    var unchangedChinese = await translationService.TranslateToSimplifiedChineseAsync(
+        "已经是中文",
+        CancellationToken.None);
+    AssertEqual("已经是中文", unchangedChinese, "已经是中文的结果保持原文");
+    AssertEqual(
+        requestCountBeforeChinese,
+        successfulTranslationHandler.Requests.Count,
+        "纯中文结果不发送联网翻译请求");
+}
+
+const string failedTranslationJson = """
+    {
+      "responseData": { "translatedText": "" },
+      "responseStatus": "403",
+      "responseDetails": "daily request limit reached"
+    }
+    """;
+using (var failedTranslationClient = new HttpClient(
+           new StaticJsonHttpMessageHandler(failedTranslationJson)))
+using (var failedTranslationService =
+       new MyMemoryTextTranslationService(failedTranslationClient))
+{
+    var failureReported = false;
+    try
+    {
+        await failedTranslationService.TranslateToSimplifiedChineseAsync(
+            "Translate this text",
+            CancellationToken.None);
+    }
+    catch (InvalidOperationException exception)
+    {
+        failureReported = exception.Message.Contains(
+            "daily request limit reached",
+            StringComparison.Ordinal);
+    }
+
+    AssertTrue(failureReported, "联网翻译失败时向结果窗口返回可读原因");
+}
 
 AssertEqual(
     new Point(612, 100),
@@ -3657,15 +4087,58 @@ finally
 }
 
 var moduleTestDirectory = Path.Combine(Path.GetTempPath(), "ScreenshotTool.ModuleTests", Guid.NewGuid().ToString("N"));
+var modulePreferenceTestDirectory = moduleTestDirectory + ".preferences";
 try
 {
     Directory.CreateDirectory(moduleTestDirectory);
+    var modulePreferenceStore = new JsonSettingsStore(
+        modulePreferenceTestDirectory,
+        "module-tests");
+    var modulePreferenceSettings = modulePreferenceStore.Load();
+    var moduleActivationPreferences = new UserPreferenceModuleActivationStore(
+        modulePreferenceSettings,
+        modulePreferenceStore);
     var legacyRootModulePath = Path.Combine(
         moduleTestDirectory,
         "ScreenshotTool.TestModule.dll");
     File.Copy(typeof(TestHotLoadModule).Assembly.Location, legacyRootModulePath);
-    using var moduleHost = new ModuleHost(moduleTestDirectory);
+    using var moduleHost = new ModuleHost(
+        moduleTestDirectory,
+        activationPreferences: moduleActivationPreferences);
+    var legacyDisabledPackageDirectory = Path.Combine(
+        moduleTestDirectory,
+        "LegacyDisabled");
+    Directory.CreateDirectory(legacyDisabledPackageDirectory);
+    File.Copy(
+        typeof(TestHotLoadModule).Assembly.Location,
+        Path.Combine(legacyDisabledPackageDirectory, "ScreenshotTool.TestModule.dll"));
+    var legacyDisabledMarkerPath = Path.Combine(
+        legacyDisabledPackageDirectory,
+        ".lightshot-module-disabled.json");
+    File.WriteAllText(
+        legacyDisabledMarkerPath,
+        """
+        {
+          "ModuleId": "tests.hot-load",
+          "DisplayName": "Legacy disabled module",
+          "Version": "1.0.0"
+        }
+        """);
     var ignoredRootModule = moduleHost.Refresh();
+    AssertTrue(
+        !File.Exists(legacyDisabledMarkerPath),
+        "Legacy module markers are removed after migration");
+    AssertTrue(
+        !modulePreferenceStore.Load()
+            .Preferences.ModuleActivationPreferences["LegacyDisabled"].Enabled,
+        "Legacy disabled state is migrated into user preferences");
+    AssertEqual(
+        ModulePackageState.Disabled,
+        moduleHost.GetInstalledPackages().Single().State,
+        "Migrated legacy modules remain disabled");
+    AssertTrue(
+        moduleHost.DeletePackage("LegacyDisabled").Succeeded,
+        "Migrated legacy modules can still be permanently deleted");
     AssertEqual(0, ignoredRootModule.Modules.Count, "Modules 根目录不再加载散落 DLL");
     File.Delete(legacyRootModulePath);
 
@@ -3710,24 +4183,48 @@ try
     }
 
     var disabledModule = moduleHost.SetPackageEnabled("TestHotLoad", enabled: false);
+    AssertTrue(
+        !modulePreferenceStore.Load()
+            .Preferences.ModuleActivationPreferences["TestHotLoad"].Enabled,
+        "Disabling a module persists its state in user preferences");
+    AssertTrue(
+        !File.Exists(Path.Combine(modulePackageDirectory, ".lightshot-module-disabled.json")),
+        "Disabling a module does not create a marker inside the module package");
     AssertTrue(disabledModule.Succeeded, "设置工作台可以禁用模块");
     AssertEqual(0, moduleHost.GetModules().Count, "禁用模块后不再用于新截图会话");
     AssertEqual(
         ModulePackageState.Disabled,
         moduleHost.GetInstalledPackages().Single().State,
         "禁用状态持久化在模块包中");
-    using (var restartedHost = new ModuleHost(moduleTestDirectory))
+    using (var restartedHost = new ModuleHost(
+               moduleTestDirectory,
+               activationPreferences: new UserPreferenceModuleActivationStore(
+                   modulePreferenceStore.Load(),
+                   modulePreferenceStore)))
     {
         restartedHost.Refresh();
+        var restartedPackage = restartedHost.GetInstalledPackages().Single();
+        AssertEqual(
+            installedPackage.DisplayName,
+            restartedPackage.DisplayName,
+            "Disabled module display metadata is restored from user preferences");
+        AssertEqual(
+            installedPackage.ModuleId,
+            restartedPackage.ModuleId,
+            "Disabled module ID is restored from user preferences");
         AssertEqual(0, restartedHost.GetModules().Count, "重启后保持模块禁用状态");
         AssertEqual(
             ModulePackageState.Disabled,
-            restartedHost.GetInstalledPackages().Single().State,
+            restartedPackage.State,
             "重启后仍可在设置工作台查看禁用模块");
     }
     AssertTrue(feature.HandleKeyDown(new KeyEventArgs(Keys.Control | Keys.Alt | Keys.M)), "禁用不打断当前截图会话");
 
     var enabledModule = moduleHost.SetPackageEnabled("TestHotLoad", enabled: true);
+    AssertTrue(
+        modulePreferenceStore.Load()
+            .Preferences.ModuleActivationPreferences["TestHotLoad"].Enabled,
+        "Re-enabling a module persists its state in user preferences");
     AssertTrue(enabledModule.Succeeded, "设置工作台可以重新启用模块");
     AssertEqual(1, moduleHost.GetModules().Count, "重新启用后模块恢复到新截图会话");
     AssertTrue(
@@ -3735,6 +4232,10 @@ try
         "模块删除拒绝越过 Modules 根目录");
 
     var deletedModule = moduleHost.DeletePackage("TestHotLoad");
+    AssertTrue(
+        !modulePreferenceStore.Load().Preferences.ModuleActivationPreferences.ContainsKey(
+            "TestHotLoad"),
+        "Permanently deleting a module removes its activation preference");
     AssertTrue(deletedModule.Succeeded, "设置工作台可以永久删除模块");
     AssertTrue(!Directory.Exists(modulePackageDirectory), "永久删除会移除整个模块文件夹");
     AssertEqual(0, moduleHost.GetInstalledPackages().Count, "永久删除后模块不再出现在安装列表");
@@ -3751,6 +4252,10 @@ finally
     if (Directory.Exists(moduleTestDirectory))
     {
         Directory.Delete(moduleTestDirectory, recursive: true);
+    }
+    if (Directory.Exists(modulePreferenceTestDirectory))
+    {
+        Directory.Delete(modulePreferenceTestDirectory, recursive: true);
     }
 }
 
@@ -4194,6 +4699,14 @@ using (var failingFeatureSession = new CaptureFeatureSession(
     AssertEqual(0, failingFeatureSession.GetToolbarCommands().Count, "故障模块只对当前截图会话停用");
 }
 
+var disposeCountingFeature = new DisposeCountingCaptureFeature();
+var repeatDisposeFeatureSession = new CaptureFeatureSession(
+    new TestCaptureFeatureCatalog(disposeCountingFeature),
+    new TestCaptureFeatureHost());
+repeatDisposeFeatureSession.Dispose();
+repeatDisposeFeatureSession.Dispose();
+AssertEqual(1, disposeCountingFeature.DisposeCount, "截图会话重复释放时只释放一次模块功能");
+
 try
 {
     Directory.CreateDirectory(recordingModuleTestDirectory);
@@ -4228,10 +4741,26 @@ try
     AssertTrue(recordingFeature is ICaptureToolbarCommandProvider, "录屏功能提供截图工具栏命令");
     var recordingCommands = ((ICaptureToolbarCommandProvider)recordingFeature).GetToolbarCommands();
     AssertEqual("录屏", recordingCommands[0].Text, "录屏模块暴露可组合工具栏入口");
-    File.WriteAllBytes(recordingDependencyPath, [1, 2, 3, 4, 5]);
-    var reloadedRecordingModules = recordingModuleHost.Refresh();
-    AssertTrue(reloadedRecordingModules.Changed, "模块文件夹内的私有依赖更新会触发热重载");
-    AssertEqual(1, reloadedRecordingModules.Modules.Count, "私有依赖更新后录屏模块保持可用");
+    var dependencyLastWriteTime = File.GetLastWriteTimeUtc(recordingDependencyPath);
+    File.WriteAllBytes(recordingDependencyPath, [4, 3, 2, 1]);
+    File.SetLastWriteTimeUtc(recordingDependencyPath, dependencyLastWriteTime);
+    ModuleRefreshResult? reloadedRecordingModules = null;
+    AssertTrue(
+        SpinWait.SpinUntil(
+            () =>
+            {
+                var refreshAfterDependencyUpdate = recordingModuleHost.Refresh();
+                if (!refreshAfterDependencyUpdate.Changed)
+                {
+                    return false;
+                }
+
+                reloadedRecordingModules = refreshAfterDependencyUpdate;
+                return true;
+            },
+            TimeSpan.FromSeconds(3)),
+        "内容变化但长度和写入时间不变时仍会触发热重载");
+    AssertEqual(1, reloadedRecordingModules!.Modules.Count, "私有依赖更新后录屏模块保持可用");
     Directory.Delete(recordingModulePackageDirectory, recursive: true);
     var removedRecordingModules = recordingModuleHost.Refresh();
     AssertEqual(0, removedRecordingModules.Modules.Count, "删除录屏模块文件夹后立即从目录卸载");
@@ -4283,7 +4812,8 @@ static void AssertSingleColumnSettings(Control page, int expectedCount, string n
     foreach (var row in rows)
     {
         var inputCount = row.Controls.Cast<Control>().Count(control =>
-            control is CheckBox or ComboBox or NumericUpDown or TextBox);
+            control is CheckBox or ComboBox or NumericUpDown or TextBox ||
+            string.Equals(control.Tag as string, "SettingInput", StringComparison.Ordinal));
         AssertEqual(1, inputCount, $"{name}每行只有一个设置控件");
     }
     for (var index = 1; index < rows.Length; index++)
@@ -4340,12 +4870,12 @@ static void VerifyPaddleOcrModule(
     {
         CreatePaddleOcrModelPlaceholders(moduleDirectory, variant);
         AssertEqual(
-            new Version(1, 11, 6),
+            new Version(1, 11, 7),
             PaddleOcrModuleBase.MinimumHostVersion,
             $"{expectedDisplayName}最低主程序版本");
         AssertEqual(expectedModuleId, module.Id, $"{expectedDisplayName}模块 ID");
         AssertEqual(expectedDisplayName, module.DisplayName, $"{expectedDisplayName}显示名称");
-        AssertEqual(new Version(1, 1, 0), module.Version, $"{expectedDisplayName}模块版本");
+        AssertEqual(new Version(1, 2, 0), module.Version, $"{expectedDisplayName}模块版本");
 
         var incompatibleRejected = false;
         try
@@ -4879,6 +5409,15 @@ internal sealed class ThrowingToolbarFeature : CaptureFeatureBase, ICaptureToolb
         Task.FromException(new InvalidOperationException("模拟录屏故障"));
 }
 
+internal sealed class DisposeCountingCaptureFeature : CaptureFeatureBase
+{
+    public override string Id => "tests.dispose-counting-feature";
+
+    public int DisposeCount { get; private set; }
+
+    public override void Dispose() => DisposeCount++;
+}
+
 internal sealed class TestTextClipboardService : IClipboardService
 {
     public string? Text { get; set; }
@@ -4971,13 +5510,14 @@ internal sealed class TestBlockingQrCodeScanner : IQrCodeScanner, IDisposable
 }
 
 internal sealed class TestOcrCaptureHost(Bitmap? selectionImage = null) :
-    ICaptureTextResultHost,
+    ITranslatableCaptureTextResultHost,
     ICaptureArtifactHost
 {
     public bool Completed { get; private set; }
     public bool SelectionCopied { get; private set; }
     public string? ResultTitle { get; private set; }
     public string? ResultText { get; private set; }
+    public bool TranslatableResultShown { get; private set; }
     public bool HasSelection => true;
     public Rectangle Selection => new(
         0,
@@ -5009,6 +5549,14 @@ internal sealed class TestOcrCaptureHost(Bitmap? selectionImage = null) :
     {
         ResultTitle = title;
         ResultText = text;
+        TranslatableResultShown = false;
+    }
+
+    public void ShowTranslatableTextResult(string title, string text)
+    {
+        ResultTitle = title;
+        ResultText = text;
+        TranslatableResultShown = true;
     }
 
     public void NotifyArtifactSaved(string path) { }
@@ -5026,4 +5574,36 @@ internal sealed class StaticJsonHttpMessageHandler(string json) : HttpMessageHan
             RequestMessage = request,
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         });
+}
+
+internal sealed class RecordingTranslationHttpMessageHandler(
+    Func<HttpRequestMessage, int, string> resultFactory) : HttpMessageHandler
+{
+    public List<Uri> Requests { get; } = [];
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var requestUri = request.RequestUri ??
+                         throw new InvalidOperationException("翻译请求缺少地址。");
+        var requestIndex = Requests.Count;
+        Requests.Add(requestUri);
+        var translatedText = resultFactory(request, requestIndex);
+        var json = JsonSerializer.Serialize(new
+        {
+            responseData = new
+            {
+                translatedText
+            },
+            responseStatus = 200,
+            responseDetails = ""
+        });
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        });
+    }
 }

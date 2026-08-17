@@ -134,8 +134,22 @@ internal sealed class OcrFeature :
             return;
         }
 
-        resultHost.ShowTextResult("本地 OCR 识别结果", text);
+        ShowResult(resultHost, "本地 OCR 识别结果", text);
         artifactHost.CompleteCaptureSession();
+    }
+
+    private static void ShowResult(
+        ICaptureTextResultHost resultHost,
+        string title,
+        string text)
+    {
+        if (resultHost is ITranslatableCaptureTextResultHost translatableResultHost)
+        {
+            translatableResultHost.ShowTranslatableTextResult(title, text);
+            return;
+        }
+
+        resultHost.ShowTextResult(title, text);
     }
 
     private static void ShowMessage(string message, string title, MessageBoxIcon icon) =>

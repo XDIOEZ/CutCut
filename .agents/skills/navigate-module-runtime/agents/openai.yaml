@@ -1,0 +1,4 @@
+interface:
+  display_name: "轻截模块运行时导航"
+  short_description: "快速定位并安全修改轻截的模块契约、热加载与卸载系统"
+  default_prompt: "使用 $navigate-module-runtime 定位并修改轻截的模块运行时，同时检查契约、生命周期联动并更新滚动日志。"

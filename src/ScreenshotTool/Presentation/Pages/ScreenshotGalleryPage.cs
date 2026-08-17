@@ -236,7 +236,15 @@ internal sealed class ScreenshotGalleryPage : UserControl
                 return;
             }
 
-            var entries = Directory.EnumerateFiles(_folderPath)
+            var entries = Directory.EnumerateFiles(
+                    _folderPath,
+                    "*",
+                    new EnumerationOptions
+                    {
+                        RecurseSubdirectories = true,
+                        IgnoreInaccessible = true,
+                        AttributesToSkip = FileAttributes.ReparsePoint
+                    })
                 .Where(path =>
                     _savedScreenshotService.IsSupportedImage(path) ||
                     _savedScreenshotService.IsSupportedVideo(path))
@@ -265,7 +273,12 @@ internal sealed class ScreenshotGalleryPage : UserControl
 
                 var imageIndex = _images.Images.Count;
                 _images.Images.Add(thumbnail);
-                var item = new ListViewItem(entry.Name, imageIndex)
+                var relativeFolder = Path.GetDirectoryName(
+                    Path.GetRelativePath(_folderPath, entry.FullName));
+                var displayName = string.IsNullOrEmpty(relativeFolder)
+                    ? entry.Name
+                    : $"{relativeFolder}  ·  {entry.Name}";
+                var item = new ListViewItem(displayName, imageIndex)
                 {
                     Tag = entry.FullName,
                     ToolTipText =

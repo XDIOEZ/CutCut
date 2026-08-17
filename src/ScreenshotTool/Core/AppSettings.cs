@@ -11,6 +11,8 @@ internal sealed class AppSettings
 
     public int HotkeyVirtualKey { get; set; } = HotkeyDefinition.Default.VirtualKey;
 
+    public List<HotkeyDefinition>? Hotkeys { get; set; }
+
     public bool StartMinimized { get; set; }
 
     public bool StartWithWindows
@@ -31,11 +33,54 @@ internal sealed class AppSettings
 
     public HotkeyDefinition GetHotkey() => new(HotkeyModifiers, HotkeyVirtualKey);
 
+    public IReadOnlyList<HotkeyDefinition> GetHotkeys()
+    {
+        if (Hotkeys is not null)
+        {
+            return HotkeyBindings.Normalize(Hotkeys);
+        }
+
+        var legacyHotkey = GetHotkey();
+        return legacyHotkey.IsValid
+            ? [legacyHotkey]
+            : [HotkeyDefinition.Default];
+    }
+
     public void SetHotkey(HotkeyDefinition hotkey)
     {
-        HotkeyModifiers = hotkey.Modifiers;
-        HotkeyVirtualKey = hotkey.VirtualKey;
+        SetHotkeys([hotkey]);
     }
+
+    public void SetHotkeys(IEnumerable<HotkeyDefinition> hotkeys)
+    {
+        var normalized = HotkeyBindings.Normalize(hotkeys);
+        Hotkeys = normalized.ToList();
+        if (normalized.Count > 0)
+        {
+            HotkeyModifiers = normalized[0].Modifiers;
+            HotkeyVirtualKey = normalized[0].VirtualKey;
+        }
+    }
+
+    public void Apply(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        OutputFolder = settings.OutputFolder;
+        HotkeyModifiers = settings.HotkeyModifiers;
+        HotkeyVirtualKey = settings.HotkeyVirtualKey;
+        Hotkeys = settings.Hotkeys?.ToList();
+        StartMinimized = settings.StartMinimized;
+        StartWithWindows = settings.StartWithWindows;
+        LastLaunchedVersion = settings.LastLaunchedVersion;
+        Preferences = settings.Preferences;
+    }
+
+    public string GetScreenshotParentFolder() =>
+        Preferences.OrganizeScreenshotsByDate &&
+        !string.IsNullOrWhiteSpace(Preferences.ScreenshotDateParentFolder)
+            ? Preferences.ScreenshotDateParentFolder
+            : OutputFolder;
 
     public ToolWidthRange GetToolWidthRange() =>
         Preferences.GetToolWidthRange();

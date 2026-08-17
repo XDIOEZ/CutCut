@@ -80,14 +80,12 @@ internal sealed class SavedScreenshotService(Action<string>? recycleFile = null)
 
         var fullFolderPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath));
         var fullFilePath = Path.GetFullPath(filePath);
-        var parentPath = Path.GetDirectoryName(fullFilePath);
-        if (string.IsNullOrEmpty(parentPath) ||
-            !string.Equals(
-                Path.TrimEndingDirectorySeparator(parentPath),
-                fullFolderPath,
-                StringComparison.OrdinalIgnoreCase))
+        var relativePath = Path.GetRelativePath(fullFolderPath, fullFilePath);
+        if (Path.IsPathRooted(relativePath) ||
+            relativePath.Equals("..", StringComparison.Ordinal) ||
+            relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("只能管理当前保存目录中的截图或视频。");
+            throw new InvalidOperationException("只能管理当前保存目录及其子文件夹中的截图或视频。");
         }
         if (!IsSupportedImage(fullFilePath) && !IsSupportedVideo(fullFilePath))
         {

@@ -10,12 +10,18 @@ internal sealed class SavePathSettingsPage : UserControl
     private readonly Button _browseButton;
     private readonly ComboBox _fileNameModeInput;
     private readonly Label _fileNameModeHint;
+    private readonly CheckBox _organizeByDateInput;
+    private readonly Label _dateParentLabel;
+    private readonly TextBox _dateParentInput;
+    private readonly Button _dateParentBrowseButton;
     private readonly Panel _card;
     private readonly Panel _note;
 
     public SavePathSettingsPage(
         string folderPath,
-        ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime)
+        ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime,
+        bool organizeByDate = false,
+        string? dateParentFolder = null)
     {
         BackColor = AppTheme.Canvas;
         AutoScroll = true;
@@ -23,7 +29,7 @@ internal sealed class SavePathSettingsPage : UserControl
         _card = new Panel
         {
             Location = new Point(0, 0),
-            Height = 342,
+            Height = 420,
             BackColor = AppTheme.Surface,
             BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(26, 22, 26, 22)
@@ -98,13 +104,52 @@ internal sealed class SavePathSettingsPage : UserControl
         _fileNameModeHint.Location = new Point(30, 234);
         UpdateFileNameModeHint();
 
+        _organizeByDateInput = new CheckBox
+        {
+            Text = "按日期自动创建子文件夹",
+            Checked = organizeByDate,
+            AutoSize = true,
+            Font = AppTheme.CreateFont(9F, FontStyle.Bold),
+            ForeColor = AppTheme.Text,
+            Location = new Point(28, 276)
+        };
+        var organizeByDateHint = AppTheme.CreateBodyLabel(
+            "启用后，截图会保存到父目录下当天的文件夹，例如 2026-08-11；同一天自动复用，跨天自动新建。",
+            650);
+        organizeByDateHint.Font = AppTheme.CreateFont(8.5F);
+        organizeByDateHint.Location = new Point(30, 304);
+        _organizeByDateInput.CheckedChanged += (_, _) => UpdateDateParentVisibility();
+
+        _dateParentLabel = new Label
+        {
+            Text = "日期分类父文件夹",
+            AutoSize = true,
+            Font = AppTheme.CreateFont(9F, FontStyle.Bold),
+            ForeColor = AppTheme.Text,
+            Location = new Point(28, 342)
+        };
+        _dateParentInput = new TextBox
+        {
+            Text = string.IsNullOrWhiteSpace(dateParentFolder) ? folderPath : dateParentFolder,
+            Location = new Point(28, 368),
+            Height = 36,
+            Font = AppTheme.CreateFont(9.5F),
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = Color.FromArgb(248, 250, 252)
+        };
+        _dateParentBrowseButton = AppTheme.CreateButton("浏览…");
+        _dateParentBrowseButton.Size = new Size(86, 36);
+        _dateParentBrowseButton.Top = 366;
+        _dateParentBrowseButton.Click += (_, _) =>
+            DateParentBrowseRequested?.Invoke(this, EventArgs.Empty);
+
         var saveButton = AppTheme.CreateButton("保存设置", primary: true);
-        saveButton.Location = new Point(28, 280);
+        saveButton.Location = new Point(28, 438);
         saveButton.Size = new Size(118, 38);
         saveButton.Click += (_, _) => SaveRequested?.Invoke(this, EventArgs.Empty);
 
         var openButton = AppTheme.CreateButton("打开文件夹");
-        openButton.Location = new Point(158, 280);
+        openButton.Location = new Point(158, 438);
         openButton.Size = new Size(118, 38);
         openButton.Click += (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty);
         _card.Controls.AddRange(
@@ -117,6 +162,11 @@ internal sealed class SavePathSettingsPage : UserControl
                 fileNameModeLabel,
                 _fileNameModeInput,
                 _fileNameModeHint,
+                _organizeByDateInput,
+                organizeByDateHint,
+                _dateParentLabel,
+                _dateParentInput,
+                _dateParentBrowseButton,
                 saveButton,
                 openButton
             ]);
@@ -127,7 +177,7 @@ internal sealed class SavePathSettingsPage : UserControl
 
         _note = new Panel
         {
-            Location = new Point(0, 362),
+            Location = new Point(0, 440),
             Height = 112,
             BackColor = Color.FromArgb(240, 253, 244),
             Padding = new Padding(20, 16, 20, 14)
@@ -146,12 +196,14 @@ internal sealed class SavePathSettingsPage : UserControl
         noteBody.Location = new Point(22, 47);
         _note.Controls.AddRange([noteTitle, noteBody]);
         Controls.Add(_note);
+        UpdateDateParentVisibility();
 
         Resize += (_, _) => ResizeContent();
         ResizeContent();
     }
 
     public event EventHandler? BrowseRequested;
+    public event EventHandler? DateParentBrowseRequested;
     public event EventHandler? OpenRequested;
     public event EventHandler? SaveRequested;
 
@@ -165,14 +217,36 @@ internal sealed class SavePathSettingsPage : UserControl
         (_fileNameModeInput.SelectedItem as FileNameModeOption)?.Mode ??
         ScreenshotFileNameMode.DateTime;
 
+    public bool OrganizeByDate => _organizeByDateInput.Checked;
+
+    public string DateParentFolder
+    {
+        get => _dateParentInput.Text;
+        set => _dateParentInput.Text = value;
+    }
+
     private void ResizeContent()
     {
         var width = Math.Max(460, ClientSize.Width - 30);
         _card.Width = width;
         _note.Width = width;
         _browseButton.Left = width - _browseButton.Width - 28;
+        _dateParentBrowseButton.Left = width - _dateParentBrowseButton.Width - 28;
         _folderInput.Width = Math.Max(240, _browseButton.Left - _folderInput.Left - 12);
+        _dateParentInput.Width = Math.Max(
+            240,
+            _dateParentBrowseButton.Left - _dateParentInput.Left - 12);
         _fileNameModeInput.Width = Math.Min(430, Math.Max(280, width - 56));
+    }
+
+    private void UpdateDateParentVisibility()
+    {
+        var visible = _organizeByDateInput.Checked;
+        _dateParentLabel.Visible = visible;
+        _dateParentInput.Visible = visible;
+        _dateParentBrowseButton.Visible = visible;
+        _card.Height = visible ? 500 : 420;
+        _note.Top = visible ? 520 : 440;
     }
 
     private void UpdateFileNameModeHint()

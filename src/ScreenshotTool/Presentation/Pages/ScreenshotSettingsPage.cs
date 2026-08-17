@@ -5,9 +5,7 @@ namespace ScreenshotTool.Presentation.Pages;
 
 internal sealed class ScreenshotSettingsPage : UserControl
 {
-    private readonly HotkeyInputBox _hotkeyInput;
-    private readonly CheckBox _startWithWindows;
-    private readonly CheckBox _startMinimized;
+    private readonly HotkeyInputBox[] _hotkeyInputs;
     private readonly CheckBox _dismissNotificationBeforeCapture;
     private readonly CheckBox _hideMainWindowDuringCapture;
     private readonly Panel _settingsCard;
@@ -15,9 +13,7 @@ internal sealed class ScreenshotSettingsPage : UserControl
     private readonly List<Panel> _settingRows = [];
 
     public ScreenshotSettingsPage(
-        HotkeyDefinition hotkey,
-        bool startMinimized,
-        bool startWithWindows = false,
+        IReadOnlyList<HotkeyDefinition> hotkeys,
         bool dismissSaveNotificationBeforeCapture = true,
         bool hideMainWindowDuringCapture = false)
     {
@@ -27,7 +23,7 @@ internal sealed class ScreenshotSettingsPage : UserControl
         _settingsCard = new Panel
         {
             Location = Point.Empty,
-            Height = 546,
+            Height = 544,
             BackColor = AppTheme.Surface,
             BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(26, 22, 26, 22)
@@ -43,37 +39,28 @@ internal sealed class ScreenshotSettingsPage : UserControl
             Location = new Point(26, 22)
         };
         var description = AppTheme.CreateBodyLabel(
-            "配置后台截图快捷键、启动方式，以及开始截图时的界面行为。",
+            "配置后台截图快捷键，以及开始截图时的界面行为。",
             660);
         description.Location = new Point(28, 58);
 
-        _hotkeyInput = new HotkeyInputBox
-        {
-            Hotkey = hotkey,
-            Size = new Size(220, 36),
-            Font = new Font("Consolas", 10.5F, FontStyle.Bold),
-            BorderStyle = BorderStyle.FixedSingle,
-            TextAlign = HorizontalAlignment.Center,
-            BackColor = Color.White
-        };
+        _hotkeyInputs = Enumerable.Range(0, HotkeyBindings.MaximumCount)
+            .Select(CreateHotkeyInput)
+            .ToArray();
+        SetHotkeys(hotkeys);
         AddSettingRow(
-            "全局截图快捷键",
-            "后台运行时按下此组合键开始截图。",
-            _hotkeyInput,
+            "截图快捷键 1",
+            "首选截图组合键；可留空。",
+            CreateHotkeyEditor(_hotkeyInputs[0], 0),
             105);
-
-        _startWithWindows = CreateCheckBox(startWithWindows);
         AddSettingRow(
-            "开机自动启动",
-            "登录 Windows 后自动启动轻截并进入系统托盘，无需管理员权限。",
-            _startWithWindows,
+            "截图快捷键 2",
+            "另一套截图组合键；可留空。",
+            CreateHotkeyEditor(_hotkeyInputs[1], 1),
             177);
-
-        _startMinimized = CreateCheckBox(startMinimized);
         AddSettingRow(
-            "手动启动后最小化",
-            "平时双击轻截启动时也直接进入系统托盘，不显示主窗口。",
-            _startMinimized,
+            "截图快捷键 3",
+            "第三套截图组合键；可留空。",
+            CreateHotkeyEditor(_hotkeyInputs[2], 2),
             249);
 
         _dismissNotificationBeforeCapture = CreateCheckBox(
@@ -92,28 +79,28 @@ internal sealed class ScreenshotSettingsPage : UserControl
             393);
 
         var saveButton = AppTheme.CreateButton("保存截图设置", primary: true);
-        saveButton.Location = new Point(28, 485);
+        saveButton.Location = new Point(28, 483);
         saveButton.Size = new Size(142, 38);
         saveButton.Click += (_, _) => SaveRequested?.Invoke(this, EventArgs.Empty);
         _settingsCard.Controls.AddRange([title, description, saveButton]);
 
         _note = new Panel
         {
-            Location = new Point(0, 566),
+            Location = new Point(0, 564),
             Height = 112,
             BackColor = Color.FromArgb(240, 253, 244),
             Padding = new Padding(20, 16, 20, 14)
         };
         var noteTitle = new Label
         {
-            Text = "默认快捷键  Ctrl + Shift + X",
+            Text = "最多绑定 3 个快捷键",
             AutoSize = true,
             Font = AppTheme.CreateFont(9.5F, FontStyle.Bold),
             ForeColor = AppTheme.Success,
             Location = new Point(20, 15)
         };
         var noteBody = AppTheme.CreateBodyLabel(
-            "如果新快捷键被其他程序占用，轻截会保留原快捷键并提示重新设置。点击输入框后直接按下新的组合键即可。",
+            "默认使用 Ctrl + Shift + X。点击输入框后直接按下新的组合键；点击旁边的“删除”可以让该槽位保持未绑定。",
             660);
         noteBody.Location = new Point(22, 47);
         _note.Controls.AddRange([noteTitle, noteBody]);
@@ -125,34 +112,57 @@ internal sealed class ScreenshotSettingsPage : UserControl
 
     public event EventHandler? SaveRequested;
 
-    public HotkeyDefinition Hotkey
-    {
-        get => _hotkeyInput.Hotkey;
-        set => _hotkeyInput.Hotkey = value;
-    }
+    public IReadOnlyList<HotkeyDefinition> Hotkeys => _hotkeyInputs
+        .Select(input => input.Hotkey)
+        .Where(hotkey => hotkey is not null)
+        .Cast<HotkeyDefinition>()
+        .ToArray();
 
-    public bool StartMinimized
+    public void SetHotkeys(IEnumerable<HotkeyDefinition> hotkeys)
     {
-        get => _startMinimized.Checked;
-        set => _startMinimized.Checked = value;
-    }
-
-    public bool StartWithWindows
-    {
-        get => _startWithWindows.Checked;
-        set => _startWithWindows.Checked = value;
+        var normalized = HotkeyBindings.Normalize(hotkeys);
+        for (var index = 0; index < _hotkeyInputs.Length; index++)
+        {
+            _hotkeyInputs[index].Hotkey = index < normalized.Count
+                ? normalized[index]
+                : null;
+        }
     }
 
     public event EventHandler? HotkeyInputEntered
     {
-        add => _hotkeyInput.Enter += value;
-        remove => _hotkeyInput.Enter -= value;
+        add
+        {
+            foreach (var input in _hotkeyInputs)
+            {
+                input.Enter += value;
+            }
+        }
+        remove
+        {
+            foreach (var input in _hotkeyInputs)
+            {
+                input.Enter -= value;
+            }
+        }
     }
 
     public event EventHandler? HotkeyInputLeft
     {
-        add => _hotkeyInput.Leave += value;
-        remove => _hotkeyInput.Leave -= value;
+        add
+        {
+            foreach (var input in _hotkeyInputs)
+            {
+                input.Leave += value;
+            }
+        }
+        remove
+        {
+            foreach (var input in _hotkeyInputs)
+            {
+                input.Leave -= value;
+            }
+        }
     }
 
     public bool DismissSaveNotificationBeforeCapture
@@ -213,6 +223,34 @@ internal sealed class ScreenshotSettingsPage : UserControl
         ForeColor = AppTheme.Text,
         Cursor = Cursors.Hand
     };
+
+    private static HotkeyInputBox CreateHotkeyInput(int index) => new()
+    {
+        Name = $"ScreenshotHotkeyInput{index + 1}",
+        Size = new Size(220, 36),
+        Font = new Font("Consolas", 10.5F, FontStyle.Bold),
+        BorderStyle = BorderStyle.FixedSingle,
+        TextAlign = HorizontalAlignment.Center,
+        BackColor = Color.White
+    };
+
+    private Control CreateHotkeyEditor(HotkeyInputBox input, int index)
+    {
+        var editor = new Panel
+        {
+            Size = new Size(302, 36),
+            BackColor = Color.Transparent,
+            Tag = "SettingInput"
+        };
+        input.Location = Point.Empty;
+        var deleteButton = AppTheme.CreateButton("删除");
+        deleteButton.Name = $"DeleteScreenshotHotkeyButton{index + 1}";
+        deleteButton.Location = new Point(228, 0);
+        deleteButton.Size = new Size(74, 36);
+        deleteButton.Click += (_, _) => input.Hotkey = null;
+        editor.Controls.AddRange([input, deleteButton]);
+        return editor;
+    }
 
     private void ResizeContent()
     {

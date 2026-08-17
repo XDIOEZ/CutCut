@@ -1,0 +1,4 @@
+interface:
+  display_name: "轻截截图编辑导航"
+  short_description: "快速定位并安全修改轻截的截图、贴图、标注与导出系统"
+  default_prompt: "使用 $navigate-capture-editor 定位并修改轻截的截图、贴图或编辑器系统，同时检查最终导出、联动并维护导航。"

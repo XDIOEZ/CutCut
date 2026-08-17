@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ScreenshotTool.Core;
 
 [Flags]
@@ -15,6 +17,7 @@ internal sealed record HotkeyDefinition(HotkeyModifiers Modifiers, int VirtualKe
     public static HotkeyDefinition Default { get; } =
         new(HotkeyModifiers.Control | HotkeyModifiers.Shift, (int)Keys.X);
 
+    [JsonIgnore]
     public bool IsValid => Modifiers != HotkeyModifiers.None && VirtualKey is > 0 and <= 0xFF;
 
     public string ToDisplayText()

@@ -66,7 +66,7 @@ internal sealed class LiveAnnotationPointerHook : IDisposable
         if (_hook == nint.Zero)
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(),
-                "无法启动实时批注鼠标输入捕获。");
+                "无法启动全局鼠标输入监听。");
         }
     }
 

@@ -211,6 +211,11 @@ public interface ICaptureTextResultHost : ICaptureFeatureHost
     void ShowTextResult(string title, string text);
 }
 
+public interface ITranslatableCaptureTextResultHost : ICaptureTextResultHost
+{
+    void ShowTranslatableTextResult(string title, string text);
+}
+
 public enum CaptureAnnotationTool
 {
     Operation,

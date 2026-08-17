@@ -1,0 +1,4 @@
+interface:
+  display_name: "轻截屏幕录制导航"
+  short_description: "快速定位并安全修改轻截的屏幕录制、音视频与产物系统"
+  default_prompt: "使用 $navigate-screen-recording 定位并修改轻截的录屏系统，同时检查进程、产物联动并更新滚动日志。"

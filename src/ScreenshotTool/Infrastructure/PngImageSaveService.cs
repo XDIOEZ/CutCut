@@ -10,13 +10,18 @@ internal sealed class PngImageSaveService : IImageSaveService
         Bitmap image,
         string outputFolder,
         ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime,
-        IReadOnlyList<string>? imageTexts = null)
+        IReadOnlyList<string>? imageTexts = null,
+        bool organizeByDate = false)
     {
         if (image.Width <= 0 || image.Height <= 0)
         {
             throw new ArgumentException("截图内容为空。", nameof(image));
         }
 
+        outputFolder = ScreenshotOutputFolderPolicy.Resolve(
+            outputFolder,
+            organizeByDate,
+            DateTime.Now);
         Directory.CreateDirectory(outputFolder);
         var fileName = ScreenshotFileNamePolicy.CreateFileName(
             fileNameMode,

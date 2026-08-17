@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using ScreenshotTool.Core;
 
 namespace ScreenshotTool.Editing;
@@ -136,6 +137,48 @@ internal sealed class CaptureAnnotationEditor : IDisposable
         }
     }
 
+    public Bitmap? RenderSelectedImage()
+    {
+        if (Selection.Count != 1 ||
+            Selection.Primary is not StickerAnnotation sticker ||
+            !Document.Contains(sticker) ||
+            sticker.VisualBounds.IsEmpty)
+        {
+            return null;
+        }
+
+        var visualBounds = sticker.VisualBounds;
+        var localBounds = new Rectangle(
+            sticker.Bounds.X - visualBounds.X,
+            sticker.Bounds.Y - visualBounds.Y,
+            sticker.Bounds.Width,
+            sticker.Bounds.Height);
+        var result = new Bitmap(
+            visualBounds.Width,
+            visualBounds.Height,
+            PixelFormat.Format32bppPArgb);
+        try
+        {
+            using var graphics = Graphics.FromImage(result);
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.Clear(Color.Transparent);
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            AnnotationRotation.ApplyTransform(
+                graphics,
+                localBounds,
+                sticker.RotationDegrees);
+            graphics.DrawImage(sticker.Image, localBounds);
+            return result;
+        }
+        catch
+        {
+            result.Dispose();
+            throw;
+        }
+    }
+
     public bool Undo()
     {
         if (!Document.Undo())
@@ -215,7 +258,8 @@ internal sealed class CaptureAnnotationEditor : IDisposable
         };
         foreach (var annotation in Selection.Items)
         {
-            if (Document.Contains(annotation))
+            if (Document.Contains(annotation) &&
+                !ReferenceEquals(annotation, ActiveTextEditAnnotation))
             {
                 var state = graphics.Save();
                 try
@@ -230,7 +274,9 @@ internal sealed class CaptureAnnotationEditor : IDisposable
             }
         }
 
-        if (Selection.Count != 1 || Selection.Primary is not { SupportsResize: true } primary)
+        if (Selection.Count != 1 ||
+            Selection.Primary is not { SupportsResize: true } primary ||
+            ReferenceEquals(primary, ActiveTextEditAnnotation))
         {
             return;
         }

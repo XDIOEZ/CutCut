@@ -1,0 +1,4 @@
+interface:
+  display_name: "轻截系统总导航"
+  short_description: "快速判断轻截修改任务所属系统并持续维护导航完整性规则"
+  default_prompt: "使用 $navigate-cutcut-systems 路由轻截系统修改任务，并维护对应系统 Skill 的导航完整性。"

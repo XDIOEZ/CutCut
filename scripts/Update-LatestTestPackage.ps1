@@ -61,13 +61,17 @@ $destinationDirectory = [System.IO.Path]::GetFullPath(
 $artifactsRoot = Resolve-RepositoryPath -RepositoryRoot $repoRoot -RelativePath "artifacts"
 $workRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot ".latest-test-package-work"))
+$retiredRoot = [System.IO.Path]::GetFullPath(
+    (Join-Path $artifactsRoot ".latest-test-package-retired"))
 $modelCacheRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot "latest-test-package-model-cache"))
 $hostOutput = Join-Path $workRoot "host"
 $addonOutput = Join-Path $workRoot "addons"
 $dotnetArtifactsRoot = Join-Path $workRoot "dotnet-artifacts"
 $stagedPackage = Join-Path $workRoot $latestPackageName
-$previousPackage = Join-Path $workRoot ".previous-package"
+$legacyPreviousPackage = Join-Path $workRoot ".previous-package"
+$retiredPackage = Join-Path $retiredRoot (
+    "retired-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([Guid]::NewGuid().ToString('N'))")
 
 Assert-ChildPath -ParentPath $repoRoot -ChildPath $testRoot -Description "Test package root"
 Assert-ChildPath -ParentPath $testRoot -ChildPath $destinationDirectory `
@@ -75,6 +79,10 @@ Assert-ChildPath -ParentPath $testRoot -ChildPath $destinationDirectory `
 Assert-ChildPath -ParentPath $repoRoot -ChildPath $artifactsRoot -Description "Artifacts root"
 Assert-ChildPath -ParentPath $artifactsRoot -ChildPath $workRoot `
     -Description "Test package work directory"
+Assert-ChildPath -ParentPath $artifactsRoot -ChildPath $retiredRoot `
+    -Description "Retired test package directory"
+Assert-ChildPath -ParentPath $retiredRoot -ChildPath $retiredPackage `
+    -Description "Retired test package"
 Assert-ChildPath -ParentPath $artifactsRoot -ChildPath $modelCacheRoot `
     -Description "PP-OCR model cache"
 
@@ -90,6 +98,24 @@ if (Test-Path -LiteralPath $testRoot) {
 }
 
 New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $retiredRoot -Force | Out-Null
+foreach ($retiredDirectory in @(
+        Get-ChildItem -LiteralPath $retiredRoot -Directory -Force)) {
+    try {
+        Remove-Item -LiteralPath $retiredDirectory.FullName -Recurse -Force -ErrorAction Stop
+    } catch [System.IO.IOException] {
+        # A running test build can keep its renamed package locked until it exits.
+    } catch [System.UnauthorizedAccessException] {
+        # Keep the retired package outside the single-entry test root and retry next update.
+    }
+}
+if (Test-Path -LiteralPath $legacyPreviousPackage) {
+    $legacyRetiredPackage = Join-Path $retiredRoot (
+        "retired-legacy-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([Guid]::NewGuid().ToString('N'))")
+    Assert-ChildPath -ParentPath $retiredRoot -ChildPath $legacyRetiredPackage `
+        -Description "Legacy retired test package"
+    Move-Item -LiteralPath $legacyPreviousPackage -Destination $legacyRetiredPackage
+}
 if (Test-Path -LiteralPath $workRoot) {
     Remove-Item -LiteralPath $workRoot -Recurse -Force
 }
@@ -249,21 +275,30 @@ New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $movedPreviousPackage = $false
 try {
     if (Test-Path -LiteralPath $destinationDirectory) {
-        Move-Item -LiteralPath $destinationDirectory -Destination $previousPackage
+        Move-Item -LiteralPath $destinationDirectory -Destination $retiredPackage
         $movedPreviousPackage = $true
     }
-    Move-Item -LiteralPath $stagedPackage -Destination $destinationDirectory
+    if (Test-Path -LiteralPath $destinationDirectory) {
+        $destinationEntries = @(
+            Get-ChildItem -LiteralPath $destinationDirectory -Force)
+        if ($destinationEntries.Count -gt 0) {
+            throw "The latest test package destination was recreated with unexpected content."
+        }
+        Get-ChildItem -LiteralPath $stagedPackage -Force | ForEach-Object {
+            Move-Item -LiteralPath $_.FullName -Destination $destinationDirectory
+        }
+        Remove-Item -LiteralPath $stagedPackage -Force
+    } else {
+        Move-Item -LiteralPath $stagedPackage -Destination $destinationDirectory
+    }
 } catch {
-    if ($movedPreviousPackage -and
-        -not (Test-Path -LiteralPath $destinationDirectory) -and
-        (Test-Path -LiteralPath $previousPackage)) {
-        Move-Item -LiteralPath $previousPackage -Destination $destinationDirectory
+    if ($movedPreviousPackage -and (Test-Path -LiteralPath $retiredPackage)) {
+        if (Test-Path -LiteralPath $destinationDirectory) {
+            Remove-Item -LiteralPath $destinationDirectory -Recurse -Force
+        }
+        Move-Item -LiteralPath $retiredPackage -Destination $destinationDirectory
     }
     throw
-}
-
-if (Test-Path -LiteralPath $previousPackage) {
-    Remove-Item -LiteralPath $previousPackage -Recurse -Force
 }
 
 $rootEntries = @(Get-ChildItem -LiteralPath $testRoot -Force)
@@ -279,6 +314,16 @@ $finalRequiredFiles = foreach ($relativePath in $requiredFiles) {
 $exePath = Join-Path $destinationDirectory "ScreenshotTool.exe"
 $exeHash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash
 
+foreach ($retiredDirectory in @(
+        Get-ChildItem -LiteralPath $retiredRoot -Directory -Force)) {
+    try {
+        Remove-Item -LiteralPath $retiredDirectory.FullName -Recurse -Force -ErrorAction Stop
+    } catch [System.IO.IOException] {
+        # The prior test executable can remain in use; cleanup will be retried next update.
+    } catch [System.UnauthorizedAccessException] {
+        # Do not close the user's running test build just to reclaim this directory.
+    }
+}
 Remove-Item -LiteralPath $workRoot -Recurse -Force
 
 [pscustomobject]@{
