@@ -46,7 +46,7 @@ internal sealed class CompositionRoot : IDisposable
             .Synchronize(startupWorkspace.Settings);
         var hotkeyService = new GlobalHotkeyService();
         var captureService = new ScreenCaptureService();
-        var imageSaveService = new PngImageSaveService();
+        var imageSaveService = new ImageSaveService();
         var clipboardService = new WindowsClipboardService();
         var windowLocator = new NativeWindowLocator();
         var fileLocationService = new ExplorerFileLocationService();

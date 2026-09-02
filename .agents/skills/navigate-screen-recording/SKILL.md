@@ -21,7 +21,7 @@ description: 定位并维护轻截的屏幕录制模块、录制协调器、帮�
 | 控制状态机 | `ScreenshotTool.ScreenRecording/RecordingControlSession.cs` | 暂停/继续/停止、控制 UI |
 | 底层录制会话 | `ScreenshotTool.ScreenRecording/ScreenRecorderSession.cs` | 编码、音频、帧率、资源释放 |
 | 选项与偏好 | `ScreenshotTool.ScreenRecording/ScreenRecordingOptions.cs`、`ScreenRecordingPreferences.cs`、`ScreenRecordingSettingsPage.cs` | 设置宿主、兼容默认值 |
-| 目标与存储 | `ScreenshotTool.ScreenRecording/RecordingTarget.cs`、`RecordingStorage.cs` | MP4 命名、保存目录、历史与通知 |
+| 目标与存储 | `ScreenshotTool.ScreenRecording/RecordingTarget.cs`、`ScreenRecordingFeature.cs` | `ICaptureArtifactHost`、`ArtifactOutputFolderPolicy.cs`、MP4 命名、保存目录、历史与通知 |
 | 捕获保护 | `ScreenshotTool.ScreenRecording/CaptureProtection.cs` | 控制窗、提示窗、录制区域 |
 | 帮助进程 | `ScreenshotTool.ScreenRecording.Recorder/Program.cs` | 进程协议、部署资产、退出清理 |
 | 实时标注宿主 | `ScreenshotTool/Presentation/LiveAnnotationSession.cs`、`ScreenshotTool.Contracts/ModuleContracts.cs` | 截图编辑标注、录制帧合成 |

@@ -13,11 +13,13 @@ internal static class ScreenshotFileNamePolicy
         ],
         StringComparer.OrdinalIgnoreCase);
 
+    // Creates a unique screenshot name using the selected naming rule and image extension.
     public static string CreateFileName(
         ScreenshotFileNameMode mode,
         DateTime timestamp,
         IEnumerable<string> existingFileNames,
-        IEnumerable<string>? imageTexts = null)
+        IEnumerable<string>? imageTexts = null,
+        ScreenshotImageFormat imageFormat = ScreenshotImageFormat.Png)
     {
         ArgumentNullException.ThrowIfNull(existingFileNames);
         var existingStems = existingFileNames
@@ -34,7 +36,7 @@ internal static class ScreenshotFileNamePolicy
                 : MakeUnique(CreateDateTimeStem(timestamp), existingStems),
             _ => MakeUnique(CreateDateTimeStem(timestamp), existingStems)
         };
-        return stem + ".png";
+        return stem + ScreenshotImageFormatPolicy.GetFileExtension(imageFormat);
     }
 
     internal static string? CreateImageTextStem(IEnumerable<string>? imageTexts)

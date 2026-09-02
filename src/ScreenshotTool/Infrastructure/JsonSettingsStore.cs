@@ -148,6 +148,7 @@ internal sealed class JsonSettingsStore : ISettingsStore
 
     private static AppSettings CreateDefaults() => Normalize(new AppSettings());
 
+    // Normalizes persisted settings so missing or invalid values remain safe to consume.
     private static AppSettings Normalize(AppSettings settings)
     {
         if (string.IsNullOrWhiteSpace(settings.OutputFolder))
@@ -261,6 +262,8 @@ internal sealed class JsonSettingsStore : ISettingsStore
         {
             settings.Preferences.ScreenshotFileNameMode = ScreenshotFileNameMode.DateTime;
         }
+        settings.Preferences.ScreenshotImageFormat = ScreenshotImageFormatPolicy.Normalize(
+            settings.Preferences.ScreenshotImageFormat);
         settings.Preferences.DrawingToolCoefficients ??= new DrawingToolCoefficients();
         settings.Preferences.DrawingToolCoefficients.Normalize();
         return settings;

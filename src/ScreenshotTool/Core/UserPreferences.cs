@@ -67,8 +67,13 @@ internal sealed class UserPreferences
     public ScreenshotFileNameMode ScreenshotFileNameMode { get; set; } =
         ScreenshotFileNameMode.DateTime;
 
+    public ScreenshotImageFormat ScreenshotImageFormat { get; set; } =
+        ScreenshotImageFormat.Png;
+
+    // The legacy property name is retained for settings-file compatibility; it applies to all saved artifacts.
     public bool OrganizeScreenshotsByDate { get; set; }
 
+    // The legacy property name is retained for settings-file compatibility; recordings use the same parent folder.
     public string ScreenshotDateParentFolder { get; set; } = string.Empty;
 
     public bool DismissSaveNotificationBeforeCapture { get; set; } = true;

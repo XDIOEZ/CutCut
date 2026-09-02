@@ -10,7 +10,7 @@ using ScreenshotTool.Presentation.Theme;
 
 namespace ScreenshotTool.Presentation;
 
-internal sealed class MainForm : Form, IModuleImageHost
+internal sealed class MainForm : Form, IModuleImageStorageHost
 {
     private const string GalleryPageId = "gallery";
     private const string ScreenshotSettingsPageId = "screenshot-settings";
@@ -39,8 +39,6 @@ internal sealed class MainForm : Form, IModuleImageHost
     private readonly ModuleManagementPage _moduleManagementPage;
     private readonly ApplicationUpdatePage _applicationUpdatePage;
     private readonly ScreenshotGalleryPage _galleryPage;
-    private readonly Dictionary<string, IModuleSettingsPage> _moduleSettingsPages =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _backgroundIntegrationEnabled;
     private readonly bool _startInBackground;
     private readonly ApplicationUpdateApplyResult? _pendingUpdateResult;
@@ -52,6 +50,7 @@ internal sealed class MainForm : Form, IModuleImageHost
     private string? _pendingHotkeyError;
     private SavedArtifactNotificationForm? _savedArtifactNotification;
 
+    // Builds the settings workspace and connects application services to its pages.
     public MainForm(
         ISettingsStore settingsStore,
         IGlobalHotkeyService hotkeyService,
@@ -124,13 +123,17 @@ internal sealed class MainForm : Form, IModuleImageHost
             _settings.OutputFolder,
             _settings.Preferences.ScreenshotFileNameMode,
             _settings.Preferences.OrganizeScreenshotsByDate,
-            _settings.Preferences.ScreenshotDateParentFolder);
-        _moduleManagementPage = new ModuleManagementPage(_moduleManager, _fileLocationService);
+            _settings.Preferences.ScreenshotDateParentFolder,
+            _settings.Preferences.ScreenshotImageFormat);
+        _moduleManagementPage = new ModuleManagementPage(
+            _moduleManager,
+            _fileLocationService,
+            new MainFormModuleSettingsHost(this));
         _applicationUpdatePage = new ApplicationUpdatePage(
             typeof(MainForm).Assembly.GetName().Version ?? new Version(1, 0, 0),
             applicationUpdateService);
         _galleryPage = new ScreenshotGalleryPage(
-            _settings.GetScreenshotParentFolder(),
+            _settings.GetArtifactParentFolder(),
             _fileLocationService,
             _savedScreenshotService,
             _clipboardService);
@@ -181,7 +184,7 @@ internal sealed class MainForm : Form, IModuleImageHost
         _shell.AddPage(new AppPage(
             "save",
             "保存路径",
-            "设置截图文件夹并快速打开保存位置",
+            "设置图片格式、命名与截图/录屏保存位置",
             _savePathPage,
             500));
 
@@ -296,12 +299,13 @@ internal sealed class MainForm : Form, IModuleImageHost
         _pendingHotkeyError = error;
     }
 
+    // Validates and persists all settings currently shown in the workspace.
     private void SaveSettings(object? sender, EventArgs e)
     {
         var folder = _savePathPage.FolderPath.Trim();
         if (string.IsNullOrWhiteSpace(folder))
         {
-            MessageBox.Show(this, "请选择截图保存文件夹。", "设置不完整",
+            MessageBox.Show(this, "请选择截图与录屏保存文件夹。", "设置不完整",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -352,6 +356,7 @@ internal sealed class MainForm : Form, IModuleImageHost
                         _settings.Preferences.ModuleStringPreferences,
                         StringComparer.Ordinal),
                     ScreenshotFileNameMode = _savePathPage.FileNameMode,
+                    ScreenshotImageFormat = _savePathPage.ImageFormat,
                     OrganizeScreenshotsByDate = _savePathPage.OrganizeByDate,
                     ScreenshotDateParentFolder = _savePathPage.OrganizeByDate
                         ? Path.GetFullPath(dateParentFolder)
@@ -406,7 +411,7 @@ internal sealed class MainForm : Form, IModuleImageHost
             _settings.Apply(candidate);
             _savePathPage.FolderPath = candidate.OutputFolder;
             _savePathPage.DateParentFolder = candidate.Preferences.ScreenshotDateParentFolder;
-            _galleryPage.FolderPath = candidate.GetScreenshotParentFolder();
+            _galleryPage.FolderPath = candidate.GetArtifactParentFolder();
             _trayIcon.Text = GetTrayIconText(newHotkeys);
             var startupRegistrationError = TryApplyStartupRegistration();
             if (imagesToMove.Count > 0)
@@ -495,11 +500,12 @@ internal sealed class MainForm : Form, IModuleImageHost
         exception is IOException or UnauthorizedAccessException or ArgumentException or
         System.Security.SecurityException;
 
+    // Lets the user choose the base folder shared by screenshots and recordings.
     private void BrowseFolder(object? sender, EventArgs e)
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "选择截图保存文件夹",
+            Description = "选择截图与录屏保存文件夹",
             UseDescriptionForTitle = true,
             SelectedPath = Directory.Exists(_savePathPage.FolderPath)
                 ? _savePathPage.FolderPath
@@ -512,6 +518,7 @@ internal sealed class MainForm : Form, IModuleImageHost
         }
     }
 
+    // Lets the user choose the parent folder for automatically created date folders.
     private void BrowseDateParentFolder(object? sender, EventArgs e)
     {
         using var dialog = new FolderBrowserDialog
@@ -520,7 +527,7 @@ internal sealed class MainForm : Form, IModuleImageHost
             UseDescriptionForTitle = true,
             SelectedPath = Directory.Exists(_savePathPage.DateParentFolder)
                 ? _savePathPage.DateParentFolder
-                : _settings.GetScreenshotParentFolder(),
+                : _settings.GetArtifactParentFolder(),
             ShowNewFolderButton = true
         };
         if (dialog.ShowDialog(this) == DialogResult.OK)
@@ -529,6 +536,7 @@ internal sealed class MainForm : Form, IModuleImageHost
         }
     }
 
+    // Opens the configured artifact parent folder in Explorer.
     private void OpenOutputFolder(object? sender, EventArgs e)
     {
         try
@@ -537,7 +545,7 @@ internal sealed class MainForm : Form, IModuleImageHost
                 ? _savePathPage.DateParentFolder
                 : _savePathPage.FolderPath;
             var folder = string.IsNullOrWhiteSpace(configuredFolder)
-                ? _settings.GetScreenshotParentFolder()
+                ? _settings.GetArtifactParentFolder()
                 : configuredFolder.Trim();
             Directory.CreateDirectory(folder);
             _fileLocationService.OpenFolder(folder);
@@ -570,7 +578,6 @@ internal sealed class MainForm : Form, IModuleImageHost
             var result = _moduleManager.Refresh(force);
             if (result.Changed || force)
             {
-                SyncModuleSettingsPages();
                 _moduleManagementPage.RefreshPackages();
             }
             if (result.Errors.Count > 0)
@@ -603,66 +610,9 @@ internal sealed class MainForm : Form, IModuleImageHost
         object? sender,
         ModuleOperationCompletedEventArgs e)
     {
-        if (e.Result.RefreshResult is not null)
-        {
-            SyncModuleSettingsPages();
-        }
-
         _shell.ShowStatus(
             e.Result.Message,
             e.Result.Succeeded ? AppTheme.Success : AppTheme.Danger);
-    }
-
-    private void SyncModuleSettingsPages()
-    {
-        foreach (var current in _moduleSettingsPages)
-        {
-            _shell.RemovePage(current.Key);
-            DisposeModuleSettingsPage(current.Value);
-        }
-        _moduleSettingsPages.Clear();
-
-        foreach (var page in _moduleManager.CreateSettingsPages(
-                     new MainFormModuleSettingsHost(this)))
-        {
-            try
-            {
-                var id = page.Id;
-                if (_shell.ContainsPage(id) || _moduleSettingsPages.ContainsKey(id))
-                {
-                    DisposeModuleSettingsPage(page);
-                    _shell.ShowStatus($"模块设置页 ID 重复：{id}", AppTheme.Danger);
-                    continue;
-                }
-
-                _shell.AddPage(new AppPage(
-                    id,
-                    page.Title,
-                    page.Description,
-                    page.Content,
-                    page.Order));
-                _moduleSettingsPages.Add(id, page);
-            }
-            catch (Exception exception)
-            {
-                DisposeModuleSettingsPage(page);
-                _shell.ShowStatus(
-                    $"模块设置页加载失败：{exception.Message}",
-                    AppTheme.Danger);
-            }
-        }
-    }
-
-    private static void DisposeModuleSettingsPage(IModuleSettingsPage page)
-    {
-        try
-        {
-            page.Dispose();
-        }
-        catch (Exception exception)
-        {
-            System.Diagnostics.Debug.WriteLine($"模块设置页释放失败：{exception}");
-        }
     }
 
     private void BeginCapture() => BeginCaptureCore(null);
@@ -679,17 +629,38 @@ internal sealed class MainForm : Form, IModuleImageHost
         _shell.ShowStatus("贴图已复制到剪贴板", AppTheme.Success);
     }
 
+    // Saves an image supplied by a module with the shared artifact folder policy.
     string IModuleImageHost.SaveImage(Bitmap image)
     {
         ArgumentNullException.ThrowIfNull(image);
-        var path = _imageSaveService.SavePng(
+        var path = _imageSaveService.SaveImage(
             image,
-            _settings.GetScreenshotParentFolder(),
+            _settings.GetArtifactParentFolder(),
+            _settings.Preferences.ScreenshotImageFormat,
             _settings.Preferences.ScreenshotFileNameMode,
             imageTexts: null,
             organizeByDate: _settings.Preferences.OrganizeScreenshotsByDate);
         HandleArtifactSaved(path);
         return path;
+    }
+
+    // Saves a module image asynchronously into an explicit module-owned folder.
+    async Task<string> IModuleImageStorageHost.SaveImageAsync(
+        Bitmap image,
+        string outputFolder,
+        IReadOnlyList<string>? imageTexts,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputFolder);
+        return await _imageSaveService.SaveImageAsync(
+            image,
+            Path.GetFullPath(outputFolder),
+            _settings.Preferences.ScreenshotImageFormat,
+            _settings.Preferences.ScreenshotFileNameMode,
+            imageTexts,
+            organizeByDate: false,
+            cancellationToken: cancellationToken);
     }
 
     void IModuleImageHost.EditImage(Bitmap image)
@@ -701,6 +672,7 @@ internal sealed class MainForm : Form, IModuleImageHost
             operationName: "编辑贴图");
     }
 
+    // Starts a screenshot session and supplies the current artifact settings to its modules.
     private async void BeginCaptureCore(
         string? savedScreenshotPath,
         Bitmap? suppliedEditImage = null,
@@ -740,7 +712,7 @@ internal sealed class MainForm : Form, IModuleImageHost
             if (savedScreenshotPath is not null && initialEditImage is null)
             {
                 initialEditImage = _savedScreenshotService.LoadForEditing(
-                    _settings.GetScreenshotParentFolder(),
+                    _settings.GetArtifactParentFolder(),
                     savedScreenshotPath);
             }
 
@@ -772,7 +744,7 @@ internal sealed class MainForm : Form, IModuleImageHost
                 annotationSessionFactory,
                 _settings.Preferences.ModuleBooleanPreferences,
                 _settings.Preferences.ModuleIntegerPreferences,
-                _settings.GetScreenshotParentFolder(),
+                _settings.GetArtifactParentFolder(),
                 _settings.Preferences.ScreenshotFileNameMode,
                 _settings.Preferences.DrawingToolCoefficients,
                 _settings.Preferences.AnnotationRotationStepDegrees,
@@ -783,7 +755,9 @@ internal sealed class MainForm : Form, IModuleImageHost
                 initialEditImage,
                 _settings.Preferences.AnnotationMoveActivationMode,
                 _textTranslationService,
-                _settings.Preferences.OrganizeScreenshotsByDate);
+                _settings.Preferences.OrganizeScreenshotsByDate,
+                _settings.Preferences.ModuleStringPreferences,
+                _settings.Preferences.ScreenshotImageFormat);
             overlay.ArtifactSaved += (_, path) => HandleArtifactSaved(path);
             await CaptureOverlayPresenter.ShowAsync(overlay);
             SaveLastToolWidth(toolWidthController.Current);
@@ -1029,12 +1003,6 @@ internal sealed class MainForm : Form, IModuleImageHost
             _savedArtifactNotification = null;
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
-            foreach (var page in _moduleSettingsPages)
-            {
-                _shell.RemovePage(page.Key);
-                DisposeModuleSettingsPage(page.Value);
-            }
-            _moduleSettingsPages.Clear();
         }
 
         base.Dispose(disposing);

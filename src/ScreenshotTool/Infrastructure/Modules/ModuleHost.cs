@@ -336,13 +336,27 @@ internal sealed class ModuleHost : IModuleManager
             .ToArray();
     }
 
-    public IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host)
+    // Creates settings-page leases only for the requested enabled module package.
+    public IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(
+        string packageName,
+        IModuleSettingsHost host)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
         ArgumentNullException.ThrowIfNull(host);
-        return _packages.Values
-            .SelectMany(assembly => assembly.CreateSettingsPageLeases(host))
-            .ToArray();
+
+        if (!TryResolvePackageDirectory(
+                packageName,
+                out var packageDirectory,
+                out var error))
+        {
+            throw new ArgumentException(error, nameof(packageName));
+        }
+
+        return _packages.TryGetValue(packageDirectory, out var package)
+            ? package.CreateSettingsPageLeases(host)
+                .ToArray()
+            : [];
     }
 
     public void Dispose()

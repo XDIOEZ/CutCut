@@ -23,7 +23,7 @@ Keep the stable asset names unchanged:
 - `complete-portable-win-x64.zip`
 - `complete-lightweight-full-win-x64.zip`
 - `complete-full-win-x64.zip`
-- seven `*-addon-win-x64.zip` module packages
+- eight `*-addon-win-x64.zip` module packages
 - `SHA256SUMS.txt`
 
 Commit the current coherent worktree directly on `main` and push it to `origin/main`. Do not

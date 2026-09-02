@@ -31,6 +31,43 @@ internal sealed class WindowsClipboardService : IClipboardService
         }
     }
 
+    // Moves clipboard retries onto a short-lived STA worker so they never sleep the UI thread.
+    public Task SetImageAsync(Image image, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                SetImage(image);
+                completion.TrySetResult(true);
+            }
+            catch (OperationCanceledException)
+            {
+                completion.TrySetCanceled(cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "轻截剪贴板写入"
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
+    }
+
     public Bitmap? GetImage() => ReadClipboard(() =>
     {
         if (Clipboard.ContainsImage())

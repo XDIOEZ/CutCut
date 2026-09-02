@@ -10,7 +10,7 @@ ScreenshotTool.Contracts       稳定公共契约
 外部模块 DLL                   只引用 Contracts
           ↑ 运行时发现/组合
 ModuleHost                     加载、版本刷新、租约、卸载
-          ↓                    可选模块设置页
+          ↓                    按模块包创建配置页租约
 CaptureFeatureSession          隔离异常并分发输入与渲染
           ↓
 CaptureOverlayForm             提供受控宿主能力
@@ -28,15 +28,16 @@ CaptureOverlayForm             提供受控宿主能力
 - `src/ScreenshotTool.PaddleOcr`：PP-OCRv6 Tiny/Small 入口共用的 ONNX 识别引擎，只依赖公共契约和模块私有运行库。
 - `src/ScreenshotTool.PaddleOcr.Tiny` 与 `src/ScreenshotTool.PaddleOcr.Small`：两个稳定 ID、独立目录、独立安装包的 PP-OCR 入口模块。
 - `src/ScreenshotTool.PinnedImage`：可独立装卸的贴图悬浮窗模块，拥有置顶窗口、移动缩放和右键菜单。
+- `src/ScreenshotTool.Favorites`：可独立装卸的截图收藏夹模块，提供收藏工具栏命令和独立文件夹配置页。
 - `src/ScreenshotTool.ScreenRecording`：可选录屏模块，仅引用 `ScreenshotTool.Contracts`，提供选区入口、录制控制和编码器编排；批注由宿主核心会话提供。
 - `src/ScreenshotTool.ScreenRecording.Recorder`：录屏模块私有的 x64 编码器进程，承载 Media Foundation 视频与音频依赖。
 - `Modules`：运行时扩展目录；每个一级子文件夹是一个独立模块包，复制、替换或删除整个文件夹即可触发刷新。
 
 ## 第一方模块的构建与发布
 
-宿主项目对随完整包预装的第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将贴图悬浮窗、长截图和本地 OCR DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。PP-OCR Tiny/Small 不进入宿主项目依赖树，也不进入轻量版和重量版；它们先由各自的独立发布脚本组装，再仅在发布阶段复制进全插件完全版。
+宿主项目对随完整包预装的第一方模块使用 `ReferenceOutputAssembly="false"` 的项目引用。该引用只保证构建顺序并取得模块输出，不会把模块加入宿主的编译引用或 `.deps.json` 依赖。普通构建会将截图收藏夹、贴图悬浮窗、长截图和本地 OCR DLL 复制到宿主输出目录中对应的 `Modules/<模块名>` 文件夹；单文件发布会将其标记为 `ExcludeFromSingleFile`，保留为可替换、可删除的独立模块包。PP-OCR Tiny/Small 不进入宿主项目依赖树，也不进入轻量版和重量版；它们先由各自的独立发布脚本组装，再仅在发布阶段复制进全插件完全版。
 
-`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含贴图悬浮窗、长截图与本地 OCR 模块，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip`、`complete-portable-win-x64.zip`、`complete-lightweight-full-win-x64.zip` 和 `complete-full-win-x64.zip`：前两者包含主程序、贴图悬浮窗、长截图、本地 OCR、二维码扫描、录屏模块和编码器；后两者再装入 PP-OCR Tiny/Small 的入口、私有依赖和四个模型文件，分别以轻量版和便携压缩版为底包，并对最终 ZIP 执行 80 MiB / 130 MiB 门槛。脚本还会生成 `pinned-image-addon-win-x64.zip`、`long-capture-addon-win-x64.zip`、`ocr-addon-win-x64.zip`、`paddle-ocr-tiny-addon-win-x64.zip` 与 `paddle-ocr-small-addon-win-x64.zip` 等独立包，供发布页按需下载。PP-OCR 模型下载脚本固定来源、版本与 SHA-256，校验不一致时停止组包。
+`scripts/Publish-Release.ps1` 会同时验证轻量版和便携压缩版都包含截图收藏夹、贴图悬浮窗、长截图与本地 OCR 模块，并按整个发布目录的文件总和执行 5 MiB / 90 MiB 体积门槛，不只统计主 EXE。标准交付物是 `complete-lightweight-win-x64.zip`、`complete-portable-win-x64.zip`、`complete-lightweight-full-win-x64.zip` 和 `complete-full-win-x64.zip`：前两者包含主程序、截图收藏夹、贴图悬浮窗、长截图、本地 OCR、二维码扫描、录屏模块和编码器；后两者再装入 PP-OCR Tiny/Small 的入口、私有依赖和四个模型文件，分别以轻量版和便携压缩版为底包，并对最终 ZIP 执行 80 MiB / 130 MiB 门槛。脚本还会生成 `favorites-addon-win-x64.zip`、`pinned-image-addon-win-x64.zip`、`long-capture-addon-win-x64.zip`、`ocr-addon-win-x64.zip`、`paddle-ocr-tiny-addon-win-x64.zip` 与 `paddle-ocr-small-addon-win-x64.zip` 等独立包，供发布页按需下载。PP-OCR 模型下载脚本固定来源、版本与 SHA-256，校验不一致时停止组包。
 
 录屏仍不进入宿主的编译依赖树。标准发布脚本会额外调用 `scripts/Publish-ScreenRecordingModule.ps1`，保留可单独下载的 `screen-recording-addon-win-x64.zip`，然后将其 `Modules` 内容复制到四种完整包中。这只是发布阶段的预安装；运行时仍通过稳定契约加载可替换、可删除的录屏模块。
 
@@ -46,21 +47,21 @@ CaptureOverlayForm             提供受控宿主能力
 2. 每个模块文件夹只允许一个 `IScreenshotToolModule` 入口；入口和托管依赖 DLL 通过流加载到独立、可回收的 `AssemblyLoadContext`。ONNX Runtime、SkiaSharp 等原生 DLL 先复制到当前进程专属临时影子目录再加载，避免锁住模块目录，并在上下文卸载或下次进程启动时尽力清理影子文件。
 3. 每次开始截图时，已加载模块分别创建新的 `ICaptureFeature`，按 `Order` 和 `Id` 排序后组合。
 4. 模块可以处理键盘、鼠标，并分别参与预览和最终导出渲染。
-5. 实现 `IModuleSettingsPageProvider` 的模块可创建自己的设置页；宿主只按通用元数据把页面加入导航，不引用具体页面类型。
+5. 实现 `IModuleSettingsPageProvider` 的模块可创建自己的设置页；宿主在“插件模块”卡片点击“管理配置”时，按模块包创建页面租约并放入独立窗口，不引用具体页面类型。
 6. 设置工作台把每个模块包的启用状态和显示元数据保存到当前用户配置的 `preferences.moduleActivationPreferences`；禁用会退役当前程序集但保留全部文件，重新启用时按同一偏好键重新加载。旧版模块目录中的 `.lightshot-module-disabled.json` 只用于首次启动迁移，迁移成功后会被删除。
-7. 模块文件夹或其中任一文件更新、禁用、删除后，宿主立即移除并释放对应设置页，也不再给新截图创建旧功能；已经打开的截图继续使用原实例。永久删除会先把用户偏好切换为禁用并退役程序集，再递归删除该模块自己的一级文件夹，最后清理对应偏好。
+7. 模块禁用或永久删除前，管理页先关闭该模块的配置窗口并释放设置页租约；模块文件夹被外部替换或删除时，已经打开的配置窗口与截图会话可以继续持有旧版本租约，新窗口和新截图只使用当前版本。
 8. 最后一个活动功能或设置页租约释放后，宿主释放模块对象并调用 `AssemblyLoadContext.Unload()`。
 
 ## 模块自带设置页
 
 设置 UI 与功能 DLL 使用同一生命周期。模块按需实现 `IModuleSettingsPageProvider`，通过 `IModuleSettingsHost` 读取和写入稳定的布尔、整数、字符串键值；页面布局、控件事件、默认值和参数归一化全部留在模块程序集。宿主只负责：
 
-- 从当前已加载模块创建 `IModuleSettingsPage` 租约；
-- 按页面 `Order`、`Id`、标题和说明组合左侧导航；
-- 在模块更新或卸载时移除控件并释放租约；
+- 只从用户点击的当前已启用模块包创建 `IModuleSettingsPage` 租约；
+- 每个模块卡片固定提供“管理配置”，单页直接显示，多页使用纵向页面选择；
+- 配置窗口关闭、模块禁用或永久删除时移除控件并释放租约；
 - 将通用模块偏好保存进用户配置。
 
-因此未安装 `LongCapture` 时没有“长截图”设置，未安装 `ScreenRecording` 时没有“录屏设置”；宿主源码和 `.deps.json` 都不依赖这两个具体设置页类型。模块页面不得引用 `MainForm`、`AppTheme`、`JsonSettingsStore` 或宿主内部设置模型。
+因此未安装 `LongCapture` 时无法创建长截图配置，未安装 `ScreenRecording` 时也无法创建录屏配置；这些模块不再占用主工作台左侧导航。宿主源码和 `.deps.json` 都不依赖具体设置页类型。模块页面不得引用 `MainForm`、`AppTheme`、`JsonSettingsStore` 或宿主内部设置模型。
 
 ## 可组合工具栏命令与实时截图能力
 
@@ -174,6 +175,23 @@ Windows Runtime 的完整 .NET 投影会显著增加轻量包体，因此 OCR �
 二维码模块只引用稳定的 `ScreenshotTool.Contracts` 边界，ZXing.Net 是模块目录内的私有依赖，
 不进入宿主程序集或其他模块。独立安装包固定为 `qr-code-addon-win-x64.zip`。
 
+## 截图收藏夹模块
+
+`ScreenshotTool.Favorites` 1.0.0 使用稳定模块 ID `screenshot-tool.favorites`、功能 ID
+`screenshot-tool.favorites.feature` 和命令 ID `screenshot-tool.favorites.save`。模块配置页通过
+`IModuleSettingsHost` 保存字符串路径 `screenshot-tool.favorites.folder`；截图会话通过
+`ICaptureFeatureHost.GetStringPreference()` 读取本次截图开始时的不可变偏好快照。
+
+用户点击“收藏”后，模块通过 `ICaptureArtifactHost.RenderSelection()` 在 UI 线程取得包含全部批注的
+最终位图，再通过可选通用能力 `IModuleImageStorageHost.SaveImageAsync()` 交给宿主异步编码和写盘。
+模块同时通过 `GetSelectionTextContents()` 传递最终选区内的可见文字，使“图片内文字”命名也与普通保存一致。
+宿主沿用当前 PNG/JPEG 格式和图片命名方式，但不对已经明确选择的收藏目录再次应用普通保存页的日期分组。模块收到
+路径后统一报告保存产物并结束截图会话；位图所有权始终留在会话级功能，异步完成后立即释放。
+
+收藏目录默认位于用户“图片”文件夹下的 `轻截收藏夹`，也可在模块独立配置窗口中选择任意有效目录。
+模块入口和恢复资产分别为 `Modules\Favorites\ScreenshotTool.Favorites.dll` 与
+`favorites-addon-win-x64.zip`。
+
 ## 贴图悬浮窗模块
 
 `ScreenshotTool.PinnedImage` 1.0.0 使用稳定模块 ID `screenshot-tool.pinned-image` 和命令 ID
@@ -196,7 +214,7 @@ Windows Runtime 的完整 .NET 投影会显著增加轻量包体，因此 OCR �
 
 ## 可选录屏模块
 
-`ScreenshotTool.ScreenRecording` 作为截图会话功能提供“录屏”工具栏命令，并在同一个模块程序集内提供独立“录屏设置”页。该页面通过通用模块设置宿主保存系统声音、麦克风、左键黄色圆圈、30/60 FPS、2/4/8/12/20 Mbps 视频码率和范围提示偏好，并按照目标视频码率和启用时的一路 128 kbps 混合音频实时估算 1 分钟、10 分钟和 1 小时的储存占用。模块通过通用布尔与整数偏好契约读取已保存参数，点击“录屏”后直接开始，不创建额外设置窗口。模块随后停放冻结的截图遮罩，通过 `IConfigurableCaptureAnnotationHost` 请求宿主核心批注会话并传入范围提示和左键圆圈选项，再通过 `ICaptureAnnotationToolbarSession` 启用宿主默认隐藏的橙色“选择”工具并注入暂停、停止保存和取消命令。宿主在捕获排除的输入层按用户偏好绘制实线、虚线或不显示的录屏范围提示，因此它不会混入 MP4 内容层；启用左键圆圈时，宿主显示一个捕获排除的半透明现场提示，编码器独立把同色圆圈写入视频，避免现场预览与成片效果重叠。宿主使用与截图模式相同的 `CaptureEditorToolbar` 渲染唯一单行菜单，录屏模块内不存在编辑按钮或独立控制窗。未选择工具时输入层鼠标穿透；点击“选择”后左键进入截图核心的元素编辑，点击绘图工具则添加实时批注，再次点击当前工具返回穿透状态。
+`ScreenshotTool.ScreenRecording` 作为截图会话功能提供“录屏”工具栏命令，并在同一个模块程序集内提供独立“录屏设置”页。用户从录屏模块卡片点击“管理配置”后，宿主在独立配置窗口中承载该页面；页面通过通用模块设置宿主保存系统声音、麦克风、左键黄色圆圈、30/60 FPS、2/4/8/12/20 Mbps 视频码率和范围提示偏好，并按照目标视频码率和启用时的一路 128 kbps 混合音频实时估算 1 分钟、10 分钟和 1 小时的储存占用。模块通过通用布尔与整数偏好契约读取已保存参数，点击“录屏”后直接开始，不再打开配置窗口。模块随后停放冻结的截图遮罩，通过 `IConfigurableCaptureAnnotationHost` 请求宿主核心批注会话并传入范围提示和左键圆圈选项，再通过 `ICaptureAnnotationToolbarSession` 启用宿主默认隐藏的橙色“选择”工具并注入暂停、停止保存和取消命令。宿主在捕获排除的输入层按用户偏好绘制实线、虚线或不显示的录屏范围提示，因此它不会混入 MP4 内容层；启用左键圆圈时，宿主显示一个捕获排除的半透明现场提示，编码器独立把同色圆圈写入视频，避免现场预览与成片效果重叠。宿主使用与截图模式相同的 `CaptureEditorToolbar` 渲染唯一单行菜单，录屏模块内不存在编辑按钮或独立控制窗。未选择工具时输入层鼠标穿透；点击“选择”后左键进入截图核心的元素编辑，点击绘图工具则添加实时批注，再次点击当前工具返回穿透状态。
 
 录屏编码采用独立的 `ScreenshotTool.ScreenRecording.Recorder` 辅助进程。模块通过每次会话唯一的命名管道发送暂停、继续、停止和取消命令；辅助进程使用 ScreenRecorderLib / Media Foundation 写入 H.264 MP4，并可混合系统声音与默认麦克风。原生 C++/CLI 编码器不会进入可回收 `AssemblyLoadContext`，模块被删除或会话取消时会先通知辅助进程停止，超时后终止其进程树，避免后台录制阻止模块卸载。
 
@@ -235,11 +253,11 @@ public sealed class WatermarkFeature : CaptureFeatureBase
 
 - 模块输入和渲染回调运行在 WinForms UI STA 线程；耗时任务必须异步执行，并在回到 UI 线程后更新状态。
 - `Host.Selection` 和绘制坐标均使用截图覆盖层的虚拟桌面客户区坐标。导出阶段宿主已设置平移与裁剪，模块无需切换坐标系。
-- 模块通过 `Host.GetBooleanPreference(id, defaultValue)` 读取宿主提供的布尔功能偏好；偏好键必须稳定，模块不得直接引用主程序设置类型或自行读取宿主 JSON。
+- 模块通过 `Host.GetBooleanPreference(id, defaultValue)`、`GetIntegerPreference()` 和 `GetStringPreference()` 读取宿主提供的会话偏好快照；偏好键必须稳定，模块不得直接引用主程序设置类型或自行读取宿主 JSON。
 - 模块设置页通过 `IModuleSettingsHost` 读写布尔、整数和字符串偏好并请求保存；设置 UI、默认值与校验逻辑必须留在模块内。
 - `CopyDesktopSelection()` 返回由调用者负责释放的新位图。
 - `ICaptureArtifactHost.RenderSelection()` 返回由调用者负责释放、包含宿主核心批注的最终选区位图；`SelectionScreenBounds` 使用物理屏幕坐标。
-- 模块通过 `IModuleContext.ImageHost` 取得通用复制、保存和再次编辑能力，不得引用宿主窗体或保存服务。
+- 模块通过 `IModuleContext.ImageHost` 取得通用复制、保存和再次编辑能力；需要显式目录与异步写盘时检测 `IModuleImageStorageHost`，不得引用宿主窗体或保存服务。
 - 模块具有与主程序相同的本机权限，只能加载可信 DLL。热加载不是安全沙箱。
 - 模块必须在 `Dispose` 中解除静态事件、停止线程/计时器并释放 GDI 对象，否则 CLR 无法真正回收加载上下文。
 

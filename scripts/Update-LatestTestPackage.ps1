@@ -182,6 +182,7 @@ foreach ($addonDirectory in $addonDirectories) {
 
 $requiredFiles = @(
     "ScreenshotTool.exe",
+    "Modules\Favorites\ScreenshotTool.Favorites.dll",
     "Modules\PinnedImage\ScreenshotTool.PinnedImage.dll",
     "Modules\LongCapture\ScreenshotTool.LongCapture.dll",
     "Modules\Ocr\ScreenshotTool.Ocr.dll",
@@ -221,6 +222,7 @@ if ($disabledMarkers.Count -gt 0) {
 }
 
 $expectedModules = @(
+    "Favorites",
     "LongCapture",
     "Ocr",
     "PaddleOcrSmall",

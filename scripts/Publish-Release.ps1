@@ -7,6 +7,7 @@ param(
     [switch]$SkipPaddleOcrSmallAddon,
     [switch]$SkipQrCodeAddon,
     [switch]$SkipPinnedImageAddon,
+    [switch]$SkipFavoritesAddon,
     [switch]$SkipScreenRecordingAddon,
     [switch]$SkipFullPackage
 )
@@ -40,6 +41,7 @@ $ocrModuleRelativePath = "Modules\Ocr\ScreenshotTool.Ocr.dll"
 $qrCodeModuleRelativePath = "Modules\QrCode\ScreenshotTool.QrCode.dll"
 $qrCodeDecoderRelativePath = "Modules\QrCode\zxing.dll"
 $pinnedImageModuleRelativePath = "Modules\PinnedImage\ScreenshotTool.PinnedImage.dll"
+$favoritesModuleRelativePath = "Modules\Favorites\ScreenshotTool.Favorites.dll"
 $paddleOcrTinyRequiredRelativePaths = @(
     "Modules\PaddleOcrTiny\ScreenshotTool.PaddleOcr.Tiny.dll",
     "Modules\PaddleOcrTiny\ScreenshotTool.PaddleOcr.dll",
@@ -112,6 +114,7 @@ $results = foreach ($package in $packages) {
     $qrCodeModule = Join-Path $package.Directory $qrCodeModuleRelativePath
     $qrCodeDecoder = Join-Path $package.Directory $qrCodeDecoderRelativePath
     $pinnedImageModule = Join-Path $package.Directory $pinnedImageModuleRelativePath
+    $favoritesModule = Join-Path $package.Directory $favoritesModuleRelativePath
     if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)) {
         throw "$($package.Name) entry point was not published: $entryPoint"
     }
@@ -129,6 +132,9 @@ $results = foreach ($package in $packages) {
     }
     if (-not (Test-Path -LiteralPath $pinnedImageModule -PathType Leaf)) {
         throw "$($package.Name) pinned image module was not published: $pinnedImageModule"
+    }
+    if (-not (Test-Path -LiteralPath $favoritesModule -PathType Leaf)) {
+        throw "$($package.Name) favorites module was not published: $favoritesModule"
     }
 
     $files = @(Get-ChildItem -LiteralPath $package.Directory -File -Recurse)
@@ -150,6 +156,7 @@ $results = foreach ($package in $packages) {
         OcrModuleSha256 = Get-FileSha256WithRetry -Path $ocrModule
         QrCodeModuleSha256 = Get-FileSha256WithRetry -Path $qrCodeModule
         PinnedImageModuleSha256 = Get-FileSha256WithRetry -Path $pinnedImageModule
+        FavoritesModuleSha256 = Get-FileSha256WithRetry -Path $favoritesModule
     }
 }
 
@@ -200,6 +207,13 @@ if (-not $SkipPinnedImageAddon) {
     & (Join-Path $PSScriptRoot "Publish-PinnedImageModule.ps1") -OutputRoot $outputRootPath
     if ($LASTEXITCODE -ne 0) {
         throw "Pinned image add-on publish failed with exit code $LASTEXITCODE."
+    }
+}
+
+if (-not $SkipFavoritesAddon) {
+    & (Join-Path $PSScriptRoot "Publish-FavoritesModule.ps1") -OutputRoot $outputRootPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Favorites add-on publish failed with exit code $LASTEXITCODE."
     }
 }
 
@@ -305,6 +319,7 @@ if (-not $SkipScreenRecordingAddon) {
         $qrCodeModule = Join-Path $packageDirectory $qrCodeModuleRelativePath
         $qrCodeDecoder = Join-Path $packageDirectory $qrCodeDecoderRelativePath
         $pinnedImageModule = Join-Path $packageDirectory $pinnedImageModuleRelativePath
+        $favoritesModule = Join-Path $packageDirectory $favoritesModuleRelativePath
         $recordingModule = Join-Path $packageDirectory $recordingModuleRelativePath
         $recorder = Join-Path $packageDirectory $recorderRelativePath
         $recorderLibrary = Join-Path $packageDirectory $recorderLibraryRelativePath
@@ -315,6 +330,7 @@ if (-not $SkipScreenRecordingAddon) {
                 $qrCodeModule,
                 $qrCodeDecoder,
                 $pinnedImageModule,
+                $favoritesModule,
                 $recordingModule,
                 $recorder,
                 $recorderLibrary)
@@ -355,6 +371,7 @@ if (-not $SkipScreenRecordingAddon) {
                 $qrCodeModuleRelativePath.Replace("\", "/"),
                 $qrCodeDecoderRelativePath.Replace("\", "/"),
                 $pinnedImageModuleRelativePath.Replace("\", "/"),
+                $favoritesModuleRelativePath.Replace("\", "/"),
                 $recordingModuleRelativePath.Replace("\", "/"),
                 $recorderRelativePath.Replace("\", "/"),
                 $recorderLibraryRelativePath.Replace("\", "/"))
@@ -381,6 +398,7 @@ if (-not $SkipScreenRecordingAddon) {
             OcrModuleSha256 = Get-FileSha256WithRetry -Path $ocrModule
             QrCodeModuleSha256 = Get-FileSha256WithRetry -Path $qrCodeModule
             PinnedImageModuleSha256 = Get-FileSha256WithRetry -Path $pinnedImageModule
+            FavoritesModuleSha256 = Get-FileSha256WithRetry -Path $favoritesModule
         }
     }
 
@@ -452,13 +470,15 @@ if (-not $SkipScreenRecordingAddon) {
     $readyQrCodeModule = Join-Path $readyToRunDirectory $qrCodeModuleRelativePath
     $readyQrCodeDecoder = Join-Path $readyToRunDirectory $qrCodeDecoderRelativePath
     $readyPinnedImageModule = Join-Path $readyToRunDirectory $pinnedImageModuleRelativePath
+    $readyFavoritesModule = Join-Path $readyToRunDirectory $favoritesModuleRelativePath
     foreach ($requiredFile in @(
             $readyEntryPoint,
             $readyRecordingModule,
             $readyOcrModule,
             $readyQrCodeModule,
             $readyQrCodeDecoder,
-            $readyPinnedImageModule)) {
+            $readyPinnedImageModule,
+            $readyFavoritesModule)) {
         if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
             throw "Ready-to-run package is missing a required file: $requiredFile"
         }
@@ -504,6 +524,9 @@ if (-not $SkipQrCodeAddon) {
 }
 if (-not $SkipPinnedImageAddon) {
     $releaseArchiveNames += "pinned-image-addon-win-x64.zip"
+}
+if (-not $SkipFavoritesAddon) {
+    $releaseArchiveNames += "favorites-addon-win-x64.zip"
 }
 
 if ($releaseArchiveNames.Count -eq 0) {

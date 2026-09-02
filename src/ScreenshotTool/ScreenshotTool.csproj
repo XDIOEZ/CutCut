@@ -11,7 +11,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>Assets\LightShotIcon.ico</ApplicationIcon>
-    <Version>1.11.7</Version>
+    <Version>1.11.8</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +31,9 @@
     <ProjectReference Include="..\ScreenshotTool.PinnedImage\ScreenshotTool.PinnedImage.csproj"
                       ReferenceOutputAssembly="false"
                       OutputItemType="FirstPartyPinnedImageModule" />
+    <ProjectReference Include="..\ScreenshotTool.Favorites\ScreenshotTool.Favorites.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="FirstPartyFavoritesModule" />
     <Content Include="..\..\modules\README.md"
              Link="Modules\README.md"
              CopyToOutputDirectory="PreserveNewest"
@@ -59,6 +62,18 @@
           SkipUnchangedFiles="true" />
     <ItemGroup>
       <FileWrites Include="@(FirstPartyPinnedImageModule->'$(OutDir)Modules\PinnedImage\%(Filename)%(Extension)')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CopyFirstPartyFavoritesModuleToOutput"
+          AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'@(FirstPartyFavoritesModule)' != ''">
+    <MakeDir Directories="$(OutDir)Modules\Favorites" />
+    <Copy SourceFiles="@(FirstPartyFavoritesModule)"
+          DestinationFolder="$(OutDir)Modules\Favorites"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <FileWrites Include="@(FirstPartyFavoritesModule->'$(OutDir)Modules\Favorites\%(Filename)%(Extension)')" />
     </ItemGroup>
   </Target>
 
@@ -140,6 +155,19 @@
     <ItemGroup>
       <ResolvedFileToPublish Include="@(FirstPartyPinnedImageModule)">
         <RelativePath>Modules\PinnedImage\%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="IncludeFirstPartyFavoritesModuleInPublish"
+          BeforeTargets="ComputeFilesToPublish"
+          DependsOnTargets="ResolveProjectReferences"
+          Condition="'@(FirstPartyFavoritesModule)' != ''">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(FirstPartyFavoritesModule)">
+        <RelativePath>Modules\Favorites\%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>

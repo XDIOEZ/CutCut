@@ -57,6 +57,7 @@
       },
       "moduleStringPreferences": {},
       "screenshotFileNameMode": "dateTime",
+      "screenshotImageFormat": "png",
       "dismissSaveNotificationBeforeCapture": true,
       "hideMainWindowDuringCapture": false,
       "longCaptureSafetyChecksEnabled": false
@@ -93,21 +94,25 @@
 
 `annotationSnapThresholdPixels` 是元素边缘或中心参考线触发吸附的最大距离，默认为 `8`，读取时限制在 `1` 至 `48` 像素。`ctrlDragStepPixels` 是元素移动或手柄缩放期间按住 `Ctrl` 使用的固定步长，默认为 `10`，读取时限制在 `1` 至 `100` 像素。
 
-`moduleBooleanPreferences`、`moduleIntegerPreferences` 和 `moduleStringPreferences` 是模块通用键值存储。宿主只负责持久化，不解释具体键；模块自带的设置页负责默认值、参数校验和写入。删除模块不会删除其偏好，因此重新安装后会恢复用户上次的选择，但未安装期间宿主不会创建对应设置 UI 或加载模块程序集。
+`moduleBooleanPreferences`、`moduleIntegerPreferences` 和 `moduleStringPreferences` 是模块通用键值存储。宿主只负责持久化，不解释具体键；模块自带的设置页负责默认值、参数校验和写入，并在“插件模块”卡片的“管理配置”独立窗口中按需创建。删除模块不会删除其偏好，因此重新安装后会恢复用户上次的选择，但未安装期间宿主不会创建对应设置 UI 或加载模块程序集。
 
 旧字段 `screenRecordingCaptureSystemAudio`、`screenRecordingCaptureMicrophone`、`screenRecordingShowMouseClickIndicator`、`screenRecordingFramesPerSecond`、`screenRecordingVideoBitrate`、`recordingRegionIndicatorStyle` 和 `longCaptureSafetyChecksEnabled` 暂时保留用于兼容迁移。读取旧配置时会把它们复制到对应的通用模块键；新设置页和截图功能均以通用模块键为准。
 
-录屏模块的系统声音与默认麦克风均默认开启。左键黄色半透明圆圈默认开启；开启时用户在录制现场即可看到圆圈，按住左键期间圆圈持续跟随鼠标移动，松开后短暂保留，编码器同时将对应效果写入最终 MP4；关闭时两处都不显示。录制帧率支持 `30` 或 `60` FPS，视频码率支持 2、4、8、12、20 Mbps；异常数值会归一化到最接近的支持档位。这些参数统一由模块自带的“录屏设置”分页保存，点击“录屏”后直接生效。
+录屏模块的系统声音与默认麦克风均默认开启。左键黄色半透明圆圈默认开启；开启时用户在录制现场即可看到圆圈，按住左键期间圆圈持续跟随鼠标移动，松开后短暂保留，编码器同时将对应效果写入最终 MP4；关闭时两处都不显示。录制帧率支持 `30` 或 `60` FPS，视频码率支持 2、4、8、12、20 Mbps；异常数值会归一化到最接近的支持档位。这些参数统一由模块配置窗口中的“录屏设置”页保存，点击“录屏”后直接生效。
 
-模块整数键 `screenshot-tool.screen-recording.region-indicator-style` 控制录屏期间选区边缘的范围提示：`0` 为实线、`1` 为虚线（默认）、`2` 为不显示。该选项同样位于“录屏设置”分页；提示线绘制在 Windows 捕获排除的输入层，只用于提示用户，不会进入最终 MP4。异常值会恢复为虚线。
+模块整数键 `screenshot-tool.screen-recording.region-indicator-style` 控制录屏期间选区边缘的范围提示：`0` 为实线、`1` 为虚线（默认）、`2` 为不显示。该选项同样位于录屏模块配置窗口；提示线绘制在 Windows 捕获排除的输入层，只用于提示用户，不会进入最终 MP4。异常值会恢复为虚线。
 
-`screenshotFileNameMode` 控制 PNG 文件名，支持：
+模块字符串键 `screenshot-tool.favorites.folder` 保存截图收藏夹目录。默认值为用户“图片”目录下的 `轻截收藏夹`；收藏命令从截图会话开始时的偏好快照读取该值，把最终图片按宿主当前 PNG/JPEG 格式异步写入该目录。收藏目录不跟随普通截图/录屏保存路径，也不应用普通保存页的日期分组。
 
-- `dateTime`：默认规则，使用 `截图_年-月-日_时-分-秒-毫秒.png`；
-- `sequence`：读取当前保存目录中的纯数字 PNG，从已有最大数字继续递增；目录中没有数字文件时从 `0.png` 开始；
+`screenshotImageFormat` 控制普通截图、贴图保存和截图收藏夹使用的图片格式：`png` 为默认无损格式，保留透明像素；`jpeg` 使用 `.jpg` 扩展名和固定 92 质量压缩，透明区域合成为白色。旧配置缺少该字段或保存了异常枚举值时恢复为 `png`。剪贴板复制仍直接传递最终位图，不受文件格式影响。
+
+`screenshotFileNameMode` 控制图片文件名，支持：
+
+- `dateTime`：默认规则，使用 `截图_年-月-日_时-分-秒-毫秒` 加当前格式扩展名；
+- `sequence`：读取当前保存目录中的纯数字 PNG/JPEG，从已有最大数字继续递增；目录中没有数字文件时从 `0.png` 或 `0.jpg` 开始；
 - `imageText`：按输入顺序组合最终图片范围内的工具栏文字和粘贴文字，连续空白与 Windows 文件名非法字符会替换为分隔符，最长保留 80 个字符。没有可用文字时自动回退到日期时间；文件重名时追加 `_1`、`_2` 等后缀。
 
-异常命名枚举值会恢复为 `dateTime`。图片命名规则只影响 PNG；录屏继续使用独立的 `录屏_日期时间.mp4` 规则。
+异常命名枚举值会恢复为 `dateTime`。图片格式与命名规则不影响录屏；录屏继续使用独立的 `录屏_日期时间.mp4` 规则。
 
 `dismissSaveNotificationBeforeCapture` 位于“截图设置”分页，默认为 `true`。下一次截图启动时，如果右下角的图片或录屏保存提示仍在显示，程序会先关闭提示，再抓取桌面，避免提示进入截图或遮挡连续操作。设为 `false` 后提示按原来的约 6 秒时限显示，可用于演示点击通知后打开目录并选中文件的跳转功能。
 

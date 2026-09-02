@@ -4,6 +4,12 @@ const latestReleaseApi = `https://api.github.com/repos/${repository}/releases/la
 
 const modules = [
   {
+    pattern: /favorites-addon-win-x64\.zip$/i,
+    status: document.querySelector("#favorites-status"),
+    meta: document.querySelector("#favorites-meta"),
+    button: document.querySelector("#favorites-download"),
+  },
+  {
     pattern: /pinned-image-addon-win-x64\.zip$/i,
     status: document.querySelector("#pinned-image-status"),
     meta: document.querySelector("#pinned-image-meta"),

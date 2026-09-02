@@ -1031,7 +1031,6 @@ internal static class Program
             form.Controls.Add(page);
             form.Show();
             page.RefreshScreenshots();
-            System.Windows.Forms.Application.DoEvents();
 
             var listView = (ListView)typeof(ScreenshotGalleryPage).GetField(
                     "_listView",
@@ -1058,6 +1057,10 @@ internal static class Program
                     System.Reflection.BindingFlags.Instance |
                     System.Reflection.BindingFlags.NonPublic)!
                 .GetValue(page)!;
+            WaitForUiCondition(
+                () => listView.Items.Count == 3,
+                TimeSpan.FromSeconds(5),
+                "截图画廊异步刷新未在限定时间内加载三个文件。");
             if (listView.Items.Count != 3 ||
                 listView.Items.Cast<ListViewItem>().All(item => item.Text != "录屏示例.mp4"))
             {
@@ -1079,20 +1082,31 @@ internal static class Program
             }
 
             searchInput.Text = "第一张";
-            Thread.Sleep(220);
-            System.Windows.Forms.Application.DoEvents();
+            WaitForUiCondition(
+                () => listView.Items.Count == 1 &&
+                      listView.Items[0].Text == "第一张截图.png",
+                TimeSpan.FromSeconds(5),
+                "截图画廊异步搜索未在限定时间内完成。");
             if (listView.Items.Count != 1 || listView.Items[0].Text != "第一张截图.png")
             {
                 throw new InvalidOperationException("截图画廊没有按文件名实时筛选。");
             }
             searchInput.Clear();
-            Thread.Sleep(220);
-            System.Windows.Forms.Application.DoEvents();
+            WaitForUiCondition(
+                () => listView.Items.Count == 3,
+                TimeSpan.FromSeconds(5),
+                "截图画廊清空搜索后未在限定时间内恢复全部文件。");
 
             var oldestFirstItem = sortMenu.Items
                 .OfType<ToolStripMenuItem>()
                 .Single(item => item.Text == "保存时间（最早优先）");
             oldestFirstItem.PerformClick();
+            WaitForUiCondition(
+                () => listView.Items.Count == 3 &&
+                      listView.Items[0].Text == "第一张截图.png" &&
+                      sortButton.Text == "时间：旧→新",
+                TimeSpan.FromSeconds(5),
+                "截图画廊异步正序排序未在限定时间内完成。");
             if (listView.Items.Count != 3 ||
                 listView.Items[0].Text != "第一张截图.png" ||
                 sortButton.Text != "时间：旧→新")
@@ -1103,6 +1117,12 @@ internal static class Program
                 .OfType<ToolStripMenuItem>()
                 .Single(item => item.Text == "保存时间（最新优先）")
                 .PerformClick();
+            WaitForUiCondition(
+                () => listView.Items.Count == 3 &&
+                      listView.Items[0].Text == "准备编辑的截图.png" &&
+                      sortButton.Text == "时间：新→旧",
+                TimeSpan.FromSeconds(5),
+                "截图画廊异步倒序排序未在限定时间内完成。");
 
             var selectedItem = listView.Items[0];
             selectedItem.Selected = true;
@@ -1204,6 +1224,25 @@ internal static class Program
         graphics.DrawString(title, font, brush, new PointF(34, 44));
         graphics.FillRectangle(brush, new Rectangle(34, 126, 400, 8));
         image.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    // Pumps WinForms messages until an asynchronous preview condition is satisfied.
+    private static void WaitForUiCondition(
+        Func<bool> condition,
+        TimeSpan timeout,
+        string failureMessage)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (stopwatch.Elapsed >= timeout)
+            {
+                throw new InvalidOperationException(failureMessage);
+            }
+
+            System.Windows.Forms.Application.DoEvents();
+            Thread.Sleep(10);
+        }
     }
 
     private static void RunExistingImageEditSmoke(string outputPath)
@@ -1518,7 +1557,7 @@ internal static class Program
             Text = "轻截 - 保存路径与命名规则",
             StartPosition = FormStartPosition.Manual,
             Location = new Point(80, 80),
-            ClientSize = new Size(760, 590),
+            ClientSize = new Size(760, 820),
             BackColor = Color.FromArgb(244, 247, 252),
             ShowInTaskbar = false,
             TopMost = true
@@ -1527,10 +1566,11 @@ internal static class Program
             @"C:\Users\User\Pictures\轻截",
             ScreenshotFileNameMode.ImageText,
             organizeByDate: true,
-            dateParentFolder: @"D:\截图归档")
+            dateParentFolder: @"D:\截图归档",
+            imageFormat: ScreenshotImageFormat.Jpeg)
         {
             Location = new Point(18, 18),
-            Size = new Size(724, 554)
+            Size = new Size(724, 784)
         };
         form.Controls.Add(page);
         form.Show();
@@ -1543,6 +1583,10 @@ internal static class Program
         if (page.FileNameMode != ScreenshotFileNameMode.ImageText)
         {
             throw new InvalidOperationException("保存设置页面没有恢复图片文字命名规则。");
+        }
+        if (page.ImageFormat != ScreenshotImageFormat.Jpeg)
+        {
+            throw new InvalidOperationException("保存设置页面没有恢复 JPEG 图片格式。");
         }
         if (!page.OrganizeByDate)
         {
@@ -1751,6 +1795,80 @@ internal static class Program
                     $"Expected={expectedInitialSelection}, Actual={actualInitialSelection}, " +
                     $"Region={overlay.Region is not null}");
             }
+
+            var selectionMoveOrigin = new Point(
+                expectedInitialSelection.Left + expectedInitialSelection.Width / 2,
+                expectedInitialSelection.Top + expectedInitialSelection.Height / 2);
+            typeof(CaptureOverlayForm)
+                .GetMethod(
+                    "BeginSelectionMove",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay, [selectionMoveOrigin]);
+            System.Windows.Forms.Application.DoEvents();
+            if (!overlay.Capture ||
+                overlay.Region is null ||
+                overlay.Region.IsVisible(new Point(20, 20)))
+            {
+                throw new InvalidOperationException(
+                    "拖动截图框取得鼠标捕获后，覆盖层错误扩张到框外并会显示黑色底面。");
+            }
+
+            var selectionMoveCurrent = new Point(
+                selectionMoveOrigin.X + 20,
+                selectionMoveOrigin.Y + 20);
+            typeof(CaptureOverlayForm)
+                .GetMethod(
+                    "HandleMouseMove",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay,
+                [
+                    overlay,
+                    new MouseEventArgs(
+                        MouseButtons.Right,
+                        0,
+                        selectionMoveCurrent.X,
+                        selectionMoveCurrent.Y,
+                        0)
+                ]);
+            System.Windows.Forms.Application.DoEvents();
+
+            var expectedMovedSelection = new Rectangle(
+                expectedInitialSelection.X + 20,
+                expectedInitialSelection.Y + 20,
+                expectedInitialSelection.Width,
+                expectedInitialSelection.Height);
+            var actualMovedSelection = ((ICaptureFeatureHost)overlay).Selection;
+            var movedSelectionCenter = new Point(
+                expectedMovedSelection.Left + expectedMovedSelection.Width / 2,
+                expectedMovedSelection.Top + expectedMovedSelection.Height / 2);
+            if (actualMovedSelection != expectedMovedSelection ||
+                overlay.Region is null ||
+                !overlay.Region.IsVisible(movedSelectionCenter) ||
+                overlay.Region.IsVisible(new Point(20, 20)))
+            {
+                throw new InvalidOperationException(
+                    $"拖动截图框时透明裁剪没有跟随新位置。" +
+                    $"Expected={expectedMovedSelection}, Actual={actualMovedSelection}");
+            }
+
+            typeof(CaptureOverlayForm)
+                .GetMethod(
+                    "HandleMouseUp",
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay,
+                [
+                    overlay,
+                    new MouseEventArgs(
+                        MouseButtons.Right,
+                        1,
+                        selectionMoveCurrent.X,
+                        selectionMoveCurrent.Y,
+                        0)
+                ]);
+            System.Windows.Forms.Application.DoEvents();
 
             if (!pinnedForm.Enabled)
             {
@@ -2536,7 +2654,7 @@ internal static class Program
                 System.Reflection.BindingFlags.Instance |
                 System.Reflection.BindingFlags.NonPublic)!
             .GetValue(form)!;
-        shell.SelectPage("screenshot-tool.screen-recording.settings");
+        shell.SelectPage("modules");
         form.Show();
         form.Activate();
         System.Windows.Forms.Application.DoEvents();
@@ -2583,12 +2701,12 @@ internal static class Program
         {
             throw new InvalidOperationException("主界面没有把快捷键整合进截图设置分页。");
         }
-        if (!navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
-            shell.SelectedPageId != "screenshot-tool.screen-recording.settings" ||
-            !shell.VersionText.Equals("v1.11.7", StringComparison.Ordinal))
+        if (navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
+            shell.SelectedPageId != "modules" ||
+            !shell.VersionText.Equals("v1.11.8", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"主界面没有正确显示录屏分页或版本号，当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");
+                $"模块配置仍占用主导航，或版本号不正确；当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");
         }
 
         using var captured = new Bitmap(form.Width, form.Height);
@@ -2695,6 +2813,7 @@ internal static class Program
                      "已启用模块 (1)",
                      "已禁用模块 (1)",
                      "录屏",
+                     "管理配置",
                      "禁用模块",
                      "永久删除",
                      "前往下载"
@@ -2718,6 +2837,29 @@ internal static class Program
             throw new InvalidOperationException("已启用模块名称没有使用绿色状态色。");
         }
 
+        var configurationButton = page.Controls
+            .Cast<Control>()
+            .SelectMany(GetControlTree)
+            .OfType<Button>()
+            .Single(button => button.Name == "ModuleConfiguration:ScreenRecording");
+        configurationButton.PerformClick();
+        System.Windows.Forms.Application.DoEvents();
+        var configurationForm = System.Windows.Forms.Application.OpenForms
+            .OfType<ModuleConfigurationForm>()
+            .Single(form => form.PackageName == "ScreenRecording");
+        var configurationText = string.Join(
+            '\n',
+            configurationForm.Controls
+                .Cast<Control>()
+                .SelectMany(GetControlTree)
+                .Select(control => control.Text));
+        if (!configurationText.Contains("保存录屏设置", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("管理配置没有在独立窗口承载录屏模块设置页。");
+        }
+        configurationForm.Close();
+        System.Windows.Forms.Application.DoEvents();
+
         var disabledTab = page.Controls
             .Cast<Control>()
             .SelectMany(GetControlTree)
@@ -2728,7 +2870,13 @@ internal static class Program
         var disabledPageText = string.Join(
             '\n',
             page.Controls.Cast<Control>().SelectMany(GetControlTree).Select(control => control.Text));
-        foreach (var expectedText in new[] { "PP-OCR Tiny 文字识别", "启用模块", "永久删除" })
+        foreach (var expectedText in new[]
+                 {
+                     "PP-OCR Tiny 文字识别",
+                     "管理配置",
+                     "启用模块",
+                     "永久删除"
+                 })
         {
             if (!disabledPageText.Contains(expectedText, StringComparison.Ordinal))
             {
@@ -3207,13 +3355,26 @@ internal sealed class VisibilityRecordingCaptureService(Func<MainForm?> formProv
 
 internal sealed class PreviewImageSaveService : IImageSaveService
 {
-    public string SavePng(
+    // Rejects synchronous saves because UI previews never write screenshot artifacts.
+    public string SaveImage(
         Bitmap image,
         string outputFolder,
+        ScreenshotImageFormat imageFormat = ScreenshotImageFormat.Png,
         ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime,
         IReadOnlyList<string>? imageTexts = null,
         bool organizeByDate = false) =>
         throw new NotSupportedException("界面预览不保存截图。");
+
+    // Rejects asynchronous saves because UI previews never write screenshot artifacts.
+    public Task<string> SaveImageAsync(
+        Bitmap image,
+        string outputFolder,
+        ScreenshotImageFormat imageFormat = ScreenshotImageFormat.Png,
+        ScreenshotFileNameMode fileNameMode = ScreenshotFileNameMode.DateTime,
+        IReadOnlyList<string>? imageTexts = null,
+        bool organizeByDate = false,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<string>(new NotSupportedException("界面预览不保存截图。"));
 }
 
 internal sealed class PreviewClipboardService : IClipboardService
@@ -3445,8 +3606,12 @@ internal sealed class PreviewModuleManager(
 
     public IReadOnlyList<ICaptureFeature> CreateCaptureFeatures() => [];
 
-    public IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host) =>
-        _includeScreenRecording
+    public IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(
+        string packageName,
+        IModuleSettingsHost host) =>
+        _includeScreenRecording &&
+        _packageEnabled &&
+        string.Equals(packageName, "ScreenRecording", StringComparison.OrdinalIgnoreCase)
             ? [new ScreenRecordingSettingsPage(host)]
             : [];
 

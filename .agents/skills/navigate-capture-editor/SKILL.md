@@ -23,6 +23,7 @@ description: 定位并维护轻截的区域截图、选区交互、标注编辑�
 | 实时标注 | `ScreenshotTool/Presentation/LiveAnnotationSession.cs` | 屏幕录制、`ScreenshotTool.Contracts/ModuleContracts.cs` |
 | 屏幕采集 | `ScreenshotTool/Infrastructure/ScreenCaptureService.cs`、`Core/DesktopSnapshot.cs`、`Presentation/CaptureBackgroundLayer.cs` | 虚拟桌面坐标、DPI、多屏、覆盖层停放与实时选区采集 |
 | 模块截图能力 | `ScreenshotTool/Presentation/CaptureFeatureSession.cs` | `ScreenshotTool.Contracts/ModuleContracts.cs`、模块运行时 |
+| 收藏最终截图 | `ScreenshotTool.Favorites/FavoritesModule.cs` | `CaptureOverlayForm.cs` 的 Export 渲染、可见文字命名元数据、字符串偏好快照、保存产物系统 |
 | 编辑策略与系数 | `ScreenshotTool/Core/AnnotationLayoutOptions.cs`、`DrawingToolCoefficients.cs` | 编辑设置页、用户偏好 |
 | 贴图创建与重新编辑 | `ScreenshotTool.PinnedImage/PinnedImageModule.cs`、`PinnedImageForm.cs`、`PinnedImageWindowLayout.cs` | 模块运行时、剪贴板/保存、`ExistingImageEditLayout.cs` |
 
@@ -34,6 +35,7 @@ description: 定位并维护轻截的区域截图、选区交互、标注编辑�
 - 通过 `ICaptureFeatureHost` 和最小契约提供宿主能力，不让模块引用主程序、窗体或内部标注类型。
 - 输入返回 `true` 仅表示确实消费事件；不得无条件截获系统保留快捷键。
 - 绘制回调不做阻塞 IO、网络请求或昂贵全图重算；缓存可复用资源并准确释放图片、字体、画刷和句柄。
+- 最终位图在 UI 线程完成 Export 渲染后，把编码、写盘和剪贴板竞争重试交给后台；完成前由截图会话唯一持有位图并阻止重复保存。
 - 新工具优先实现可组合策略/服务，保持 `CaptureOverlayForm` 和 `CaptureAnnotationEditor` 的职责边界。
 
 ## 联动照护
@@ -41,7 +43,7 @@ description: 定位并维护轻截的区域截图、选区交互、标注编辑�
 - 改坐标或选区：同步检查截图采集、标注几何、模块功能、长截图替换图像和多屏导出。
 - 改标注模型/渲染：同步检查实时标注、屏幕录制、序列化/撤销、Preview 与 Export。
 - 改输入：同步检查全局快捷键、模块输入消费、文本编辑焦点和系统保留键。
-- 改最终位图：同步检查保存、剪贴板、OCR/二维码输入源、历史记录与通知。
+- 改最终位图：同步检查普通保存、收藏夹、剪贴板、OCR/二维码输入源、历史记录与通知。
 - 改公共宿主能力：同步检查 `ScreenshotTool.Contracts`、所有模块实现、生命周期和兼容性测试。
 - 改贴图：同步检查 `docs/pinned-image-addon.md`、`scripts/Publish-PinnedImageModule.ps1`、模块卸载关闭窗口、复制/保存和重新编辑。
 

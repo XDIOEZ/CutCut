@@ -76,7 +76,8 @@ internal sealed class AppSettings
         Preferences = settings.Preferences;
     }
 
-    public string GetScreenshotParentFolder() =>
+    // Returns the configured parent folder shared by screenshots and recordings.
+    public string GetArtifactParentFolder() =>
         Preferences.OrganizeScreenshotsByDate &&
         !string.IsNullOrWhiteSpace(Preferences.ScreenshotDateParentFolder)
             ? Preferences.ScreenshotDateParentFolder

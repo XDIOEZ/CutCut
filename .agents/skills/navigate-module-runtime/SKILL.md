@@ -19,11 +19,12 @@ description: 定位并维护轻截的模块契约、发现加载、热更新、�
 | 稳定公共契约 | `ScreenshotTool.Contracts/ModuleContracts.cs` | 所有 `ScreenshotTool.*` 模块、宿主适配器、测试模块 |
 | 模块发现/加载/卸载 | `ScreenshotTool/Infrastructure/Modules/ModuleHost.cs` | `ModuleLoadContext.cs`、文件监听、租约、激活偏好 |
 | 程序集加载上下文 | `ScreenshotTool/Infrastructure/Modules/ModuleLoadContext.cs` | 私有依赖解析、流式加载、可回收性 |
-| 图片宿主代理 | `ScreenshotTool/Infrastructure/Modules/ModuleImageHostProxy.cs` | 保存系统、图片所有权、异常隔离 |
+| 图片宿主代理 | `ScreenshotTool/Infrastructure/Modules/ModuleImageHostProxy.cs` | `IModuleImageStorageHost`、自定义目录保存、图片所有权、异常隔离 |
 | 激活偏好 | `ScreenshotTool/Abstractions/IModuleActivationPreferenceStore.cs`、`Infrastructure/Modules/UserPreferenceModuleActivationStore.cs` | 设置存储、模块管理页 |
 | 宿主接口与模型 | `ScreenshotTool/Abstractions/IModuleManager.cs`、`ModuleInfo.cs` | `Application/CompositionRoot.cs`、页面刷新 |
 | 会话租约 | `ScreenshotTool/Presentation/CaptureFeatureSession.cs` | `CaptureOverlayForm.cs`、功能 Dispose、延迟卸载 |
-| 模块管理 UI | `ScreenshotTool/Presentation/Pages/ModuleManagementPage.cs` | 发现状态、启停、错误展示 |
+| 模块管理与配置 UI | `ScreenshotTool/Presentation/Pages/ModuleManagementPage.cs`、`Presentation/ModuleConfigurationForm.cs` | 按模块包创建设置页租约、启停、错误展示、窗口释放 |
+| 截图收藏夹模块 | `ScreenshotTool.Favorites/FavoritesModule.cs`、`FavoritesSettingsPage.cs` | 公共字符串偏好、最终位图、自定义目录异步保存、独立恢复包 |
 | 组合入口 | `ScreenshotTool/Application/CompositionRoot.cs` | 启动/关闭顺序、服务释放 |
 
 ## 修改规则
@@ -41,7 +42,7 @@ description: 定位并维护轻截的模块契约、发现加载、热更新、�
 
 - 改契约：同步检查所有模块项目、测试模块、宿主代理、版本兼容和打包内容。
 - 改加载/卸载：同步检查管理页刷新、激活偏好、活动截图会话、资源释放及 DLL 替换/删除。
-- 改设置页扩展：同步检查模块设置契约、主设置导航和纵向单列布局。
+- 改设置页扩展：同步检查模块设置契约、每个模块卡片的“管理配置”、独立窗口租约释放和纵向单列布局。
 - 改图片/文本结果宿主：同步检查保存系统、OCR/二维码结果窗体、所有权与取消语义。
 - 改模块目录或资产命名：同步检查发布脚本、插件文档与 `docs/project-memory.md`；只有明确要求才打包。
 

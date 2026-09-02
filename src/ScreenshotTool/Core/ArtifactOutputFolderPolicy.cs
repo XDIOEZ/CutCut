@@ -2,18 +2,19 @@ using System.Globalization;
 
 namespace ScreenshotTool.Core;
 
-internal static class ScreenshotOutputFolderPolicy
+internal static class ArtifactOutputFolderPolicy
 {
     public const string DateFolderFormat = "yyyy-MM-dd";
 
-    public static string Resolve(string parentFolder, bool organizeByDate, DateTime capturedAt)
+    // Resolves the shared screenshot and recording folder for the supplied local time.
+    public static string Resolve(string parentFolder, bool organizeByDate, DateTime createdAt)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parentFolder);
 
         return organizeByDate
             ? Path.Combine(
                 parentFolder,
-                capturedAt.ToString(DateFolderFormat, CultureInfo.InvariantCulture))
+                createdAt.ToString(DateFolderFormat, CultureInfo.InvariantCulture))
             : parentFolder;
     }
 }

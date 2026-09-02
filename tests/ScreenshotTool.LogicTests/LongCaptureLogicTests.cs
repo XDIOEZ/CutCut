@@ -978,7 +978,7 @@ internal static class LongCaptureLogicTests
             Guid.NewGuid().ToString("N"));
         try
         {
-            var path = new PngImageSaveService().SavePng(stitched, directory);
+            var path = new ImageSaveService().SaveImage(stitched, directory);
             using var reloaded = new Bitmap(path);
             AssertBitmapEqual(source, reloaded, "长截图保存 PNG 后重新读取仍保持全部像素和尺寸");
         }

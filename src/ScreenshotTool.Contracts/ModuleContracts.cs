@@ -50,6 +50,18 @@ public interface IModuleImageHost
     void EditImage(Bitmap image);
 }
 
+public interface IModuleImageStorageHost : IModuleImageHost
+{
+    /// <summary>
+    /// Saves an image to an explicit folder without taking ownership of the bitmap.
+    /// </summary>
+    Task<string> SaveImageAsync(
+        Bitmap image,
+        string outputFolder,
+        IReadOnlyList<string>? imageTexts = null,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IModuleSettingsPageProvider
 {
     IEnumerable<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host);
@@ -165,6 +177,11 @@ public interface ICaptureFeatureHost
 
     int GetIntegerPreference(string id, int defaultValue);
 
+    /// <summary>
+    /// Reads a string preference while preserving compatibility with hosts that predate string settings.
+    /// </summary>
+    string GetStringPreference(string id, string defaultValue) => defaultValue;
+
     void InvalidateAll();
 
     void Invalidate(Rectangle bounds);
@@ -195,9 +212,17 @@ public interface ILiveCaptureFeatureHost : ICaptureFeatureHost
 
 public interface ICaptureArtifactHost : ICaptureFeatureHost
 {
+    /// <summary>
+    /// Gets the final directory for an artifact created now, including host-managed grouping.
+    /// </summary>
     string OutputFolder { get; }
 
     Rectangle SelectionScreenBounds { get; }
+
+    /// <summary>
+    /// Returns visible text metadata from the final selection for shared file-name policies.
+    /// </summary>
+    IReadOnlyList<string> GetSelectionTextContents() => [];
 
     Bitmap RenderSelection();
 

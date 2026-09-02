@@ -38,6 +38,7 @@ $expectedArchives = @(
     "complete-lightweight-full-win-x64.zip",
     "complete-lightweight-win-x64.zip",
     "complete-portable-win-x64.zip",
+    "favorites-addon-win-x64.zip",
     "long-capture-addon-win-x64.zip",
     "ocr-addon-win-x64.zip",
     "paddle-ocr-small-addon-win-x64.zip",

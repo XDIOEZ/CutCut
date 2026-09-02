@@ -6,3 +6,7 @@
 - 2026-08-05 | 核对截图框外贴图右键复制 | `IModuleImageHost` 既有接口、`PinnedImageForm.cs`、框外交互 UI 冒烟 | 复制与保存入口无需变更，无导航缺口
 - 2026-08-11 | 截图按本地日期自动创建并复用子文件夹 | `ScreenshotOutputFolderPolicy.cs`、`PngImageSaveService.cs`、`SavePathSettingsPage.cs`、画廊与安全校验 | 补录日期目录策略入口
 - 2026-08-11 | 日期分类支持独立绑定父文件夹 | `UserPreferences.cs`、`SavePathSettingsPage.cs`、`MainForm.cs`、画廊 | 既有入口完整，无导航缺口
+- 2026-08-31 | 截图与录屏共用日期分类目录 | `ArtifactOutputFolderPolicy.cs`、`CaptureOverlayForm.cs`、`SavePathSettingsPage.cs` | 日期目录入口已泛化为全部保存产物
+- 2026-08-31 | 截图保存与图库刷新移出 UI 阻塞链路 | `IImageSaveService.cs`、`WindowsClipboardService.cs`、`CaptureOverlayForm.cs`、`ScreenshotGalleryPage.cs` | 补录后台 PNG、STA 剪贴板重试及最新图库快照规则
+- 2026-09-01 | 新增收藏夹模块独立目录异步保存 | `IModuleImageStorageHost`、`ModuleImageHostProxy.cs`、`ScreenshotTool.Favorites` | 补录显式目录、图片内文字命名元数据与异步位图边界，普通日期目录和收藏目录保持分离
+- 2026-09-01 | 保存页新增 PNG/JPEG 格式选择 | `ScreenshotImageFormat.cs`、`ImageSaveService.cs`、`SavePathSettingsPage.cs`、图片保存调用方 | PNG/JPEG 共用宿主策略，补录格式入口与透明像素规则

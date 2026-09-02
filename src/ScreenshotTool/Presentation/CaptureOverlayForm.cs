@@ -32,8 +32,10 @@ internal sealed class CaptureOverlayForm : Form,
     private readonly ControlDoubleTapDetector _controlDoubleTapDetector = new();
     private readonly IReadOnlyDictionary<string, bool> _booleanFeaturePreferences;
     private readonly IReadOnlyDictionary<string, int> _integerFeaturePreferences;
+    private readonly IReadOnlyDictionary<string, string> _stringFeaturePreferences;
     private readonly ScreenshotFileNameMode _screenshotFileNameMode;
-    private readonly bool _organizeScreenshotsByDate;
+    private readonly ScreenshotImageFormat _screenshotImageFormat;
+    private readonly bool _organizeArtifactsByDate;
     private readonly CaptureAnnotationEditor _annotationEditor;
     private readonly LiveAnnotationSessionFactory _annotationSessionFactory;
     private readonly LiveAnnotationPointerHook _outsidePointerHook;
@@ -93,12 +95,14 @@ internal sealed class CaptureOverlayForm : Form,
     private Point _replacementFramePointerOrigin;
     private Rectangle _replacementFrameOrigin;
     private bool _featureCommandRunning;
+    private bool _savingSelection;
     private bool _liveCaptureOverlayParked;
     private bool _updatingInteractionRegion;
     private bool _backgroundRefreshInProgress;
     private bool _annotationSnappingEnabled;
     private bool _finished;
 
+    // Creates one capture session and exposes shared host capabilities to active modules.
     public CaptureOverlayForm(
         DesktopSnapshot snapshot,
         IImageSaveService imageSaveService,
@@ -122,7 +126,9 @@ internal sealed class CaptureOverlayForm : Form,
         AnnotationMoveActivationMode annotationMoveActivationMode =
             AnnotationMoveActivationMode.HoldAlt,
         ITextTranslationService? textTranslationService = null,
-        bool organizeScreenshotsByDate = false)
+        bool organizeArtifactsByDate = false,
+        IReadOnlyDictionary<string, string>? stringFeaturePreferences = null,
+        ScreenshotImageFormat screenshotImageFormat = ScreenshotImageFormat.Png)
     {
         _snapshot = snapshot;
         _backgroundLayer = new CaptureBackgroundLayer(snapshot.Image);
@@ -152,9 +158,16 @@ internal sealed class CaptureOverlayForm : Form,
             preference => preference.Key,
             preference => preference.Value,
             StringComparer.Ordinal);
+        _stringFeaturePreferences = (stringFeaturePreferences ??
+                                     new Dictionary<string, string>())
+            .ToDictionary(
+                preference => preference.Key,
+                preference => preference.Value,
+                StringComparer.Ordinal);
         _outputFolder = outputFolder;
         _screenshotFileNameMode = screenshotFileNameMode;
-        _organizeScreenshotsByDate = organizeScreenshotsByDate;
+        _screenshotImageFormat = ScreenshotImageFormatPolicy.Normalize(screenshotImageFormat);
+        _organizeArtifactsByDate = organizeArtifactsByDate;
 
         Text = "轻截 - 选择截图区域";
         FormBorderStyle = FormBorderStyle.None;
@@ -216,10 +229,18 @@ internal sealed class CaptureOverlayForm : Form,
 
     public event EventHandler<string>? ArtifactSaved;
 
-    string ICaptureArtifactHost.OutputFolder => _outputFolder;
+    // Resolves the final folder at artifact creation time so modules share the host's date grouping rule.
+    string ICaptureArtifactHost.OutputFolder => ArtifactOutputFolderPolicy.Resolve(
+        _outputFolder,
+        _organizeArtifactsByDate,
+        DateTime.Now);
 
     Rectangle ICaptureArtifactHost.SelectionScreenBounds =>
         new(PointToScreen(_selection.Location), _selection.Size);
+
+    // Supplies visible annotation text so module saves can reuse the normal image naming policy.
+    IReadOnlyList<string> ICaptureArtifactHost.GetSelectionTextContents() =>
+        _document.GetVisibleTextContents(EditingBounds);
 
     Bitmap ICaptureArtifactHost.RenderSelection() => RenderSelection();
 
@@ -369,6 +390,7 @@ internal sealed class CaptureOverlayForm : Form,
         return GetSizeBadgeBounds(_selection, text, font);
     }
 
+    // Keeps the top-level window clipped to editor surfaces while mouse capture owns a drag.
     private void UpdateInteractionRegion()
     {
         if (_updatingInteractionRegion || !IsHandleCreated || IsDisposed)
@@ -381,7 +403,6 @@ internal sealed class CaptureOverlayForm : Form,
         {
             var constrainToEditor = _hasSelection &&
                                     !_selection.IsEmpty &&
-                                    !Capture &&
                                     !_isSelecting &&
                                     !_isPendingWindowSelection &&
                                     !_liveCaptureOverlayParked;
@@ -1880,8 +1901,10 @@ internal sealed class CaptureOverlayForm : Form,
                Math.Abs(current.Y - start.Y) >= Math.Max(3, threshold.Height / 2);
     }
 
+    // Moves the window clip with selection geometry before repainting the changed pixels.
     private void InvalidateSelectionTransition(Rectangle previous, Rectangle current)
     {
+        UpdateInteractionRegion();
         using var dirty = new Region();
         dirty.MakeEmpty();
         if (!previous.IsEmpty)
@@ -1901,8 +1924,10 @@ internal sealed class CaptureOverlayForm : Form,
         Invalidate(dirty, false);
     }
 
+    // Moves the window clip with an existing-image frame before repainting its transition.
     private void InvalidateReplacementFrameTransition(Rectangle previous, Rectangle current)
     {
+        UpdateInteractionRegion();
         using var dirty = new Region();
         dirty.MakeEmpty();
         if (!previous.IsEmpty)
@@ -1922,12 +1947,14 @@ internal sealed class CaptureOverlayForm : Form,
         Invalidate(dirty, false);
     }
 
+    // Moves the window clip with a dragged selection and repaints its shifted annotations.
     private void InvalidateSelectionMoveTransition(
         Rectangle previousSelection,
         Rectangle currentSelection,
         IEnumerable<Rectangle> previousVisualAreas,
         Point offset)
     {
+        UpdateInteractionRegion();
         using var dirty = new Region();
         dirty.MakeEmpty();
         if (!previousSelection.IsEmpty)
@@ -3085,28 +3112,35 @@ internal sealed class CaptureOverlayForm : Form,
         }
     }
 
-    private void SaveSelectionAndClose()
+    // Saves the current screenshot without blocking the overlay UI during encoding or clipboard retries.
+    private async void SaveSelectionAndClose()
     {
-        if (_finished)
+        if (_finished || _savingSelection || _featureCommandRunning)
         {
             return;
         }
 
+        Bitmap? image = null;
         try
         {
-            using var image = RenderSelection();
-            var path = _imageSaveService.SavePng(
+            image = RenderSelection();
+            var imageTexts = _document.GetVisibleTextContents(EditingBounds);
+            _savingSelection = true;
+            SetSavingSelectionState(saving: true);
+            var path = await _imageSaveService.SaveImageAsync(
                 image,
                 _outputFolder,
+                _screenshotImageFormat,
                 _screenshotFileNameMode,
-                _document.GetVisibleTextContents(EditingBounds),
-                _organizeScreenshotsByDate);
+                imageTexts,
+                _organizeArtifactsByDate);
             try
             {
-                _clipboardService.SetImage(image);
+                await _clipboardService.SetImageAsync(image);
             }
             catch (Exception clipboardException)
             {
+                SetSavingSelectionState(saving: false);
                 _finished = true;
                 ArtifactSaved?.Invoke(this, path);
                 MessageBox.Show(this,
@@ -3126,14 +3160,37 @@ internal sealed class CaptureOverlayForm : Form,
         }
         catch (Exception exception)
         {
+            SetSavingSelectionState(saving: false);
             MessageBox.Show(this, $"保存截图失败：{exception.Message}", "保存失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+        finally
+        {
+            image?.Dispose();
+            _savingSelection = false;
+            if (!_finished)
+            {
+                SetSavingSelectionState(saving: false);
+            }
+        }
     }
 
+    // Prevents duplicate input while an owned bitmap is being saved on background workers.
+    private void SetSavingSelectionState(bool saving)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        UseWaitCursor = saving;
+        Enabled = !saving;
+    }
+
+    // Copies the final screenshot only when no save or module command is already in flight.
     private void CopySelectionAndClose()
     {
-        if (_finished)
+        if (_finished || _savingSelection || _featureCommandRunning)
         {
             return;
         }
@@ -3289,6 +3346,15 @@ internal sealed class CaptureOverlayForm : Form,
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         return _integerFeaturePreferences.TryGetValue(id, out var value)
+            ? value
+            : defaultValue;
+    }
+
+    // Reads the immutable string preference snapshot supplied for this capture session.
+    string ICaptureFeatureHost.GetStringPreference(string id, string defaultValue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        return _stringFeaturePreferences.TryGetValue(id, out var value)
             ? value
             : defaultValue;
     }

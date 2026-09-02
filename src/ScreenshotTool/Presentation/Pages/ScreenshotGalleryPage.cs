@@ -18,6 +18,8 @@ internal sealed class ScreenshotGalleryPage : UserControl
     private readonly System.Windows.Forms.Timer _searchTimer;
     private readonly Label _countLabel;
     private readonly Label _emptyLabel;
+    private readonly List<Bitmap> _thumbnailSources = [];
+    private CancellationTokenSource? _refreshCancellation;
     private ScreenshotGallerySortMode _sortMode =
         ScreenshotGallerySortMode.SavedTimeDescending;
     private string _folderPath;
@@ -222,78 +224,188 @@ internal sealed class ScreenshotGalleryPage : UserControl
         set => _folderPath = value;
     }
 
+    // Starts a cancelable background scan so directory and thumbnail work never blocks the UI.
     public void RefreshScreenshots()
     {
         _searchTimer.Stop();
+        if (IsDisposed || Disposing)
+        {
+            return;
+        }
+
+        var request = new GalleryRefreshRequest(
+            _folderPath,
+            _searchInput.Text,
+            _sortMode);
+        var cancellation = new CancellationTokenSource();
+        var previousCancellation = _refreshCancellation;
+        _refreshCancellation = cancellation;
+        previousCancellation?.Cancel();
+        _countLabel.Text = "正在读取截图和视频…";
+        _ = RefreshScreenshotsAsync(request, cancellation);
+    }
+
+    // Loads one immutable gallery snapshot on a worker and applies only the newest request.
+    private async Task RefreshScreenshotsAsync(
+        GalleryRefreshRequest request,
+        CancellationTokenSource cancellation)
+    {
+        GalleryRefreshSnapshot? snapshot = null;
+        try
+        {
+            snapshot = await Task.Run(
+                () => LoadGallerySnapshot(request, cancellation.Token),
+                cancellation.Token);
+            if (!CanApplyGalleryRefresh(cancellation))
+            {
+                return;
+            }
+
+            ApplyGallerySnapshot(request, snapshot);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (CanApplyGalleryRefresh(cancellation))
+            {
+                ApplyGalleryLoadFailure(exception);
+            }
+        }
+        finally
+        {
+            snapshot?.Dispose();
+            if (ReferenceEquals(_refreshCancellation, cancellation))
+            {
+                _refreshCancellation = null;
+            }
+            cancellation.Dispose();
+        }
+    }
+
+    // Enumerates metadata and builds bounded thumbnails without touching WinForms controls.
+    private GalleryRefreshSnapshot LoadGallerySnapshot(
+        GalleryRefreshRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(request.FolderPath))
+        {
+            return new GalleryRefreshSnapshot(
+                directoryExists: false,
+                totalCount: 0,
+                matchCount: 0,
+                []);
+        }
+
+        var entries = new List<ScreenshotGalleryEntry>();
+        foreach (var path in Directory.EnumerateFiles(
+                     request.FolderPath,
+                     "*",
+                     new EnumerationOptions
+                     {
+                         RecurseSubdirectories = true,
+                         IgnoreInaccessible = true,
+                         AttributesToSkip = FileAttributes.ReparsePoint
+                     }))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_savedScreenshotService.IsSupportedImage(path) &&
+                !_savedScreenshotService.IsSupportedVideo(path))
+            {
+                continue;
+            }
+
+            var file = new FileInfo(path);
+            entries.Add(new ScreenshotGalleryEntry(
+                file.FullName,
+                file.Name,
+                file.LastWriteTime,
+                file.LastWriteTimeUtc,
+                file.Length));
+        }
+
+        var query = ScreenshotGalleryQuery.Apply(
+            entries,
+            request.SearchText,
+            request.SortMode,
+            maximumCount: 60);
+        var items = new List<GalleryRefreshItem>(query.Entries.Count);
+        try
+        {
+            foreach (var entry in query.Entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var thumbnail = _savedScreenshotService.IsSupportedVideo(entry.FullName)
+                    ? CreateVideoThumbnail(entry.FullName)
+                    : TryCreateImageThumbnail(entry.FullName);
+                if (thumbnail is not null)
+                {
+                    items.Add(new GalleryRefreshItem(entry, thumbnail));
+                }
+            }
+
+            return new GalleryRefreshSnapshot(
+                directoryExists: true,
+                entries.Count,
+                query.MatchCount,
+                items);
+        }
+        catch
+        {
+            foreach (var item in items)
+            {
+                item.Thumbnail.Dispose();
+            }
+            throw;
+        }
+    }
+
+    // Replaces the visible gallery with a completed snapshot in one short UI update.
+    private void ApplyGallerySnapshot(
+        GalleryRefreshRequest request,
+        GalleryRefreshSnapshot snapshot)
+    {
         _listView.BeginUpdate();
         try
         {
-            _listView.Items.Clear();
-            _images.Images.Clear();
-            if (!Directory.Exists(_folderPath))
+            ClearGalleryItems();
+            if (!snapshot.DirectoryExists)
             {
                 ShowEmpty("保存目录中还没有截图或视频");
                 return;
             }
 
-            var entries = Directory.EnumerateFiles(
-                    _folderPath,
-                    "*",
-                    new EnumerationOptions
-                    {
-                        RecurseSubdirectories = true,
-                        IgnoreInaccessible = true,
-                        AttributesToSkip = FileAttributes.ReparsePoint
-                    })
-                .Where(path =>
-                    _savedScreenshotService.IsSupportedImage(path) ||
-                    _savedScreenshotService.IsSupportedVideo(path))
-                .Select(path => new FileInfo(path))
-                .Select(file => new ScreenshotGalleryEntry(
-                    file.FullName,
-                    file.Name,
-                    file.LastWriteTime,
-                    file.LastWriteTimeUtc,
-                    file.Length))
+            var thumbnails = snapshot.Items
+                .Select(item => item.Thumbnail)
                 .ToArray();
-            var result = ScreenshotGalleryQuery.Apply(
-                entries,
-                _searchInput.Text,
-                _sortMode,
-                maximumCount: 60);
-            foreach (var entry in result.Entries)
+            snapshot.TransferThumbnailOwnership();
+            _thumbnailSources.AddRange(thumbnails);
+            foreach (var galleryItem in snapshot.Items)
             {
-                var thumbnail = _savedScreenshotService.IsSupportedVideo(entry.FullName)
-                    ? CreateVideoThumbnail(entry.FullName)
-                    : TryCreateImageThumbnail(entry.FullName);
-                if (thumbnail is null)
-                {
-                    continue;
-                }
-
+                var entry = galleryItem.Entry;
                 var imageIndex = _images.Images.Count;
-                _images.Images.Add(thumbnail);
+                _images.Images.Add(galleryItem.Thumbnail);
                 var relativeFolder = Path.GetDirectoryName(
-                    Path.GetRelativePath(_folderPath, entry.FullName));
+                    Path.GetRelativePath(request.FolderPath, entry.FullName));
                 var displayName = string.IsNullOrEmpty(relativeFolder)
                     ? entry.Name
                     : $"{relativeFolder}  ·  {entry.Name}";
-                var item = new ListViewItem(displayName, imageIndex)
+                _listView.Items.Add(new ListViewItem(displayName, imageIndex)
                 {
                     Tag = entry.FullName,
                     ToolTipText =
                         $"{entry.LastWriteTime:g}  ·  {Math.Max(1, entry.Length / 1024)} KB"
-                };
-                _listView.Items.Add(item);
+                });
             }
 
             _countLabel.Text = CreateCountText(
-                result.MatchCount,
+                snapshot.MatchCount,
                 _listView.Items.Count,
-                entries.Length,
-                _searchInput.Text);
+                snapshot.TotalCount,
+                request.SearchText);
             _emptyLabel.Visible = _listView.Items.Count == 0;
-            _emptyLabel.Text = entries.Length == 0
+            _emptyLabel.Text = snapshot.TotalCount == 0
                 ? "保存目录中还没有截图或视频"
                 : "没有找到匹配的截图或视频";
             if (!_emptyLabel.Visible)
@@ -301,15 +413,37 @@ internal sealed class ScreenshotGalleryPage : UserControl
                 _listView.BringToFront();
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            ShowEmpty("无法读取截图或视频");
-            _countLabel.Text = $"读取失败：{exception.Message}";
-        }
         finally
         {
             _listView.EndUpdate();
         }
+    }
+
+    // Shows a failed background refresh without leaving stale thumbnail ownership behind.
+    private void ApplyGalleryLoadFailure(Exception exception)
+    {
+        ClearGalleryItems();
+        ShowEmpty("无法读取截图或视频");
+        _countLabel.Text = $"读取失败：{exception.Message}";
+    }
+
+    // Confirms that a completed worker still belongs to the latest live page request.
+    private bool CanApplyGalleryRefresh(CancellationTokenSource cancellation) =>
+        !cancellation.IsCancellationRequested &&
+        ReferenceEquals(_refreshCancellation, cancellation) &&
+        !IsDisposed &&
+        !Disposing;
+
+    // Clears list items and releases source bitmaps retained by the ImageList.
+    private void ClearGalleryItems()
+    {
+        _listView.Items.Clear();
+        _images.Images.Clear();
+        foreach (var thumbnail in _thumbnailSources)
+        {
+            thumbnail.Dispose();
+        }
+        _thumbnailSources.Clear();
     }
 
     private void ShowEmpty(string message)
@@ -617,16 +751,65 @@ internal sealed class ScreenshotGalleryPage : UserControl
         return target;
     }
 
+    // Cancels pending background work and releases every gallery-owned image resource.
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            var refreshCancellation = _refreshCancellation;
+            _refreshCancellation = null;
+            refreshCancellation?.Cancel();
             _searchTimer.Dispose();
             _sortMenu.Dispose();
             _itemMenu.Dispose();
+            ClearGalleryItems();
             _images.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    private sealed record GalleryRefreshRequest(
+        string FolderPath,
+        string SearchText,
+        ScreenshotGallerySortMode SortMode);
+
+    private sealed record GalleryRefreshItem(
+        ScreenshotGalleryEntry Entry,
+        Bitmap Thumbnail);
+
+    private sealed class GalleryRefreshSnapshot(
+        bool directoryExists,
+        int totalCount,
+        int matchCount,
+        IReadOnlyList<GalleryRefreshItem> items) : IDisposable
+    {
+        private bool _ownsThumbnails = true;
+
+        public bool DirectoryExists { get; } = directoryExists;
+
+        public int TotalCount { get; } = totalCount;
+
+        public int MatchCount { get; } = matchCount;
+
+        public IReadOnlyList<GalleryRefreshItem> Items { get; } = items;
+
+        // Transfers thumbnail lifetime to the page after a successful UI apply.
+        public void TransferThumbnailOwnership() => _ownsThumbnails = false;
+
+        // Releases thumbnails produced by canceled, stale, or failed refresh requests.
+        public void Dispose()
+        {
+            if (!_ownsThumbnails)
+            {
+                return;
+            }
+
+            foreach (var item in Items)
+            {
+                item.Thumbnail.Dispose();
+            }
+            _ownsThumbnails = false;
+        }
     }
 }
 

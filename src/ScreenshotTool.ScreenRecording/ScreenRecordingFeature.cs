@@ -95,6 +95,7 @@ internal sealed class ScreenRecordingFeature :
         _lifetimeCancellation.Dispose();
     }
 
+    // Coordinates one recording session while keeping output and lifecycle work outside the UI callbacks.
     private async Task RunRecordingAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -137,8 +138,10 @@ internal sealed class ScreenRecordingFeature :
             return;
         }
 
-        Directory.CreateDirectory(artifactHost.OutputFolder);
-        var outputPath = CreateOutputPath(artifactHost.OutputFolder, DateTime.Now);
+        var recordingStartedAt = DateTime.Now;
+        var outputFolder = artifactHost.OutputFolder;
+        Directory.CreateDirectory(outputFolder);
+        var outputPath = CreateOutputPath(outputFolder, recordingStartedAt);
         var recordingOptions = RecordingOptions.FromHost(Host);
         RecordingControlResult? result = null;
         Exception? failure = null;

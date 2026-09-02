@@ -17,6 +17,7 @@ using ScreenshotTool.PaddleOcr.Small;
 using ScreenshotTool.PaddleOcr.Tiny;
 using ScreenshotTool.QrCode;
 using ScreenshotTool.PinnedImage;
+using ScreenshotTool.Favorites;
 using ZXing;
 using System.IO.Compression;
 using System.Net;
@@ -1569,18 +1570,26 @@ AssertEqual(
 var namingTimestamp = new DateTime(2026, 7, 21, 15, 6, 7, 123);
 AssertEqual(
     Path.Combine("C:\\截图", "2026-07-21"),
-    ScreenshotOutputFolderPolicy.Resolve(
+    ArtifactOutputFolderPolicy.Resolve(
         "C:\\截图",
         organizeByDate: true,
-        capturedAt: namingTimestamp),
-    "按日期保存时解析当天子文件夹");
+        createdAt: namingTimestamp),
+    "截图与录屏按日期保存时解析当天子文件夹");
 AssertEqual(
     "C:\\截图",
-    ScreenshotOutputFolderPolicy.Resolve(
+    ArtifactOutputFolderPolicy.Resolve(
         "C:\\截图",
         organizeByDate: false,
-        capturedAt: namingTimestamp),
+        createdAt: namingTimestamp),
     "关闭按日期保存时继续使用父文件夹");
+var datedRecordingFolder = ArtifactOutputFolderPolicy.Resolve(
+    "C:\\截图",
+    organizeByDate: true,
+    createdAt: namingTimestamp);
+AssertEqual(
+    Path.Combine("C:\\截图", "2026-07-21", "录屏_20260721_150607.mp4"),
+    ScreenRecordingFeature.CreateOutputPath(datedRecordingFolder, namingTimestamp),
+    "录屏文件使用共享日期子目录和录制时间命名");
 AssertEqual(
     "截图_2026-07-21_15-06-07-123.png",
     ScreenshotFileNamePolicy.CreateFileName(
@@ -1588,6 +1597,14 @@ AssertEqual(
         namingTimestamp,
         []),
     "日期时间命名规则");
+AssertEqual(
+    "截图_2026-07-21_15-06-07-123.jpg",
+    ScreenshotFileNamePolicy.CreateFileName(
+        ScreenshotFileNameMode.DateTime,
+        namingTimestamp,
+        [],
+        imageFormat: ScreenshotImageFormat.Jpeg),
+    "JPEG 命名规则使用 jpg 扩展名");
 AssertEqual(
     "截图_2026-07-21_15-06-07-123_1.png",
     ScreenshotFileNamePolicy.CreateFileName(
@@ -1659,29 +1676,60 @@ try
     File.WriteAllBytes(Path.Combine(namingSaveDirectory, "0.png"), []);
     File.WriteAllBytes(Path.Combine(namingSaveDirectory, "2.png"), []);
     using var namingBitmap = new Bitmap(8, 8);
-    var sequencePath = new PngImageSaveService().SavePng(
+    var imageSaveService = new ImageSaveService();
+    var sequencePath = imageSaveService.SaveImage(
         namingBitmap,
         namingSaveDirectory,
-        ScreenshotFileNameMode.Sequence);
+        fileNameMode: ScreenshotFileNameMode.Sequence);
     AssertEqual("3.png", Path.GetFileName(sequencePath), "序号模式实际保存为下一个数字 PNG");
-    var textPath = new PngImageSaveService().SavePng(
+    var asyncSequencePath = imageSaveService
+        .SaveImageAsync(
+            namingBitmap,
+            namingSaveDirectory,
+            fileNameMode: ScreenshotFileNameMode.Sequence)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual("4.png", Path.GetFileName(asyncSequencePath), "异步保存沿用相同序号命名规则");
+    AssertTrue(File.Exists(asyncSequencePath), "异步保存的 PNG 真实落盘");
+    var textPath = imageSaveService.SaveImage(
         namingBitmap,
         namingSaveDirectory,
-        ScreenshotFileNameMode.ImageText,
-        ["发布:成功"]);
+        fileNameMode: ScreenshotFileNameMode.ImageText,
+        imageTexts: ["发布:成功"]);
     AssertEqual("发布_成功.png", Path.GetFileName(textPath), "图片文字模式实际保存为文字 PNG");
-    var duplicateTextPath = new PngImageSaveService().SavePng(
+    var duplicateTextPath = imageSaveService.SaveImage(
         namingBitmap,
         namingSaveDirectory,
-        ScreenshotFileNameMode.ImageText,
-        ["发布:成功"]);
+        fileNameMode: ScreenshotFileNameMode.ImageText,
+        imageTexts: ["发布:成功"]);
     AssertEqual("发布_成功_1.png", Path.GetFileName(duplicateTextPath), "重复图片文字名称追加序号");
-    var datedPath = new PngImageSaveService().SavePng(
+    var jpegPath = imageSaveService.SaveImage(
+        namingBitmap,
+        namingSaveDirectory,
+        ScreenshotImageFormat.Jpeg,
+        ScreenshotFileNameMode.ImageText,
+        ["较小体积"]);
+    AssertEqual("较小体积.jpg", Path.GetFileName(jpegPath), "JPEG 保存使用 jpg 扩展名");
+    using (var savedJpeg = Image.FromFile(jpegPath))
+    {
+        AssertEqual(
+            System.Drawing.Imaging.ImageFormat.Jpeg.Guid,
+            savedJpeg.RawFormat.Guid,
+            "JPEG 文件使用真实 JPEG 编码");
+    }
+    using (var flattenedJpeg = new Bitmap(jpegPath))
+    {
+        var flattenedPixel = flattenedJpeg.GetPixel(4, 4);
+        AssertTrue(
+            flattenedPixel.R >= 250 && flattenedPixel.G >= 250 && flattenedPixel.B >= 250,
+            "JPEG 会把透明像素合成为白色");
+    }
+    var datedPath = imageSaveService.SaveImage(
         namingBitmap,
         namingSaveDirectory,
         organizeByDate: true);
     AssertEqual(
-        DateTime.Today.ToString(ScreenshotOutputFolderPolicy.DateFolderFormat),
+        DateTime.Today.ToString(ArtifactOutputFolderPolicy.DateFolderFormat),
         Path.GetFileName(Path.GetDirectoryName(datedPath)!),
         "实际保存时自动创建并使用当天子文件夹");
     AssertTrue(File.Exists(datedPath), "日期子文件夹中的截图真实落盘");
@@ -2951,6 +2999,7 @@ try
                 ["tests.module.caption"] = "模块自带设置"
             },
             ScreenshotFileNameMode = ScreenshotFileNameMode.ImageText,
+            ScreenshotImageFormat = ScreenshotImageFormat.Jpeg,
             OrganizeScreenshotsByDate = true,
             ScreenshotDateParentFolder = Path.Combine(settingsTestDirectory, "dated-captures"),
             DismissSaveNotificationBeforeCapture = false,
@@ -2975,6 +3024,7 @@ try
         savedJson.Contains("\"moduleStringPreferences\"", StringComparison.Ordinal),
         "JSON 保存通用模块偏好字典");
     AssertTrue(savedJson.Contains("\"screenshotFileNameMode\": \"imageText\"", StringComparison.Ordinal), "JSON 保存图片命名规则");
+    AssertTrue(savedJson.Contains("\"screenshotImageFormat\": \"jpeg\"", StringComparison.Ordinal), "JSON 保存图片格式");
     AssertTrue(savedJson.Contains("\"organizeScreenshotsByDate\": true", StringComparison.Ordinal), "JSON 保存按日期分类开关");
     AssertTrue(savedJson.Contains("\"screenshotDateParentFolder\"", StringComparison.Ordinal), "JSON 保存日期分类父文件夹");
     AssertTrue(savedJson.Contains("\"dismissSaveNotificationBeforeCapture\": false", StringComparison.Ordinal), "JSON 保存截图前关闭提示开关");
@@ -3028,10 +3078,11 @@ try
     AssertEqual(11, loadedSettings.Preferences.LastToolWidth, "JSON 恢复上次使用的粗细");
     AssertTrue(loadedSettings.Preferences.LongCaptureSafetyChecksEnabled, "JSON 恢复长截图安全开关");
     AssertEqual(ScreenshotFileNameMode.ImageText, loadedSettings.Preferences.ScreenshotFileNameMode, "JSON 恢复图片文字命名规则");
+    AssertEqual(ScreenshotImageFormat.Jpeg, loadedSettings.Preferences.ScreenshotImageFormat, "JSON 恢复 JPEG 图片格式");
     AssertTrue(loadedSettings.Preferences.OrganizeScreenshotsByDate, "JSON 恢复按日期分类开关");
     AssertEqual(
         Path.Combine(settingsTestDirectory, "dated-captures"),
-        loadedSettings.GetScreenshotParentFolder(),
+        loadedSettings.GetArtifactParentFolder(),
         "启用日期分类后使用用户绑定的独立父文件夹");
     AssertTrue(!loadedSettings.Preferences.DismissSaveNotificationBeforeCapture, "JSON 恢复保留保存提示的选择");
     AssertTrue(loadedSettings.Preferences.HideMainWindowDuringCapture, "JSON 恢复截图时隐藏主界面开关");
@@ -3097,6 +3148,7 @@ try
             DrawingCursorShape = (DrawingCursorShape)99,
             RecordingRegionIndicatorStyle = (RecordingRegionIndicatorStyle)99,
             ScreenshotFileNameMode = (ScreenshotFileNameMode)99,
+            ScreenshotImageFormat = (ScreenshotImageFormat)99,
             AnnotationSnapThresholdPixels = -50,
             CtrlDragStepPixels = 500,
             AnnotationMoveActivationMode = (AnnotationMoveActivationMode)99,
@@ -3124,6 +3176,10 @@ try
         ScreenshotFileNameMode.DateTime,
         invalidShapeStore.Load().Preferences.ScreenshotFileNameMode,
         "JSON 异常图片命名规则恢复为日期时间");
+    AssertEqual(
+        ScreenshotImageFormat.Png,
+        invalidShapeStore.Load().Preferences.ScreenshotImageFormat,
+        "JSON 异常图片格式恢复为无损 PNG");
     AssertEqual(
         AnnotationLayoutOptions.MinimumSnapThresholdPixels,
         invalidShapeStore.Load().Preferences.AnnotationSnapThresholdPixels,
@@ -3162,10 +3218,11 @@ try
     AssertEqual(5, migratedSettings.Preferences.LastToolWidth, "旧 JSON 使用范围内默认粗细");
     AssertTrue(!migratedSettings.Preferences.LongCaptureSafetyChecksEnabled, "旧 JSON 默认迁移为宽松长截图");
     AssertEqual(ScreenshotFileNameMode.DateTime, migratedSettings.Preferences.ScreenshotFileNameMode, "旧 JSON 默认迁移为日期时间命名");
+    AssertEqual(ScreenshotImageFormat.Png, migratedSettings.Preferences.ScreenshotImageFormat, "旧 JSON 默认迁移为无损 PNG");
     AssertTrue(!migratedSettings.Preferences.OrganizeScreenshotsByDate, "旧 JSON 默认不启用按日期分类");
     AssertEqual(
         migratedSettings.OutputFolder,
-        migratedSettings.GetScreenshotParentFolder(),
+        migratedSettings.GetArtifactParentFolder(),
         "旧 JSON 缺少日期父文件夹时继续使用原保存目录");
     AssertTrue(migratedSettings.Preferences.DismissSaveNotificationBeforeCapture, "旧 JSON 默认在截图前关闭保存提示");
     AssertTrue(!migratedSettings.Preferences.HideMainWindowDuringCapture, "旧 JSON 默认保留轻截主界面");
@@ -4086,6 +4143,121 @@ finally
     }
 }
 
+var favoritesOutputFolder = Path.Combine(
+    Path.GetTempPath(),
+    "ScreenshotTool.FavoritesOutput",
+    Guid.NewGuid().ToString("N"));
+var favoritesImageHost = new TestModuleImageHost();
+using (var favoritesModule = new FavoritesModule())
+{
+    AssertEqual(
+        new Version(1, 11, 8),
+        FavoritesModule.MinimumHostVersion,
+        "收藏夹模块最低主程序版本");
+    favoritesModule.Initialize(new TestModuleContext(
+        FavoritesModule.MinimumHostVersion,
+        imageHost: favoritesImageHost));
+    AssertEqual("screenshot-tool.favorites", favoritesModule.Id, "收藏夹模块 ID 保持稳定");
+    AssertEqual(new Version(1, 0, 0), favoritesModule.Version, "收藏夹模块初始版本保持稳定");
+
+    var favoritesSettingsHost = new TestModuleSettingsHost();
+    using var favoritesSettingsPage = favoritesModule
+        .CreateSettingsPages(favoritesSettingsHost)
+        .Single();
+    AssertEqual(
+        "screenshot-tool.favorites.settings",
+        favoritesSettingsPage.Id,
+        "收藏夹配置页 ID 保持稳定");
+    var favoritesPage = (FavoritesSettingsPage)favoritesSettingsPage.Content;
+    favoritesPage.FolderPath = favoritesOutputFolder;
+    favoritesPage.Controls
+        .Cast<Control>()
+        .SelectMany(Descendants)
+        .OfType<Button>()
+        .Single(button => button.Text == "保存收藏夹设置")
+        .PerformClick();
+    AssertEqual(1, favoritesSettingsHost.SaveCount, "收藏夹配置页通过通用宿主保存路径");
+    AssertEqual(
+        Path.GetFullPath(favoritesOutputFolder),
+        favoritesSettingsHost.GetString(FavoritesPreferences.FolderId, string.Empty),
+        "收藏夹配置保存绝对文件夹路径");
+
+    using var favoritesFeature = favoritesModule.CreateCaptureFeatures().Single();
+    var favoritesCaptureHost = new TestCaptureArtifactHost();
+    favoritesCaptureHost.StringPreferences[FavoritesPreferences.FolderId] =
+        favoritesOutputFolder;
+    favoritesFeature.Attach(favoritesCaptureHost);
+    var favoriteCommandProvider = (ICaptureToolbarCommandProvider)favoritesFeature;
+    AssertEqual("收藏", favoriteCommandProvider.GetToolbarCommands().Single().Text,
+        "收藏夹模块向截图工具栏提供收藏按钮");
+    favoriteCommandProvider.ExecuteToolbarCommandAsync(
+            FavoritesCaptureFeature.CommandId,
+            CancellationToken.None)
+        .GetAwaiter()
+        .GetResult();
+    AssertEqual(1, favoritesImageHost.AsyncSaveCount, "收藏操作只提交一次异步图片保存");
+    AssertEqual(
+        Path.GetFullPath(favoritesOutputFolder),
+        favoritesImageHost.LastOutputFolder,
+        "收藏图片写入用户配置的独立文件夹");
+    AssertEqual(
+        "收藏标题",
+        favoritesImageHost.LastImageTexts.Single(),
+        "收藏图片沿用普通保存的图片内文字命名元数据");
+    AssertEqual(
+        "render,notify:favorite.png,complete",
+        string.Join(',', favoritesCaptureHost.Calls),
+        "收藏操作先渲染最终图片、通知保存，再结束截图会话");
+}
+
+var favoritesModuleTestDirectory = Path.Combine(
+    Path.GetTempPath(),
+    "ScreenshotTool.FavoritesModuleTests",
+    Guid.NewGuid().ToString("N"));
+try
+{
+    var favoritesPackageDirectory = Path.Combine(
+        favoritesModuleTestDirectory,
+        "Favorites");
+    Directory.CreateDirectory(favoritesPackageDirectory);
+    File.Copy(
+        typeof(FavoritesModule).Assembly.Location,
+        Path.Combine(favoritesPackageDirectory, "ScreenshotTool.Favorites.dll"));
+    using var favoritesModuleHost = new ModuleHost(
+        favoritesModuleTestDirectory,
+        new TestModuleImageHost());
+    var loadedFavoritesModules = favoritesModuleHost.Refresh();
+    AssertEqual(0, loadedFavoritesModules.Errors.Count, "收藏夹模块以独立单 DLL 包加载");
+    AssertEqual(1, loadedFavoritesModules.Modules.Count, "发现并加载收藏夹模块");
+    var loadedFavoritesFeatures = favoritesModuleHost.CreateCaptureFeatures();
+    var loadedFavoritesSettings = favoritesModuleHost.CreateSettingsPages(
+        "Favorites",
+        new TestModuleSettingsHost());
+    AssertEqual(1, loadedFavoritesFeatures.Count, "收藏夹模块创建会话级功能租约");
+    AssertEqual(1, loadedFavoritesSettings.Count, "收藏夹模块创建配置页租约");
+    using var loadedFavoritesFeature = loadedFavoritesFeatures.Single();
+    using var loadedFavoritesPage = loadedFavoritesSettings.Single();
+    Directory.Delete(favoritesPackageDirectory, recursive: true);
+    AssertEqual(0, favoritesModuleHost.Refresh().Modules.Count,
+        "删除收藏夹模块目录后立即从新会话移除");
+    AssertEqual(
+        "收藏",
+        ((ICaptureToolbarCommandProvider)loadedFavoritesFeature)
+            .GetToolbarCommands()
+            .Single()
+            .Text,
+        "活动收藏功能在模块删除后保持延迟释放租约");
+    AssertEqual("收藏夹", loadedFavoritesPage.Title,
+        "活动收藏配置窗口在模块删除后保持延迟释放租约");
+}
+finally
+{
+    if (Directory.Exists(favoritesModuleTestDirectory))
+    {
+        Directory.Delete(favoritesModuleTestDirectory, recursive: true);
+    }
+}
+
 var moduleTestDirectory = Path.Combine(Path.GetTempPath(), "ScreenshotTool.ModuleTests", Guid.NewGuid().ToString("N"));
 var modulePreferenceTestDirectory = moduleTestDirectory + ".preferences";
 try
@@ -4159,7 +4331,9 @@ try
 
     var hotLoadSettingsHost = new TestModuleSettingsHost();
     hotLoadSettingsHost.SetBoolean("tests.hot-load.flag", true);
-    var settingsPages = moduleHost.CreateSettingsPages(hotLoadSettingsHost);
+    var settingsPages = moduleHost.CreateSettingsPages(
+        "TestHotLoad",
+        hotLoadSettingsHost);
     AssertEqual(1, settingsPages.Count, "热加载模块创建自带设置页");
     using var settingsPage = settingsPages[0];
     AssertEqual("tests.hot-load.settings", settingsPage.Id, "模块设置页 ID 保持稳定");
@@ -4242,7 +4416,7 @@ try
     AssertEqual(0, moduleHost.GetModules().Count, "永久删除后热拆卸模块");
     AssertEqual(
         0,
-        moduleHost.CreateSettingsPages(hotLoadSettingsHost).Count,
+        moduleHost.CreateSettingsPages("TestHotLoad", hotLoadSettingsHost).Count,
         "删除模块后不再创建对应设置页");
     AssertTrue(feature.HandleKeyDown(new KeyEventArgs(Keys.Control | Keys.Alt | Keys.M)), "当前截图会话延迟释放旧模块");
     AssertEqual("测试模块", settingsPage.Title, "活动设置页租约延迟释放旧模块");
@@ -4728,6 +4902,7 @@ try
     AssertEqual(1, refresh.Modules.Count, "发现并加载可选录屏模块");
     AssertEqual("screenshot-tool.screen-recording", refresh.Modules[0].Id, "录屏模块 ID 保持稳定");
     var recordingSettingsPages = recordingModuleHost.CreateSettingsPages(
+        "ScreenRecording",
         new TestModuleSettingsHost());
     AssertEqual(1, recordingSettingsPages.Count, "录屏模块安装后提供自带设置页");
     using var recordingSettingsPage = recordingSettingsPages[0];
@@ -4766,7 +4941,9 @@ try
     AssertEqual(0, removedRecordingModules.Modules.Count, "删除录屏模块文件夹后立即从目录卸载");
     AssertEqual(
         0,
-        recordingModuleHost.CreateSettingsPages(new TestModuleSettingsHost()).Count,
+        recordingModuleHost.CreateSettingsPages(
+            "ScreenRecording",
+            new TestModuleSettingsHost()).Count,
         "卸载录屏模块后不再出现录屏设置页");
     AssertEqual("screenshot-tool.screen-recording.feature", recordingFeature.Id, "活动录屏会话保留延迟释放租约");
 }
@@ -5272,6 +5449,8 @@ internal sealed class TestCaptureFeatureHost(
 internal sealed class TestCaptureArtifactHost : ICaptureArtifactHost
 {
     public List<string> Calls { get; } = [];
+    public Dictionary<string, string> StringPreferences { get; } =
+        new(StringComparer.Ordinal);
     public string OutputFolder => "C:\\截图目录";
     public bool HasSelection => true;
     public Rectangle Selection => new(0, 0, 40, 40);
@@ -5280,11 +5459,14 @@ internal sealed class TestCaptureArtifactHost : ICaptureArtifactHost
     public int Dpi => 96;
     public bool GetBooleanPreference(string id, bool defaultValue) => defaultValue;
     public int GetIntegerPreference(string id, int defaultValue) => defaultValue;
+    public string GetStringPreference(string id, string defaultValue) =>
+        StringPreferences.TryGetValue(id, out var value) ? value : defaultValue;
     public void InvalidateAll() { }
     public void Invalidate(Rectangle bounds) { }
     public void SetCursor(Cursor cursor) { }
     public void SetMouseCapture(bool capture) { }
     public Bitmap CopyDesktopSelection() => new(Selection.Width, Selection.Height);
+    public IReadOnlyList<string> GetSelectionTextContents() => ["收藏标题"];
     public Bitmap RenderSelection()
     {
         Calls.Add("render");
@@ -5307,11 +5489,14 @@ internal sealed class TestModuleContext(
     public IModuleImageHost ImageHost { get; } = imageHost ?? new TestModuleImageHost();
 }
 
-internal sealed class TestModuleImageHost : IModuleImageHost
+internal sealed class TestModuleImageHost : IModuleImageStorageHost
 {
     public int CopyCount { get; private set; }
     public int SaveCount { get; private set; }
+    public int AsyncSaveCount { get; private set; }
     public int EditCount { get; private set; }
+    public string? LastOutputFolder { get; private set; }
+    public IReadOnlyList<string> LastImageTexts { get; private set; } = [];
 
     public void CopyImage(Bitmap image) => CopyCount++;
 
@@ -5319,6 +5504,20 @@ internal sealed class TestModuleImageHost : IModuleImageHost
     {
         SaveCount++;
         return Path.Combine(Path.GetTempPath(), "pinned-image.png");
+    }
+
+    // Records explicit-folder writes made by the favorites module without touching disk.
+    public Task<string> SaveImageAsync(
+        Bitmap image,
+        string outputFolder,
+        IReadOnlyList<string>? imageTexts = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        AsyncSaveCount++;
+        LastOutputFolder = Path.GetFullPath(outputFolder);
+        LastImageTexts = imageTexts?.ToArray() ?? [];
+        return Task.FromResult(Path.Combine(LastOutputFolder, "favorite.png"));
     }
 
     public void EditImage(Bitmap image) => EditCount++;

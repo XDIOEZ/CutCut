@@ -1,4 +1,5 @@
 using ScreenshotTool.Abstractions;
+using ScreenshotTool.Contracts;
 using ScreenshotTool.Presentation.Theme;
 
 namespace ScreenshotTool.Presentation.Pages;
@@ -10,20 +11,26 @@ internal sealed class ModuleManagementPage : UserControl
 
     private readonly IModuleManager _moduleManager;
     private readonly IFileLocationService _fileLocationService;
+    private readonly IModuleSettingsHost _settingsHost;
     private readonly FlowLayoutPanel _content;
     private readonly Panel _introCard;
     private readonly TableLayoutPanel _statusTabs;
     private readonly Button _enabledModulesTab;
     private readonly Button _disabledModulesTab;
     private readonly List<Control> _packageCards = [];
+    private readonly Dictionary<string, ModuleConfigurationForm> _configurationForms =
+        new(StringComparer.OrdinalIgnoreCase);
     private ModulePageFilter _selectedFilter = ModulePageFilter.Enabled;
 
+    // Builds the module catalog and receives the generic settings host used by module-owned pages.
     public ModuleManagementPage(
         IModuleManager moduleManager,
-        IFileLocationService fileLocationService)
+        IFileLocationService fileLocationService,
+        IModuleSettingsHost settingsHost)
     {
         _moduleManager = moduleManager;
         _fileLocationService = fileLocationService;
+        _settingsHost = settingsHost;
         BackColor = AppTheme.Canvas;
 
         _content = new FlowLayoutPanel
@@ -57,6 +64,7 @@ internal sealed class ModuleManagementPage : UserControl
 
     public event EventHandler<ModuleOperationCompletedEventArgs>? OperationCompleted;
 
+    // Rebuilds the visible module cards and closes configuration windows whose package state changed.
     public void RefreshPackages()
     {
         foreach (var card in _packageCards)
@@ -69,6 +77,7 @@ internal sealed class ModuleManagementPage : UserControl
         try
         {
             var packages = _moduleManager.GetInstalledPackages();
+            SynchronizeConfigurationForms(packages);
             var enabledPackages = packages
                 .Where(package => package.State == ModulePackageState.Enabled)
                 .ToArray();
@@ -184,6 +193,7 @@ internal sealed class ModuleManagementPage : UserControl
         return tab;
     }
 
+    // Creates one module card with configuration, activation, and deletion actions.
     private Panel CreatePackageCard(ModulePackageInfo package)
     {
         var card = new Panel
@@ -197,7 +207,9 @@ internal sealed class ModuleManagementPage : UserControl
         {
             Name = $"ModuleTitle:{package.PackageName}",
             Text = package.DisplayName,
-            AutoSize = true,
+            AutoSize = false,
+            AutoEllipsis = true,
+            Size = new Size(430, 27),
             Font = AppTheme.CreateFont(11F, FontStyle.Bold),
             ForeColor = package.State == ModulePackageState.Enabled
                 ? AppTheme.Success
@@ -213,6 +225,15 @@ internal sealed class ModuleManagementPage : UserControl
             Location = new Point(28, 51),
             Size = new Size(560, 22)
         };
+
+        var configureButton = AppTheme.CreateButton("管理配置");
+        configureButton.Name = $"ModuleConfiguration:{package.PackageName}";
+        configureButton.Size = new Size(108, 36);
+        configureButton.Location = new Point(card.ClientSize.Width - 135, 17);
+        configureButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        configureButton.ForeColor = AppTheme.Accent;
+        configureButton.FlatAppearance.BorderColor = Color.FromArgb(147, 197, 253);
+        configureButton.Click += (_, _) => OpenConfiguration(package);
 
         var enabled = package.State == ModulePackageState.Enabled;
         var stateRow = CreateActionRow(
@@ -231,10 +252,11 @@ internal sealed class ModuleManagementPage : UserControl
             AppTheme.Danger);
         deleteRow.Location = new Point(27, 150);
 
-        card.Controls.AddRange([title, metadata, stateRow, deleteRow]);
+        card.Controls.AddRange([title, metadata, configureButton, stateRow, deleteRow]);
         card.Resize += (_, _) =>
         {
-            metadata.Width = Math.Max(320, card.ClientSize.Width - 56);
+            title.Width = Math.Max(220, configureButton.Left - title.Left - 18);
+            metadata.Width = Math.Max(220, configureButton.Left - metadata.Left - 18);
             stateRow.Width = Math.Max(420, card.ClientSize.Width - 54);
             deleteRow.Width = Math.Max(420, card.ClientSize.Width - 54);
         };
@@ -340,8 +362,10 @@ internal sealed class ModuleManagementPage : UserControl
         return card;
     }
 
+    // Releases the package configuration lease before changing its activation state.
     private void ChangeEnabledState(ModulePackageInfo package, bool enabled)
     {
+        CloseConfiguration(package.PackageName);
         var result = _moduleManager.SetPackageEnabled(package.PackageName, enabled);
         HandleOperationResult(result);
     }
@@ -362,8 +386,124 @@ internal sealed class ModuleManagementPage : UserControl
             return;
         }
 
+        CloseConfiguration(package.PackageName);
         var result = _moduleManager.DeletePackage(package.PackageName);
         HandleOperationResult(result);
+    }
+
+    // Opens or activates the one floating configuration window owned by a module package.
+    private void OpenConfiguration(ModulePackageInfo package)
+    {
+        if (_configurationForms.TryGetValue(package.PackageName, out var existing) &&
+            !existing.IsDisposed)
+        {
+            if (existing.WindowState == FormWindowState.Minimized)
+            {
+                existing.WindowState = FormWindowState.Normal;
+            }
+            existing.BringToFront();
+            existing.Activate();
+            return;
+        }
+
+        IReadOnlyList<IModuleSettingsPage> pages = [];
+        string? loadError = null;
+        if (package.State == ModulePackageState.Enabled)
+        {
+            try
+            {
+                pages = _moduleManager.CreateSettingsPages(
+                    package.PackageName,
+                    _settingsHost);
+            }
+            catch (Exception exception)
+            {
+                loadError = exception.GetBaseException().Message;
+            }
+        }
+
+        ModuleConfigurationForm configurationForm;
+        try
+        {
+            configurationForm = new ModuleConfigurationForm(
+                package,
+                pages,
+                loadError);
+        }
+        catch (Exception exception)
+        {
+            DisposeSettingsPages(pages);
+            configurationForm = new ModuleConfigurationForm(
+                package,
+                [],
+                exception.GetBaseException().Message);
+        }
+        configurationForm.FormClosed += (_, _) =>
+        {
+            if (_configurationForms.TryGetValue(package.PackageName, out var current) &&
+                ReferenceEquals(current, configurationForm))
+            {
+                _configurationForms.Remove(package.PackageName);
+            }
+        };
+        _configurationForms[package.PackageName] = configurationForm;
+        var owner = FindForm();
+        if (owner is null)
+        {
+            configurationForm.Show();
+        }
+        else
+        {
+            configurationForm.Show(owner);
+        }
+    }
+
+    // Releases page leases that could not be transferred into a configuration window.
+    private static void DisposeSettingsPages(IEnumerable<IModuleSettingsPage> pages)
+    {
+        foreach (var page in pages)
+        {
+            try
+            {
+                page.Dispose();
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Debug.WriteLine($"模块配置页释放失败：{exception}");
+            }
+        }
+    }
+
+    // Closes one package window before disabling or deleting the module that owns its lease.
+    private void CloseConfiguration(string packageName)
+    {
+        if (!_configurationForms.Remove(packageName, out var form))
+        {
+            return;
+        }
+
+        form.Close();
+        if (!form.IsDisposed)
+        {
+            form.Dispose();
+        }
+    }
+
+    // Closes stale windows when a package disappears or changes activation state externally.
+    private void SynchronizeConfigurationForms(
+        IReadOnlyList<ModulePackageInfo> packages)
+    {
+        var currentPackages = packages.ToDictionary(
+            package => package.PackageName,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var openForm in _configurationForms.ToArray())
+        {
+            if (!currentPackages.TryGetValue(openForm.Key, out var package) ||
+                package.State != openForm.Value.PackageState)
+            {
+                CloseConfiguration(openForm.Key);
+            }
+        }
     }
 
     private void HandleOperationResult(ModuleOperationResult result)
@@ -485,6 +625,20 @@ internal sealed class ModuleManagementPage : UserControl
         ModulePackageState.LoadFailed => package.ErrorMessage ?? "加载失败，可尝试重新启用。",
         _ => "状态未知"
     };
+
+    // Releases modeless configuration windows before the module management page is destroyed.
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            foreach (var packageName in _configurationForms.Keys.ToArray())
+            {
+                CloseConfiguration(packageName);
+            }
+        }
+
+        base.Dispose(disposing);
+    }
 }
 
 internal enum ModulePageFilter

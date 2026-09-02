@@ -16,5 +16,7 @@ internal interface IModuleManager : ICaptureFeatureCatalog, IDisposable
 
     ModuleOperationResult DeletePackage(string packageName);
 
-    IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(IModuleSettingsHost host);
+    IReadOnlyList<IModuleSettingsPage> CreateSettingsPages(
+        string packageName,
+        IModuleSettingsHost host);
 }
