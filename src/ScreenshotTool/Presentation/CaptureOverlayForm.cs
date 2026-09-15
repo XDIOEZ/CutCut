@@ -670,7 +670,7 @@ internal sealed class CaptureOverlayForm : Form,
         }
 
         toolbar.AddExtensionSeparator();
-        var copy = toolbar.AddCommandButton("复制", 48, "复制到剪贴板并结束（Ctrl+C）");
+        var copy = toolbar.AddCommandButton("复制", 48, "复制截图到剪贴板并结束（Ctrl+Shift+C）");
         copy.Click += (_, _) => CopySelectionAndClose();
 
         var save = toolbar.AddCommandButton(
@@ -2196,6 +2196,7 @@ internal sealed class CaptureOverlayForm : Form,
         }
     }
 
+    // Routes screenshot shortcuts, text input and module/editor commands in priority order.
     private void HandleKeyDown(object? sender, KeyEventArgs e)
     {
         _controlDoubleTapDetector.RegisterKeyDown(e.KeyCode, Environment.TickCount64);
@@ -2238,6 +2239,16 @@ internal sealed class CaptureOverlayForm : Form,
             e.SuppressKeyPress = true;
             CancelTextEditor(commit: true);
             HandleSelectAllShortcut();
+            return;
+        }
+
+        if (e.KeyData == (Keys.Control | Keys.Shift | Keys.C))
+        {
+            e.SuppressKeyPress = true;
+            if (_hasSelection)
+            {
+                CopySelectionAndClose();
+            }
             return;
         }
 
@@ -2314,13 +2325,10 @@ internal sealed class CaptureOverlayForm : Form,
             e.SuppressKeyPress = true;
             SaveSelectionAndClose();
         }
-        else if (e.Control && e.KeyCode == Keys.C)
+        else if (e.KeyData == (Keys.Control | Keys.C))
         {
             e.SuppressKeyPress = true;
-            if (!TryCopySelectedImage())
-            {
-                CopySelectionAndClose();
-            }
+            CopySelectedAnnotations();
         }
         else if (e.Control && e.KeyCode == Keys.V && _hasSelection)
         {
@@ -2356,11 +2364,20 @@ internal sealed class CaptureOverlayForm : Form,
         }
     }
 
+    // Prefers editable objects from this session, then falls back to external images or text.
     private void PasteClipboardContent()
     {
         try
         {
             var anchor = GetPasteAnchor();
+            if (_annotationEditor.Clipboard.TryPaste(_annotationEditor, _clipboardService, anchor))
+            {
+                SelectTool(EditorTool.None);
+                PositionToolbar();
+                Invalidate();
+                UpdateIdleCursor(PointToClient(Cursor.Position));
+                return;
+            }
             var image = _clipboardService.GetImage();
             if (image is not null)
             {
@@ -3210,29 +3227,17 @@ internal sealed class CaptureOverlayForm : Form,
         }
     }
 
-    private bool TryCopySelectedImage()
+    // Copies selected editing objects while keeping the screenshot session open.
+    private void CopySelectedAnnotations()
     {
-        Bitmap? image = null;
         try
         {
-            image = _annotationEditor.RenderSelectedImage();
-            if (image is null)
-            {
-                return false;
-            }
-
-            _clipboardService.SetImage(image);
-            return true;
+            _annotationEditor.Clipboard.Copy(_annotationEditor, EditingSource, _clipboardService);
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, $"复制图片失败：{exception.Message}", "复制失败",
+            MessageBox.Show(this, $"复制编辑元素失败：{exception.Message}", "复制失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return true;
-        }
-        finally
-        {
-            image?.Dispose();
         }
     }
 

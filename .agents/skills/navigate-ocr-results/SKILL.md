@@ -22,6 +22,7 @@ description: 定位并维护轻截的 OCR、PaddleOCR、二维码识别、文本
 | PaddleOCR Small | `ScreenshotTool.PaddleOcr.Small/` | 公共 Paddle 实现、模型下载体积、发布资产 |
 | 二维码识别 | `ScreenshotTool.QrCode/` | 图片来源、文本结果或命令宿主 |
 | 模块结果契约 | `ScreenshotTool.Contracts/ModuleContracts.cs` | `ICaptureFeatureHost`、文本/命令/进度接口 |
+| 无结果窗的位置识别 | `ScreenshotTool.Contracts/ImageTextRecognition.cs`、`WindowsOcrRecognizer.cs`、`PaddleOcrRecognizer.cs` | 原图坐标、预处理留白/缩放还原、PP-OCR 逐字框、宿主请求租约与贴图选择 |
 | 文本结果 UI | `ScreenshotTool/Presentation/CaptureTextResultForm.cs` | 复制、翻译、窗口生命周期 |
 | 翻译抽象/实现 | `ScreenshotTool/Abstractions/ITextTranslationService.cs`、`Infrastructure/MyMemoryTextTranslationService.cs` | 网络取消、错误提示、结果窗体 |
 | 使用文档 | `docs/ocr-addon.md`、`docs/paddle-ocr-addon.md`、`docs/qr-code-addon.md` | 模块目录、依赖与限制 |

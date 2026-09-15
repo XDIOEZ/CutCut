@@ -2,7 +2,7 @@ using ScreenshotTool.Contracts;
 
 namespace ScreenshotTool.Ocr;
 
-public sealed class OcrModule : ScreenshotToolModuleBase
+public sealed class OcrModule : ScreenshotToolModuleBase, IImageTextRecognitionProvider
 {
     public static Version MinimumHostVersion { get; } = new(1, 11, 7);
 
@@ -24,4 +24,9 @@ public sealed class OcrModule : ScreenshotToolModuleBase
 
     public override IEnumerable<ICaptureFeature> CreateCaptureFeatures() =>
         [new OcrFeature(new WindowsOcrRecognizer())];
+
+    // Returns source-coordinate text for consumers that provide their own selection UI.
+    public Task<ImageTextRecognitionResult> RecognizeImageTextAsync(
+        Bitmap image, CancellationToken cancellationToken) =>
+        new WindowsOcrRecognizer().RecognizeImageTextAsync(image, cancellationToken);
 }

@@ -34,12 +34,14 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
     private readonly Bitmap _image;
     private readonly IModuleImageHost _imageHost;
     private readonly ContextMenuStrip _menu;
+    private readonly PinnedImageTextController _textController;
     private PinnedImageResizeEdges _resizeEdges;
     private Point _pointerOrigin;
     private Rectangle _boundsOrigin;
     private bool _dragging;
     private bool _resourcesDisposed;
 
+    // Creates the floating image window and composes optional text interaction.
     public PinnedImageForm(
         Bitmap image,
         Rectangle suggestedBounds,
@@ -86,12 +88,14 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
         var edit = _menu.Items.Add("编辑", null, (_, _) => EditImage());
         edit.Name = "EditPinnedImageMenuItem";
         ContextMenuStrip = _menu;
+        _textController = new PinnedImageTextController(this, _image, _imageHost, _menu);
     }
 
     public event EventHandler? WindowClosed;
 
     internal Bitmap SourceImage => _image;
 
+    // Draws the source image followed by transient text selection feedback.
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -103,10 +107,16 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
             ClientRectangle,
             new Rectangle(Point.Empty, _image.Size),
             GraphicsUnit.Pixel);
+        _textController.Draw(e.Graphics);
     }
 
+    // Routes text gestures before starting image movement or resizing.
     protected override void OnMouseDown(MouseEventArgs e)
     {
+        if (_textController.HandleMouseDown(e, ModifierKeys))
+        {
+            return;
+        }
         if (e.Button != MouseButtons.Left)
         {
             base.OnMouseDown(e);
@@ -124,8 +134,13 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
         Cursor = PinnedImageWindowLayout.GetCursor(_resizeEdges);
     }
 
+    // Updates the active gesture and shows the cursor for the current mode.
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        if (_textController.HandleMouseMove(e))
+        {
+            return;
+        }
         if (_dragging)
         {
             var pointer = Cursor.Position;
@@ -143,6 +158,13 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
             return;
         }
 
+        if (_textController.IsTextMode && (ModifierKeys & Keys.Alt) == 0)
+        {
+            Cursor = Cursors.IBeam;
+            base.OnMouseMove(e);
+            return;
+        }
+
         var edges = PinnedImageWindowLayout.HitTestEdges(
             ClientSize,
             e.Location,
@@ -151,8 +173,13 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
         base.OnMouseMove(e);
     }
 
+    // Completes the active text or image gesture and releases pointer capture.
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        if (_textController.HandleMouseUp(e))
+        {
+            return;
+        }
         if (e.Button == MouseButtons.Left && _dragging)
         {
             _dragging = false;
@@ -168,32 +195,42 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
         base.OnMouseUp(e);
     }
 
+    // Clears gesture state when another window acquires pointer capture.
     protected override void OnMouseCaptureChanged(EventArgs e)
     {
         if (!Capture)
         {
+            _textController.ReleaseCapture();
             _dragging = false;
             _resizeEdges = PinnedImageResizeEdges.None;
         }
         base.OnMouseCaptureChanged(e);
     }
 
+    // Cancels text work before notifying the module that its pin has closed.
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _textController.Dispose();
         base.OnFormClosed(e);
         WindowClosed?.Invoke(this, EventArgs.Empty);
     }
 
+    // Releases optional text interaction before the menu and source image.
     protected override void Dispose(bool disposing)
     {
         if (disposing && !_resourcesDisposed)
         {
             _resourcesDisposed = true;
+            _textController.Dispose();
             _menu.Dispose();
             _image.Dispose();
         }
         base.Dispose(disposing);
     }
+
+    // Gives text mode standard copy/select-all shortcuts before the window processes other keys.
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData) =>
+        _textController.HandleKey(keyData) || base.ProcessCmdKey(ref msg, keyData);
 
     private int GetGripSize() => Math.Max(5, DeviceDpi * 6 / 96);
 

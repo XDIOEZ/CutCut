@@ -2,7 +2,7 @@ using ScreenshotTool.Contracts;
 
 namespace ScreenshotTool.PaddleOcr;
 
-public abstract class PaddleOcrModuleBase : ScreenshotToolModuleBase
+public abstract class PaddleOcrModuleBase : ScreenshotToolModuleBase, IImageTextRecognitionProvider
 {
     public static Version MinimumHostVersion { get; } = new(1, 11, 7);
 
@@ -47,22 +47,10 @@ public abstract class PaddleOcrModuleBase : ScreenshotToolModuleBase
         }
     }
 
+    // Creates the ordinary screenshot OCR feature using the shared model workspace.
     public override IEnumerable<ICaptureFeature> CreateCaptureFeatures()
     {
-        string modelModuleDirectory;
-        lock (_lifecycleLock)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (string.IsNullOrWhiteSpace(_moduleDirectory))
-            {
-                throw new InvalidOperationException($"{DisplayName}尚未初始化。");
-            }
-
-            _modelWorkspace ??= PaddleOcrModelWorkspace.Create(
-                _moduleDirectory,
-                Variant);
-            modelModuleDirectory = _modelWorkspace.ModuleDirectory;
-        }
+        var modelModuleDirectory = GetModelDirectory();
 
         return
         [
@@ -75,6 +63,30 @@ public abstract class PaddleOcrModuleBase : ScreenshotToolModuleBase
                 ResultTitle,
                 new PaddleOcrRecognizer(modelModuleDirectory, Variant))
         ];
+    }
+
+    // Runs spatial OCR under the host's package lease and releases the per-request engine.
+    public async Task<ImageTextRecognitionResult> RecognizeImageTextAsync(
+        Bitmap image, CancellationToken cancellationToken)
+    {
+        var modelDirectory = await Task.Run(GetModelDirectory, cancellationToken);
+        using var recognizer = new PaddleOcrRecognizer(modelDirectory, Variant);
+        return await recognizer.RecognizeImageTextAsync(image, cancellationToken);
+    }
+
+    // Shares the hot-unload-safe model workspace between screenshot and image consumers.
+    private string GetModelDirectory()
+    {
+        lock (_lifecycleLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (string.IsNullOrWhiteSpace(_moduleDirectory))
+            {
+                throw new InvalidOperationException($"{DisplayName}尚未初始化。");
+            }
+            _modelWorkspace ??= PaddleOcrModelWorkspace.Create(_moduleDirectory, Variant);
+            return _modelWorkspace.ModuleDirectory;
+        }
     }
 
     public override void Dispose()

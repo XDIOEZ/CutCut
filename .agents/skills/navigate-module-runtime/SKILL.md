@@ -17,6 +17,7 @@ description: 定位并维护轻截的模块契约、发现加载、热更新、�
 | 修改目标 | 首要入口 | 常见联动 |
 | --- | --- | --- |
 | 稳定公共契约 | `ScreenshotTool.Contracts/ModuleContracts.cs` | 所有 `ScreenshotTool.*` 模块、宿主适配器、测试模块 |
+| 跨模块图片文字识别 | `ScreenshotTool.Contracts/ImageTextRecognition.cs`、`ModuleHost.cs` 的识别请求租约 | `ModuleImageHostProxy.cs`、OCR/PP-OCR 能力提供者、贴图文字控制器；查询与租约释放跟随宿主 UI 线程 |
 | 模块发现/加载/卸载 | `ScreenshotTool/Infrastructure/Modules/ModuleHost.cs` | `ModuleLoadContext.cs`、文件监听、租约、激活偏好 |
 | 程序集加载上下文 | `ScreenshotTool/Infrastructure/Modules/ModuleLoadContext.cs` | 私有依赖解析、流式加载、可回收性 |
 | 图片宿主代理 | `ScreenshotTool/Infrastructure/Modules/ModuleImageHostProxy.cs` | `IModuleImageStorageHost`、自定义目录保存、图片所有权、异常隔离 |

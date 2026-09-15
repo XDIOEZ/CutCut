@@ -40,6 +40,9 @@ internal abstract class Annotation : IDisposable
 
 internal abstract class MovableAnnotation : Annotation
 {
+    // Copies value state; resource-owning and collection-owning types override this method.
+    public virtual MovableAnnotation Clone() => (MovableAnnotation)MemberwiseClone();
+
     public abstract Rectangle Bounds { get; protected set; }
 
     public float RotationDegrees { get; private set; }
@@ -200,6 +203,14 @@ internal sealed class ArrowAnnotation : MovableAnnotation
 
 internal sealed class FreehandAnnotation : MovableAnnotation
 {
+    // Copies the stroke points so later edits cannot affect the original stroke.
+    public override MovableAnnotation Clone()
+    {
+        var clone = (FreehandAnnotation)base.Clone();
+        clone.Points = Points.ToArray();
+        return clone;
+    }
+
     public FreehandAnnotation(IEnumerable<Point> points, Color color, float width)
     {
         Points = points.ToArray();
@@ -323,6 +334,14 @@ internal sealed class TextAnnotation : MovableAnnotation
 
 internal sealed class MosaicAnnotation : MovableAnnotation
 {
+    // Preserves resized block geometry while giving the copy its own block collection.
+    public override MovableAnnotation Clone()
+    {
+        var clone = (MosaicAnnotation)base.Clone();
+        clone.Blocks = Blocks.ToArray();
+        return clone;
+    }
+
     private const int BlockSize = 14;
     private Size _blockSize = new(BlockSize, BlockSize);
 
@@ -499,6 +518,14 @@ internal sealed class MosaicAnnotation : MovableAnnotation
 
 internal sealed class StickerAnnotation : MovableAnnotation
 {
+    // Gives the copied sticker independent bitmap ownership and preserves rotation.
+    public override MovableAnnotation Clone()
+    {
+        var clone = new StickerAnnotation(new Bitmap(Image), Bounds);
+        clone.RotateBy(RotationDegrees);
+        return clone;
+    }
+
     public StickerAnnotation(Bitmap image, Rectangle bounds)
     {
         Image = image;

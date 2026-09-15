@@ -84,6 +84,7 @@ internal sealed class CompositionRoot : IDisposable
             startupRegistrationError: startupRegistrationError,
             textTranslationService: textTranslationService);
         moduleImageHost.Attach(mainForm);
+        moduleImageHost.AttachTextRecognition(moduleHost, clipboardService.SetText);
         return new CompositionRoot(
             mainForm,
             hotkeyService,

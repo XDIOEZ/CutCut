@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Text;
 using System.Text.Json;
+using ScreenshotTool.Contracts;
 
 namespace ScreenshotTool.Ocr;
 
@@ -10,7 +11,24 @@ internal sealed class WindowsOcrRecognizer : IOcrRecognizer
     private const string WorkerResourceName = "ScreenshotTool.Ocr.WindowsOcrWorker.ps1";
     private static readonly Lazy<string> WorkerScript = new(ReadWorkerScript);
 
-    public async Task<string> RecognizeAsync(
+    // Preserves the ordinary OCR result window's normalized text contract.
+    public async Task<string> RecognizeAsync(Bitmap image, CancellationToken cancellationToken) =>
+        OcrTextNormalizer.Normalize((await RecognizeCandidateAsync(image, cancellationToken)).Text);
+
+    // Converts word geometry into source-pixel regions without creating a result window.
+    public async Task<ImageTextRecognitionResult> RecognizeImageTextAsync(
+        Bitmap image, CancellationToken cancellationToken)
+    {
+        var result = await RecognizeCandidateAsync(image, cancellationToken);
+        return new ImageTextRecognitionResult((result.Words ?? []).Select(word => new ImageTextRegion(
+            word.Text, word.LineIndex,
+            new PointF(word.X, word.Y), new PointF(word.X + word.Width, word.Y),
+            new PointF(word.X + word.Width, word.Y + word.Height),
+            new PointF(word.X, word.Y + word.Height), word.LeadingText)).ToArray());
+    }
+
+    // Shares preprocessing and candidate ranking between ordinary OCR and spatial OCR.
+    private async Task<OcrWorkerResult> RecognizeCandidateAsync(
         Bitmap image,
         CancellationToken cancellationToken)
     {
@@ -19,7 +37,7 @@ internal sealed class WindowsOcrRecognizer : IOcrRecognizer
 
         var tempDirectory = Path.Combine(Path.GetTempPath(), "LightShotCN", "Ocr");
         Directory.CreateDirectory(tempDirectory);
-        var candidates = OcrImagePreprocessor.CreateCandidates(image);
+        var candidates = await Task.Run(() => OcrImagePreprocessor.CreateCandidates(image), cancellationToken);
         var imagePaths = candidates
             .Select(candidate => Path.Combine(
                 tempDirectory,
@@ -39,7 +57,27 @@ internal sealed class WindowsOcrRecognizer : IOcrRecognizer
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             var results = await RunWorkerAsync(imagePaths, cancellationToken);
-            return OcrCandidateSelector.SelectBest(results);
+            var best = OcrCandidateSelector.SelectBestResult(results);
+            if (best is null)
+            {
+                return new OcrWorkerResult(string.Empty, string.Empty, 0, 0, []);
+            }
+            var candidateIndex = Array.FindIndex(imagePaths,
+                path => Path.GetFileNameWithoutExtension(path) == best.Name);
+            var candidate = candidates[candidateIndex];
+            var padding = candidate.Padding;
+            var scaleX = image.Width / (float)(candidate.Image.Width - padding * 2);
+            var scaleY = image.Height / (float)(candidate.Image.Height - padding * 2);
+            return best with
+            {
+                Words = (best.Words ?? []).Select(word => word with
+                {
+                    X = (word.X * candidate.Image.Width - padding) * scaleX,
+                    Y = (word.Y * candidate.Image.Height - padding) * scaleY,
+                    Width = word.Width * candidate.Image.Width * scaleX,
+                    Height = word.Height * candidate.Image.Height * scaleY
+                }).ToArray()
+            };
         }
         finally
         {

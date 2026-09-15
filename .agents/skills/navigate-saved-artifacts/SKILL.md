@@ -24,6 +24,8 @@ description: 定位并维护轻截的图片保存、文件命名、路径迁移�
 | 保存路径设置 | `ScreenshotTool/Presentation/Pages/SavePathSettingsPage.cs` | `AppSettings.cs`、`JsonSettingsStore.cs` |
 | 按日期解析截图与录屏子目录 | `ScreenshotTool/Core/ArtifactOutputFolderPolicy.cs` | `ScreenshotTool/Infrastructure/ImageSaveService.cs`、`CaptureOverlayForm.cs`、录屏产物、保存路径设置、历史画廊 |
 | 剪贴板与资源定位 | `ScreenshotTool/Abstractions/IClipboardService.cs`、`IFileLocationService.cs` | `WindowsClipboardService.cs`、`ExplorerFileLocationService.cs` |
+| 编辑元素与整图复制 | `ScreenshotTool/Editing/AnnotationClipboard.cs`、`Presentation/CaptureOverlayForm.cs` | Ctrl+C 复制选中元素，Ctrl+Shift+C 复制整图；`IClipboardService` 原子写入位图及通用自定义数据 |
+| 贴图选择文字复制 | `ScreenshotTool.Contracts/ImageTextRecognition.cs`、`ModuleImageHostProxy.cs` | `PinnedImageTextController.cs`、宿主 `IClipboardService.SetText`；蓝色高亮不得进入图片复制/保存 |
 | 保存通知 | `ScreenshotTool/Presentation/SavedArtifactNotificationForm.cs` | 主窗体、截图/录屏完成事件、目录打开 |
 
 ## 修改规则

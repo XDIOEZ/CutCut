@@ -19,6 +19,7 @@ description: 定位并维护轻截的区域截图、选区交互、标注编辑�
 | 截图浮层与输入 | `ScreenshotTool/Presentation/CaptureOverlayForm.cs`、`CaptureOverlayPresenter.cs`、`CaptureOverlayInteractionLayout.cs`、`CaptureBackgroundRefreshPolicy.cs` | `CaptureBackgroundRefreshHotkeyRegistration.cs`、`LiveAnnotationPointerHook.cs`、`CaptureFeatureSession.cs`、选区/工具栏辅助类、模块功能 |
 | 编辑工具栏 | `ScreenshotTool/Presentation/CaptureEditorToolbar.cs` | `Editing/CaptureAnnotationEditor.cs`、设置模型 |
 | 标注模型 | `ScreenshotTool/Editing/AnnotationDocument.cs`、`Annotations.cs` | 命中测试、几何、缩放、旋转、对齐策略 |
+| 编辑元素复制粘贴 | `ScreenshotTool/Editing/AnnotationClipboard.cs`、`CaptureAnnotationEditor.cs` | `Annotations.cs` 独立副本、`CaptureOverlayForm.cs` 快捷键、通用剪贴板自定义数据；同会话保留对象，外部使用位图 |
 | 文本编辑 | `ScreenshotTool/Presentation/TransparentTextEditorControl.cs` | 文本标注、导出渲染、字体资源释放 |
 | 实时标注 | `ScreenshotTool/Presentation/LiveAnnotationSession.cs` | 屏幕录制、`ScreenshotTool.Contracts/ModuleContracts.cs` |
 | 屏幕采集 | `ScreenshotTool/Infrastructure/ScreenCaptureService.cs`、`Core/DesktopSnapshot.cs`、`Presentation/CaptureBackgroundLayer.cs` | 虚拟桌面坐标、DPI、多屏、覆盖层停放与实时选区采集 |
@@ -26,6 +27,7 @@ description: 定位并维护轻截的区域截图、选区交互、标注编辑�
 | 收藏最终截图 | `ScreenshotTool.Favorites/FavoritesModule.cs` | `CaptureOverlayForm.cs` 的 Export 渲染、可见文字命名元数据、字符串偏好快照、保存产物系统 |
 | 编辑策略与系数 | `ScreenshotTool/Core/AnnotationLayoutOptions.cs`、`DrawingToolCoefficients.cs` | 编辑设置页、用户偏好 |
 | 贴图创建与重新编辑 | `ScreenshotTool.PinnedImage/PinnedImageModule.cs`、`PinnedImageForm.cs`、`PinnedImageWindowLayout.cs` | 模块运行时、剪贴板/保存、`ExistingImageEditLayout.cs` |
+| 贴图原图文字选择 | `ScreenshotTool.PinnedImage/PinnedImageTextController.cs`、`ImageTextSelection.cs` | OCR 位置契约、蓝色预览高亮、阅读顺序选择、Alt 移动/缩放、文字剪贴板 |
 
 ## 修改规则
 

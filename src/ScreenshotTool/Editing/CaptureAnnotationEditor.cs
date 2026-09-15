@@ -24,6 +24,8 @@ internal sealed class CaptureAnnotationEditor : IDisposable
 
     public AnnotationSelection Selection { get; } = new();
 
+    public AnnotationClipboard Clipboard { get; } = new();
+
     public float GetDrawingCursorDiameter(EditorTool tool, float width) => tool switch
     {
         EditorTool.Pen => _coefficients.ApplyPen(width),
@@ -307,5 +309,10 @@ internal sealed class CaptureAnnotationEditor : IDisposable
         Document.Clear();
     }
 
-    public void Dispose() => Document.Dispose();
+    // Releases both document objects and independently owned clipboard snapshots.
+    public void Dispose()
+    {
+        Clipboard.Dispose();
+        Document.Dispose();
+    }
 }

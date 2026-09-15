@@ -13,6 +13,7 @@ try {
         } |
         Select-Object -First 1
 
+    # Awaits a Windows Runtime operation in the isolated OCR worker.
     function Wait-WinRtOperation {
         param(
             [Parameter(Mandatory = $true)] $Operation,
@@ -72,10 +73,28 @@ try {
                 $result = Wait-WinRtOperation ($engine.RecognizeAsync($bitmap)) $ocrResultType
                 [int]$wordCount = 0
                 [int]$lineCount = 0
+                $words = [System.Collections.Generic.List[object]]::new()
                 foreach ($line in $result.Lines) {
                     $lineCount++
+                    $textOffset = 0
                     foreach ($word in $line.Words) {
                         $wordCount++
+                        $bounds = $word.BoundingRect
+                        $wordOffset = $line.Text.IndexOf($word.Text, $textOffset, [StringComparison]::Ordinal)
+                        $leadingText = ""
+                        if ($wordOffset -ge 0) {
+                            $leadingText = $line.Text.Substring($textOffset, $wordOffset - $textOffset)
+                            $textOffset = $wordOffset + $word.Text.Length
+                        }
+                        $words.Add([PSCustomObject]@{
+                            Text = $word.Text
+                            LineIndex = $lineCount - 1
+                            X = $bounds.X / [double]$bitmap.PixelWidth
+                            Y = $bounds.Y / [double]$bitmap.PixelHeight
+                            Width = $bounds.Width / [double]$bitmap.PixelWidth
+                            Height = $bounds.Height / [double]$bitmap.PixelHeight
+                            LeadingText = $leadingText
+                        })
                     }
                 }
                 $results.Add([PSCustomObject]@{
@@ -83,6 +102,7 @@ try {
                     Text = $result.Text
                     LineCount = $lineCount
                     WordCount = $wordCount
+                    Words = @($words)
                 })
             }
             finally {
@@ -94,7 +114,7 @@ try {
         }
     }
 
-    $resultJson = ConvertTo-Json -Compress -InputObject @($results)
+    $resultJson = ConvertTo-Json -Compress -Depth 6 -InputObject @($results)
     $resultBytes = [Text.Encoding]::UTF8.GetBytes($resultJson)
     [Console]::Out.Write("OK:" + [Convert]::ToBase64String($resultBytes))
 }

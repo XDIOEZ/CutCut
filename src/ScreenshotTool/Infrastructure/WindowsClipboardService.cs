@@ -11,15 +11,39 @@ internal sealed class WindowsClipboardService : IClipboardService
         ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff"
     };
 
-    public void SetImage(Image image)
+    // Writes an ordinary image using the shared clipboard retry path.
+    public void SetImage(Image image) => WriteData(image);
+
+    // Publishes the bitmap and its application token in one clipboard operation.
+    public void SetImageWithData(Image image, string format, string data)
     {
-        ArgumentNullException.ThrowIfNull(image);
+        var content = new DataObject();
+        content.SetImage(image);
+        content.SetData(format, false, data);
+        WriteData(content);
+    }
+
+    // Reads a custom text payload through the existing clipboard read policy.
+    public string? GetData(string format) => ReadClipboard(() =>
+        Clipboard.GetDataObject()?.GetData(format, false) as string);
+
+    // Retries clipboard contention consistently for images and composite payloads.
+    private static void WriteData(object data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
 
         for (var attempt = 0; attempt < MaximumAttempts; attempt++)
         {
             try
             {
-                Clipboard.SetImage(image);
+                if (data is Image image)
+                {
+                    Clipboard.SetImage(image);
+                }
+                else
+                {
+                    Clipboard.SetDataObject(data, true);
+                }
                 return;
             }
             catch (ExternalException) when (attempt < MaximumAttempts - 1)

@@ -10,6 +10,7 @@ internal static class OcrImagePreprocessor
     private const int EnhancementPadding = 12;
     private const double MaximumScale = 3D;
 
+    // Creates recognition variants and retains padding needed to map word boxes back to the source.
     public static IReadOnlyList<OcrImageCandidate> CreateCandidates(Bitmap source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -33,14 +34,14 @@ internal static class OcrImagePreprocessor
             {
                 candidates.Add(new OcrImageCandidate(
                     "scaled-contrast",
-                    AddPadding(enhanced, EnhancementPadding)));
+                    AddPadding(enhanced, EnhancementPadding), EnhancementPadding));
             }
 
             using (var binary = CreateEnhancedGrayscale(scaled, binary: true))
             {
                 candidates.Add(new OcrImageCandidate(
                     "scaled-binary",
-                    AddPadding(binary, EnhancementPadding)));
+                    AddPadding(binary, EnhancementPadding), EnhancementPadding));
             }
 
             return candidates;
@@ -269,7 +270,7 @@ internal static class OcrImagePreprocessor
     }
 }
 
-internal sealed record OcrImageCandidate(string Name, Bitmap Image) : IDisposable
+internal sealed record OcrImageCandidate(string Name, Bitmap Image, int Padding = 0) : IDisposable
 {
     public void Dispose() => Image.Dispose();
 }

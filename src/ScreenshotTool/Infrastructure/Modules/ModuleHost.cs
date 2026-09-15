@@ -6,7 +6,7 @@ using ScreenshotTool.Contracts;
 
 namespace ScreenshotTool.Infrastructure.Modules;
 
-internal sealed class ModuleHost : IModuleManager
+internal sealed class ModuleHost : IModuleManager, IImageTextRecognitionService
 {
     private const string DisabledMarkerFileName = ".lightshot-module-disabled.json";
     private static readonly JsonSerializerOptions MarkerJsonOptions = new()
@@ -46,6 +46,32 @@ internal sealed class ModuleHost : IModuleManager
     }
 
     public string ModulesDirectory { get; }
+
+    // Lists enabled OCR capabilities on the same UI thread that owns module refreshes.
+    public IReadOnlyList<ImageTextRecognizerInfo> GetTextRecognizers() => _disposed
+        ? []
+        : _packages.Values.SelectMany(package => package.Modules)
+            .Where(module => module is IImageTextRecognitionProvider)
+            .OrderBy(module => module.Id, StringComparer.Ordinal)
+            .Select(module => new ImageTextRecognizerInfo(module.Id, module.DisplayName))
+            .ToArray();
+
+    // Resolves a current provider and delegates through the package's existing lease lifetime.
+    public Task<ImageTextRecognitionResult> RecognizeImageTextAsync(
+        string providerId, Bitmap image, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var package in _packages.Values)
+        {
+            var module = package.Modules.FirstOrDefault(module => module.Id == providerId);
+            if (module is IImageTextRecognitionProvider provider)
+            {
+                return package.RecognizeImageTextAsync(provider, image, cancellationToken);
+            }
+        }
+        throw new InvalidOperationException("文字识别插件已停用或卸载，请启用后重试。");
+    }
 
     public ModuleRefreshResult Refresh(bool force = false)
     {
@@ -842,6 +868,21 @@ internal sealed class ModuleHost : IModuleManager
                     _activeLeases++;
                     yield return new ModuleSettingsPageLease(page, ReleaseLease);
                 }
+            }
+        }
+
+        // Keeps model files and module resources alive until the asynchronous operation exits.
+        public async Task<ImageTextRecognitionResult> RecognizeImageTextAsync(
+            IImageTextRecognitionProvider provider, Bitmap image, CancellationToken cancellationToken)
+        {
+            _activeLeases++;
+            try
+            {
+                return await provider.RecognizeImageTextAsync(image, cancellationToken);
+            }
+            finally
+            {
+                ReleaseLease();
             }
         }
 

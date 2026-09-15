@@ -2,27 +2,17 @@ namespace ScreenshotTool.Ocr;
 
 internal static class OcrCandidateSelector
 {
+    // Keeps plain-text consumers on the same candidate ranking as spatial recognition.
     public static string SelectBest(IReadOnlyList<OcrWorkerResult> candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        if (candidates.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var ranked = candidates
-            .Select((candidate, index) => new
-            {
-                Text = OcrTextNormalizer.Normalize(candidate.Text),
-                Score = Score(candidate),
-                Index = index
-            })
-            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Text))
-            .OrderByDescending(candidate => candidate.Score)
-            .ThenBy(candidate => candidate.Index)
-            .ToArray();
-        return ranked.Length == 0 ? string.Empty : ranked[0].Text;
+        return OcrTextNormalizer.Normalize(SelectBestResult(candidates)?.Text ?? string.Empty);
     }
+
+    // Selects the same winning candidate while retaining its spatial recognition data.
+    public static OcrWorkerResult? SelectBestResult(IReadOnlyList<OcrWorkerResult> candidates) =>
+        candidates.Where(candidate => !string.IsNullOrWhiteSpace(OcrTextNormalizer.Normalize(candidate.Text)))
+            .OrderByDescending(Score).FirstOrDefault();
 
     private static double Score(OcrWorkerResult candidate)
     {
@@ -61,4 +51,8 @@ internal static class OcrCandidateSelector
         >= '\uac00' and <= '\ud7af';
 }
 
-internal sealed record OcrWorkerResult(string Name, string Text, int LineCount, int WordCount);
+internal sealed record OcrWorkerResult(
+    string Name, string Text, int LineCount, int WordCount, OcrWorkerWord[]? Words = null);
+
+internal sealed record OcrWorkerWord(string Text, int LineIndex, float X, float Y,
+    float Width, float Height, string? LeadingText = null);
