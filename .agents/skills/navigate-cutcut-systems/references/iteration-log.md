@@ -11,4 +11,4 @@
 - 2026-10-10 | 当前录屏编辑与多框功能测试打包 | Update-LatestTestPackage.ps1 | 固定目录已更新，8模块、94.45 MiB，编译与包内必要文件检查完成；未运行交互验收
 - 2026-10-10 | 录屏文件日期时间在前、类型在后 | navigate-screen-recording、navigate-saved-artifacts | 同步实际占位与路径生成入口；未运行验证、未重新打包
 - 2026-10-10 | 工作台左侧底部打开保存目录 | navigate-startup-settings、navigate-saved-artifacts | 补录侧栏快捷按钮与宿主事件连接入口；按用户要求未运行验证
-- 2026-10-10 | v1.11.9 正式打包与 GitHub 发布 | publish-cutcut-release | 先生成四种整包、八个模块包和校验清单；同步主程序与变更模块版本，未运行独立验证
+- 2026-10-10 | v1.11.9 正式打包与 GitHub 发布 | publish-cutcut-release | 正式包生成后推送 872f276，13个资产上传并正式发布；未运行独立验证
