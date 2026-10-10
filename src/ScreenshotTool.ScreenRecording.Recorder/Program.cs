@@ -126,6 +126,12 @@ internal static class Program
     {
         var displaySource = new DisplayRecordingSource(options.DisplayDeviceName)
         {
+            // Desktop Duplication can terminate the native recorder on secondary GPU outputs.
+            // Monitor capture through Windows Graphics Capture is available since Windows 10 1903.
+            RecorderApi = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362)
+                ? RecorderApi.WindowsGraphicsCapture
+                : RecorderApi.DesktopDuplication,
+            IsBorderRequired = false,
             SourceRect = new ScreenRect(options.X, options.Y, options.Width, options.Height)
         };
         var microphoneEnabled = options.CaptureMicrophone && HasAudioInputDevice();
@@ -139,8 +145,8 @@ internal static class Program
             OutputOptions = new OutputOptions
             {
                 RecorderMode = RecorderMode.Video,
-                OutputFrameSize = new ScreenSize(options.Width, options.Height),
-                Stretch = StretchMode.Fill
+                OutputFrameSize = new ScreenSize(options.OutputWidth, options.OutputHeight),
+                Stretch = StretchMode.Uniform
             },
             AudioOptions = new AudioOptions
             {
@@ -149,21 +155,26 @@ internal static class Program
                 IsInputDeviceEnabled = microphoneEnabled,
                 InputVolume = bothAudioSources ? 0.5F : 1F,
                 OutputVolume = bothAudioSources ? 0.5F : 1F,
-                Bitrate = AudioBitrate.bitrate_128kbps,
-                Channels = AudioChannels.Stereo
+                Bitrate = (AudioBitrate)(options.AudioBitrate / 8),
+                Channels = options.MonoAudio ? AudioChannels.Mono : AudioChannels.Stereo
             },
             VideoEncoderOptions = new VideoEncoderOptions
             {
                 Bitrate = options.VideoBitrate,
                 Framerate = options.FramesPerSecond,
                 IsFixedFramerate = true,
-                IsHardwareEncodingEnabled = true,
+                // Hardware encoders can reject very low frame rates and small output frames.
+                // The system software encoder is inexpensive at compressed resolutions.
+                IsHardwareEncodingEnabled = options.VideoBitrate >= 1_000_000 &&
+                    options.FramesPerSecond >= 15 && options.OutputWidth >= 128 && options.OutputHeight >= 128,
                 IsLowLatencyEnabled = false,
                 IsThrottlingDisabled = false,
                 IsMp4FastStartEnabled = true,
                 Encoder = new H264VideoEncoder
                 {
-                    BitrateMode = H264BitrateControlMode.UnconstrainedVBR,
+                    BitrateMode = options.VideoBitrate < 1_000_000 && OperatingSystem.IsWindowsVersionAtLeast(6, 2)
+                        ? H264BitrateControlMode.CBR
+                        : H264BitrateControlMode.UnconstrainedVBR,
                     EncoderProfile = H264Profile.Main
                 }
             },
@@ -233,7 +244,11 @@ internal sealed record RecorderArguments(
     int VideoBitrate,
     bool CaptureSystemAudio,
     bool CaptureMicrophone,
-    bool ShowMouseClickIndicator)
+    bool ShowMouseClickIndicator,
+    int OutputWidth,
+    int OutputHeight,
+    int AudioBitrate,
+    bool MonoAudio)
 {
     public static RecorderArguments Parse(string[] args)
     {
@@ -247,19 +262,35 @@ internal sealed record RecorderArguments(
             values[args[index]] = args[index + 1];
         }
 
+        var width = ParseInt(values, "--width", 2, 32768) & ~1;
+        var height = ParseInt(values, "--height", 2, 32768) & ~1;
+        var outputWidth = values.ContainsKey("--output-width")
+            ? ParseInt(values, "--output-width", 2, 32768) & ~1 : width;
+        var outputHeight = values.ContainsKey("--output-height")
+            ? ParseInt(values, "--output-height", 2, 32768) & ~1 : height;
+        var audioBitrate = values.ContainsKey("--audio-bitrate")
+            ? ParseInt(values, "--audio-bitrate", 96_000, 192_000) : 128_000;
+        if (audioBitrate is not (96_000 or 128_000 or 160_000 or 192_000))
+        {
+            throw new ArgumentOutOfRangeException("--audio-bitrate");
+        }
         return new RecorderArguments(
             Required(values, "--pipe"),
             Path.GetFullPath(Required(values, "--output")),
             Required(values, "--display"),
             ParseInt(values, "--x", 0, int.MaxValue),
             ParseInt(values, "--y", 0, int.MaxValue),
-            ParseInt(values, "--width", 2, 32768),
-            ParseInt(values, "--height", 2, 32768),
+            width,
+            height,
             ParseInt(values, "--fps", 1, 120),
-            ParseInt(values, "--bitrate", 100_000, 100_000_000),
+            ParseInt(values, "--bitrate", 32_000, 100_000_000),
             bool.Parse(Required(values, "--system-audio")),
             bool.Parse(Required(values, "--microphone")),
-            bool.Parse(Required(values, "--mouse-click-indicator")));
+            bool.Parse(Required(values, "--mouse-click-indicator")),
+            outputWidth,
+            outputHeight,
+            audioBitrate,
+            values.TryGetValue("--mono-audio", out var monoAudio) && bool.Parse(monoAudio));
     }
 
     private static string Required(IReadOnlyDictionary<string, string> values, string key) =>

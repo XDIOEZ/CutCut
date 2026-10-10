@@ -19,11 +19,14 @@ description: 定位并维护轻截的图片保存、文件命名、路径迁移�
 | 图片格式与保存 | `ScreenshotTool/Core/ScreenshotImageFormat.cs`、`ScreenshotTool/Abstractions/IImageSaveService.cs`、`ScreenshotTool/Infrastructure/ImageSaveService.cs` | 截图导出、贴图、收藏夹、剪贴板、通知 |
 | 模块自定义目录保存 | `ScreenshotTool.Contracts/ModuleContracts.cs` 的 `IModuleImageStorageHost`、`ScreenshotTool/Infrastructure/Modules/ModuleImageHostProxy.cs` | `ScreenshotTool.Favorites/FavoritesModule.cs`、图片内文字命名、异步写盘、模块图片所有权 |
 | 已保存截图查询/删除 | `ScreenshotTool/Abstractions/ISavedScreenshotService.cs`、`Infrastructure/SavedScreenshotService.cs` | `Presentation/Pages/ScreenshotGalleryPage.cs`、`ScreenshotGalleryQuery.cs` |
+| 图库双向与贴图拖入 Windows 拖放 | `src/Shared/WindowsArtifactDragDrop.cs`、`Presentation/Pages/ScreenshotGalleryPage.cs` | `ScreenshotTool.PinnedImage/PinnedImageDragController.cs`；图库直接拖出、拖入系统查看，贴图无覆盖控件，仅拖入新建，临时 PNG 延迟清理 |
 | 文件命名 | `ScreenshotTool/Core/ScreenshotFileNamePolicy.cs`、`ScreenshotFileNameMode.cs` | 设置模型、碰撞处理、测试 |
+| 录屏文件命名与占位 | `ScreenshotTool.ScreenRecording/RecordingOutputPathReservation.cs`、`ScreenRecordingFeature.CreateOutputPath` | 本地开始时间 `yyyyMMdd_HHmmss_录屏.mp4`，重名追加编号；占位保留到录制完成 |
 | 保存目录迁移 | `ScreenshotTool/Core/ScreenshotFolderMigration.cs` | `SavePathSettingsPage.cs`、设置持久化、历史刷新 |
 | 保存路径设置 | `ScreenshotTool/Presentation/Pages/SavePathSettingsPage.cs` | `AppSettings.cs`、`JsonSettingsStore.cs` |
 | 按日期解析截图与录屏子目录 | `ScreenshotTool/Core/ArtifactOutputFolderPolicy.cs` | `ScreenshotTool/Infrastructure/ImageSaveService.cs`、`CaptureOverlayForm.cs`、录屏产物、保存路径设置、历史画廊 |
 | 剪贴板与资源定位 | `ScreenshotTool/Abstractions/IClipboardService.cs`、`IFileLocationService.cs` | `WindowsClipboardService.cs`、`ExplorerFileLocationService.cs` |
+| 工作台底部打开保存目录 | `ScreenshotTool/Presentation/Shell/AppShellControl.cs`、`Presentation/MainForm.cs` 的 `OpenOutputFolder` | 保存路径页与托盘复用同一处理；日期分类打开父目录 |
 | 编辑元素与整图复制 | `ScreenshotTool/Editing/AnnotationClipboard.cs`、`Presentation/CaptureOverlayForm.cs` | Ctrl+C 复制选中元素，Ctrl+Shift+C 复制整图；`IClipboardService` 原子写入位图及通用自定义数据 |
 | 贴图选择文字复制 | `ScreenshotTool.Contracts/ImageTextRecognition.cs`、`ModuleImageHostProxy.cs` | `PinnedImageTextController.cs`、宿主 `IClipboardService.SetText`；蓝色高亮不得进入图片复制/保存 |
 | 保存通知 | `ScreenshotTool/Presentation/SavedArtifactNotificationForm.cs` | 主窗体、截图/录屏完成事件、目录打开 |
@@ -61,6 +64,7 @@ description: 定位并维护轻截的图片保存、文件命名、路径迁移�
 - 覆盖命名冲突、非法格式、目录不存在/无权限、迁移失败与大目录查询测试。
 - 检查保存后的真实文件可解码、没有遗留文件锁，历史删除符合可恢复约定。
 - 涉及界面时验证单列布局、空状态、分页/滚动和通知点击行为。
+- 拖放运行 `ScreenshotTool.UiPreview --artifact-dragdrop-interaction` 验证真实鼠标与 Windows OLE 双向操作、贴图无遮挡显示、原移动及图库 Esc 取消；`ScreenshotTool.LogicTests --artifact-dragdrop` 检查数据格式、文件过滤、复制语义与文件锁。聊天软件和资源管理器的实际接收行为需分别核对。
 - 按根目录 `AGENTS.md` 完成格式、测试与 Release 构建；用户未要求时不创建发布包。
 
 ## 迭代日志

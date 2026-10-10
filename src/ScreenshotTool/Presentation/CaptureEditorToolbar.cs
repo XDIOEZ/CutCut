@@ -19,6 +19,7 @@ internal sealed class CaptureEditorToolbar : FlowLayoutPanel
     private readonly List<Button> _colorButtons = [];
     private readonly ToolTip _toolTip = new();
     private readonly int _coreControlCount;
+    private readonly CaptureToolbarDragController _dragController;
 
     public CaptureEditorToolbar(
         IReadOnlyList<CaptureAnnotationToolDefinition> tools,
@@ -42,11 +43,24 @@ internal sealed class CaptureEditorToolbar : FlowLayoutPanel
         BackColor = ToolbarBackColor;
         Font = new Font("Microsoft YaHei UI", 8.5F);
 
+        var dragHandle = new Label
+        {
+            Name = "ToolbarDragHandle",
+            Text = "⠿",
+            Size = new Size(24, 30),
+            Margin = new Padding(0, 0, 4, 0),
+            ForeColor = Color.FromArgb(148, 163, 184),
+            TextAlign = ContentAlignment.MiddleCenter,
+            AccessibleName = "拖动工具栏"
+        };
+        _toolTip.SetToolTip(dragHandle, "按住左键拖动工具栏");
+        Controls.Add(dragHandle);
+
         AddToolButton(
             CaptureAnnotationTool.Select,
             "选择",
             76,
-            "录屏编辑模式：使用左键单选、多选、框选和调整元素；再次点击恢复操作屏幕",
+            "录屏编辑模式（~ 键，1 左侧）：短按切换，长按临时选择；左键选择、移动和缩放元素",
             RecordingSelectBackColor,
             RecordingSelectHoverColor,
             RecordingSelectActiveColor,
@@ -105,6 +119,7 @@ internal sealed class CaptureEditorToolbar : FlowLayoutPanel
         _coreControlCount = Controls.Count;
         SetActiveTool(activeTool);
         SetSelectedColor(selectedColor);
+        _dragController = new CaptureToolbarDragController(this);
     }
 
     public event Action<CaptureAnnotationTool>? ToolClicked;
@@ -120,6 +135,12 @@ internal sealed class CaptureEditorToolbar : FlowLayoutPanel
     public Button WidthButton { get; }
 
     public Button SnappingButton { get; }
+
+    public bool IsDragging => _dragController.IsDragging;
+
+    public void SetDragTarget(Control target) => _dragController.SetTarget(target);
+
+    public void PositionDragTarget(Point suggestedLocation) => _dragController.Position(suggestedLocation);
 
     public void SetActiveTool(CaptureAnnotationTool? activeTool)
     {
@@ -265,6 +286,7 @@ internal sealed class CaptureEditorToolbar : FlowLayoutPanel
     {
         if (disposing)
         {
+            _dragController.Dispose();
             _toolTip.Dispose();
         }
         base.Dispose(disposing);
@@ -478,6 +500,7 @@ internal sealed class CaptureEditorToolbarWindow : Form
         BackColor = toolbar.BackColor;
         AutoScaleMode = AutoScaleMode.None;
         Controls.Add(toolbar);
+        toolbar.SetDragTarget(this);
 
         Shown += (_, _) =>
         {
@@ -510,6 +533,6 @@ internal sealed class CaptureEditorToolbarWindow : Form
             top,
             workArea.Top + 8,
             Math.Max(workArea.Top + 8, workArea.Bottom - preferred.Height - 8));
-        Location = new Point(left, top);
+        _toolbar.PositionDragTarget(new Point(left, top));
     }
 }

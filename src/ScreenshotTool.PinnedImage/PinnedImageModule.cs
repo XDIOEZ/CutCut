@@ -10,8 +10,8 @@ public sealed class PinnedImageModule : ScreenshotToolModuleBase
     private bool _disposed;
 
     public PinnedImageModule()
-        : this(new PinnedImageWindowFactory())
     {
+        _windowFactory = new PinnedImageWindowFactory(ShowPinnedImage);
     }
 
     internal PinnedImageModule(IPinnedImageWindowFactory windowFactory)
@@ -23,7 +23,7 @@ public sealed class PinnedImageModule : ScreenshotToolModuleBase
 
     public override string DisplayName => "贴图悬浮窗";
 
-    public override Version Version => new(1, 0, 0);
+    public override Version Version => new(1, 0, 1);
 
     internal int WindowCount => _windows.Count;
 
@@ -45,7 +45,7 @@ public sealed class PinnedImageModule : ScreenshotToolModuleBase
         ArgumentNullException.ThrowIfNull(image);
         var imageHost = _imageHost ??
                         throw new InvalidOperationException("贴图模块尚未初始化。");
-        Bitmap? ownedImage = new(image);
+        Bitmap? ownedImage = (Bitmap)image.Clone();
         IPinnedImageWindow? window = null;
         try
         {

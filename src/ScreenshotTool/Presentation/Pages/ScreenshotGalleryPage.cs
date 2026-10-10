@@ -1,4 +1,5 @@
 using ScreenshotTool.Abstractions;
+using ScreenshotTool.Infrastructure.DragDrop;
 using ScreenshotTool.Presentation.Theme;
 
 namespace ScreenshotTool.Presentation.Pages;
@@ -186,6 +187,20 @@ internal sealed class ScreenshotGalleryPage : UserControl
         _listView.ContextMenuStrip = _itemMenu;
         _listView.MouseDown += (_, e) => SelectRightClickedItem(e);
         _listView.DoubleClick += (_, _) => OpenSelectedArtifact();
+        _listView.ItemDrag += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left && e.Item is ListViewItem { Tag: string path } && File.Exists(path))
+            {
+                try
+                {
+                    _listView.DoDragDrop(WindowsArtifactDragDrop.CreateFileData([path]), DragDropEffects.Copy);
+                }
+                catch (Exception exception)
+                {
+                    ShowDragFailure(exception);
+                }
+            }
+        };
         _listView.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -214,7 +229,50 @@ internal sealed class ScreenshotGalleryPage : UserControl
         };
         Controls.Add(_emptyLabel);
         _emptyLabel.BringToFront();
+        EnableFileDrop(this);
     }
+
+    private void EnableFileDrop(Control control)
+    {
+        control.AllowDrop = true;
+        control.DragEnter += (_, e) => e.Effect = WindowsArtifactDragDrop.GetDropEffect(e, includeVideo: true);
+        control.DragOver += (_, e) => e.Effect = WindowsArtifactDragDrop.GetDropEffect(e, includeVideo: true);
+        control.DragDrop += async (_, e) =>
+        {
+            try
+            {
+                var paths = WindowsArtifactDragDrop.GetFiles(e.Data, includeVideo: true);
+                if (paths.Length == 0 && e.Data?.GetData(DataFormats.Bitmap) is Image image)
+                {
+                    using var copy = (Bitmap)image.Clone();
+                    paths = [await Task.Run(() => WindowsArtifactDragDrop.SaveTemporaryImage(copy))];
+                }
+                if (IsDisposed || Disposing)
+                {
+                    return;
+                }
+                foreach (var path in paths)
+                {
+                    _fileLocationService.OpenFile(path);
+                }
+            }
+            catch (Exception exception)
+            {
+                if (!IsDisposed && !Disposing)
+                {
+                    ShowDragFailure(exception);
+                }
+            }
+        };
+        foreach (Control child in control.Controls)
+        {
+            EnableFileDrop(child);
+        }
+    }
+
+    private void ShowDragFailure(Exception exception) =>
+        MessageBox.Show(this, $"无法拖拽文件：{exception.Message}", "拖拽失败",
+            MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
     public event EventHandler<ScreenshotEditRequestedEventArgs>? EditRequested;
 
@@ -526,7 +584,7 @@ internal sealed class ScreenshotGalleryPage : UserControl
         int totalCount,
         string searchText)
     {
-        const string hint = "双击查看 · 右键管理";
+        const string hint = "双击查看 · 右键管理 · 拖入查看 / 拖出使用";
         if (totalCount == 0)
         {
             return "暂无截图或视频";

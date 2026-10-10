@@ -165,8 +165,13 @@ internal sealed class ScreenRecorderSession : IDisposable
         AddArgument(startInfo, "--y", relativeBounds.Y.ToString());
         AddArgument(startInfo, "--width", relativeBounds.Width.ToString());
         AddArgument(startInfo, "--height", relativeBounds.Height.ToString());
+        var outputSize = RecordingOutputResolution.Resolve(relativeBounds.Size, _options);
+        AddArgument(startInfo, "--output-width", outputSize.Width.ToString());
+        AddArgument(startInfo, "--output-height", outputSize.Height.ToString());
         AddArgument(startInfo, "--fps", _options.FramesPerSecond.ToString());
         AddArgument(startInfo, "--bitrate", _options.VideoBitrate.ToString());
+        AddArgument(startInfo, "--audio-bitrate", _options.AudioBitrate.ToString());
+        AddArgument(startInfo, "--mono-audio", _options.MonoAudio.ToString());
         AddArgument(startInfo, "--system-audio", _options.CaptureSystemAudio.ToString());
         AddArgument(startInfo, "--microphone", _options.CaptureMicrophone.ToString());
         AddArgument(

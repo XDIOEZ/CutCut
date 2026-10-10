@@ -112,6 +112,9 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
     private readonly CaptureAnnotationEditor _editor;
     private readonly DrawingCursorIndicator _drawingCursorIndicator;
     private readonly LiveAnnotationPointerHook _pointerHook;
+    private readonly LiveAnnotationKeyboardHook _keyboardHook;
+    private readonly LiveAnnotationToolShortcutState _toolShortcutState = new();
+    private readonly LiveAnnotationContextMenu _annotationContextMenu;
     private readonly LiveAnnotationPointerHook _clickPreviewPointerHook;
     private readonly RecordingMouseClickIndicatorForm _mouseClickIndicator;
     private readonly RecordingSelectionMarqueeForm _selectionMarqueeFill;
@@ -155,6 +158,12 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
     private Point _hookLastLeftDownPoint;
     private long _hookLastLeftDownAt;
     private bool _annotationSnappingEnabled;
+    private bool _contextRightClickConsumed;
+    private bool _shortcutWasActive;
+    private nint _shortcutForegroundWindow;
+    private bool _shortcutLeftUpPending;
+    private bool _backgroundInputEnabled = true;
+    private int _snapshotParkingDepth;
 
     public LiveAnnotationSessionForm(
         Rectangle screenBounds,
@@ -182,6 +191,10 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         _editor = new CaptureAnnotationEditor(drawingToolCoefficients);
         _drawingCursorIndicator = new DrawingCursorIndicator(drawingCursorShape);
         _pointerHook = new LiveAnnotationPointerHook(HandlePointerHookEvent);
+        _keyboardHook = new LiveAnnotationKeyboardHook(HandleToolShortcutKey);
+        _annotationContextMenu = new LiveAnnotationContextMenu(
+            ToggleContextAnnotationEditing,
+            DeleteContextAnnotation);
         _clickPreviewPointerHook = new LiveAnnotationPointerHook(
             HandleClickPreviewPointerHookEvent);
         _mouseClickIndicator = new RecordingMouseClickIndicatorForm();
@@ -263,6 +276,8 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         _toolbarWindow.Owner = this;
         _toolbarWindow.KeyDown += HandleKeyDown;
         _toolbarWindow.KeyUp += HandleKeyUp;
+        Activated += (_, _) => EditingActivated?.Invoke(this, EventArgs.Empty);
+        _toolbarWindow.Activated += (_, _) => EditingActivated?.Invoke(this, EventArgs.Empty);
         Shown += HandleShown;
         FormClosing += HandleFormClosing;
         MouseDown += HandleMouseDown;
@@ -280,6 +295,32 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
     public IReadOnlyList<Color> Palette => CaptureEditorToolCatalog.Palette;
 
     public event EventHandler<CaptureAnnotationToolbarCommandEventArgs>? ToolbarCommandInvoked;
+
+    internal event EventHandler? EditingActivated;
+
+    internal Func<Point, bool>? IsPointerOverOtherCaptureSession { get; set; }
+
+    internal void SetBackgroundInputEnabled(bool enabled)
+    {
+        _backgroundInputEnabled = enabled;
+        if (!enabled)
+        {
+            HideDrawingCursorIndicator();
+        }
+    }
+
+    internal bool ContainsInteractiveScreenPoint(Point point) =>
+        !_closing && !IsDisposed && Visible && _snapshotParkingDepth == 0 &&
+        (Bounds.Contains(point) || _toolbarWindow.Bounds.Contains(point));
+
+    internal IDisposable ParkForSnapshot()
+    {
+        _snapshotParkingDepth++;
+        _annotationContextMenu.Close();
+        return new CaptureWindowParkingLease(
+            [this, _content, _toolbarWindow, _mouseClickIndicator, _selectionMarqueeFill],
+            () => _snapshotParkingDepth--);
+    }
 
     public CaptureAnnotationTool ActiveTool
     {
@@ -551,6 +592,8 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         {
             _drawingCursorIndicator.Dispose();
             _pointerHook.Dispose();
+            _keyboardHook.Dispose();
+            _annotationContextMenu.Dispose();
             _clickPreviewPointerHook.Dispose();
             _mouseClickIndicator.Dispose();
             _selectionMarqueeFill.Dispose();
@@ -570,6 +613,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         BringToFront();
         _toolbarWindow.BringToFront();
         WindowCaptureProtection.TryExclude(this);
+        _keyboardHook.Start();
         UpdateInputMode();
     }
 
@@ -582,6 +626,9 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
 
         _closing = true;
         _pointerHook.Stop();
+        _keyboardHook.Stop();
+        _toolShortcutState.Reset();
+        _annotationContextMenu.Close();
         _clickPreviewPointerHook.Stop();
         _mouseClickIndicator.Close();
         _selectionMarqueeFill.Close();
@@ -620,11 +667,18 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
 
     private void HandleMouseDown(object? sender, MouseEventArgs e)
     {
+        if (e.Button == MouseButtons.Right)
+        {
+            ShowAnnotationContextMenu(e.Location);
+            return;
+        }
         if (e.Button != MouseButtons.Left ||
             (ActiveTool == CaptureAnnotationTool.Operation && !IsAnnotationMoveActive()))
         {
             return;
         }
+
+        _toolShortcutState.MarkPointerInteraction();
 
         if (IsAltPressed())
         {
@@ -686,6 +740,21 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
             return false;
         }
 
+        if (pointerEvent.Kind == LiveAnnotationPointerEventKind.LeftUp && _shortcutLeftUpPending)
+        {
+            _shortcutLeftUpPending = false;
+            return true;
+        }
+        if (pointerEvent.Kind == LiveAnnotationPointerEventKind.RightUp && _contextRightClickConsumed)
+        {
+            _contextRightClickConsumed = false;
+            return true;
+        }
+        if (_snapshotParkingDepth > 0)
+        {
+            return false;
+        }
+
         var clientPoint = PointToClient(pointerEvent.ScreenLocation);
         if (_showMouseClickIndicator &&
             pointerEvent.Kind == LiveAnnotationPointerEventKind.Move &&
@@ -698,26 +767,51 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         {
             _mouseClickIndicator.EndClick();
         }
-        if (ActiveTool == CaptureAnnotationTool.Operation)
-        {
-            return false;
-        }
-
         var pointerOperationActive = Capture ||
             _isDrawing ||
             _isPendingMarquee ||
             _isSelectingMarquee ||
             _activeMovableTarget != StickerHitTarget.None;
-        if (!pointerOperationActive &&
-            _toolbarWindow.Bounds.Contains(pointerEvent.ScreenLocation))
+        if (_toolbar.IsDragging ||
+            (!pointerOperationActive && _toolbarWindow.Bounds.Contains(pointerEvent.ScreenLocation)))
         {
             // When a large recording selection contains the toolbar, the low-level hook
-            // must leave toolbar clicks to WinForms instead of turning them into annotations.
+            // must leave toolbar clicks and captured drags (even outside its bounds) to WinForms.
             return false;
         }
 
+        // Popup input must reach WinForms even when it overlaps the recording region.
+        if (_annotationContextMenu.Visible)
+        {
+            return false;
+        }
+        if (!_backgroundInputEnabled)
+        {
+            if (pointerEvent.Kind == LiveAnnotationPointerEventKind.RightDown &&
+                ClientRectangle.Contains(clientPoint) &&
+                IsPointerOverOtherCaptureSession?.Invoke(pointerEvent.ScreenLocation) != true &&
+                _editor.FindTopMovableAt(clientPoint, GetHitTolerance()) is not null)
+            {
+                EditingActivated?.Invoke(this, EventArgs.Empty);
+            }
+            if (!_backgroundInputEnabled)
+            {
+                return false;
+            }
+        }
         if (_textEditor is not null &&
             RectangleToScreen(_textEditor.Bounds).Contains(pointerEvent.ScreenLocation))
+        {
+            return false;
+        }
+
+        if (pointerEvent.Kind == LiveAnnotationPointerEventKind.RightDown &&
+            ClientRectangle.Contains(clientPoint))
+        {
+            _contextRightClickConsumed = ShowAnnotationContextMenu(clientPoint);
+            return _contextRightClickConsumed || ActiveTool == CaptureAnnotationTool.Select;
+        }
+        if (ActiveTool == CaptureAnnotationTool.Operation)
         {
             return false;
         }
@@ -793,9 +887,67 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         }
     }
 
+    private bool ShowAnnotationContextMenu(Point clientPoint)
+    {
+        if (_isDrawing || _activeMovableTarget != StickerHitTarget.None ||
+            _isPendingMarquee || _isSelectingMarquee)
+        {
+            return false;
+        }
+        CancelTextEditor(commit: true);
+        var target = FindSelectedMovableHit(clientPoint) ??
+            _editor.FindTopMovableAt(clientPoint, GetHitTolerance());
+        if (target is null)
+        {
+            return false;
+        }
+
+        var screenLocation = PointToScreen(clientPoint);
+        // Leave the low-level input callback before opening a popup window.
+        BeginInvoke((Action)(() =>
+        {
+            if (!_closing && !IsDisposed && _editor.Document.Contains(target))
+            {
+                HideDrawingCursorIndicator();
+                _annotationContextMenu.Show(this, screenLocation, target);
+            }
+        }));
+        return true;
+    }
+
+    private void ToggleContextAnnotationEditing(MovableAnnotation target)
+    {
+        if (!_editor.Document.Contains(target))
+        {
+            return;
+        }
+        if (ActiveTool == CaptureAnnotationTool.Select)
+        {
+            ActiveTool = CaptureAnnotationTool.Operation;
+            return;
+        }
+
+        ActiveTool = CaptureAnnotationTool.Select;
+        _editor.Selection.SelectOnly(target);
+        BringToFrontForEditing();
+        InvalidateLayers();
+    }
+
+    private void DeleteContextAnnotation(MovableAnnotation target)
+    {
+        if (!_editor.Document.Contains(target))
+        {
+            return;
+        }
+        CancelPointerOperation();
+        _editor.Selection.SelectOnly(target);
+        DeleteSelected();
+    }
+
     private bool HandleClickPreviewPointerHookEvent(LiveAnnotationPointerEvent pointerEvent)
     {
-        if (_closing || IsDisposed || !_showMouseClickIndicator)
+        if (_closing || IsDisposed || !_showMouseClickIndicator ||
+            !_backgroundInputEnabled || _snapshotParkingDepth > 0)
         {
             return false;
         }
@@ -1059,6 +1211,12 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
 
     private void HandleKeyDown(object? sender, KeyEventArgs e)
     {
+        if (HandleToolShortcutKey(e.KeyCode, isDown: true))
+        {
+            // Keep KeyUp available for the short-press/hold decision.
+            e.Handled = true;
+            return;
+        }
         _controlDoubleTapDetector.RegisterKeyDown(e.KeyCode, Environment.TickCount64);
 
         if (IsAltKey(e.KeyCode))
@@ -1087,13 +1245,6 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
                 CancelTextEditor(commit: true);
                 e.SuppressKeyPress = true;
             }
-            return;
-        }
-
-        if (!e.Control && !e.Alt && !e.Shift && TryResolveShortcut(e.KeyCode, out var tool))
-        {
-            ActiveTool = ActiveTool == tool ? CaptureAnnotationTool.Operation : tool;
-            e.SuppressKeyPress = true;
             return;
         }
 
@@ -1128,6 +1279,11 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
 
     private void HandleKeyUp(object? sender, KeyEventArgs e)
     {
+        if (HandleToolShortcutKey(e.KeyCode, isDown: false))
+        {
+            e.Handled = true;
+            return;
+        }
         if (_controlDoubleTapDetector.RegisterKeyUp(e.KeyCode, Environment.TickCount64))
         {
             ToggleAnnotationSnapping();
@@ -1140,6 +1296,95 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         if (IsAltKey(e.KeyCode) || IsControlKey(e.KeyCode))
         {
             UpdateIdleCursor(PointToClient(Cursor.Position));
+        }
+    }
+
+    private bool HandleToolShortcutKey(Keys keyCode, bool isDown)
+    {
+        if (_closing || IsDisposed || !TryResolveShortcut(keyCode, out var tool))
+        {
+            return false;
+        }
+
+        var tracked = _toolShortcutState.IsTracked(keyCode);
+        if (!isDown)
+        {
+            if (_toolShortcutState.TryRelease(keyCode, Environment.TickCount64, out var temporary))
+            {
+                if (temporary)
+                {
+                    _shortcutLeftUpPending = Capture &&
+                        (GetAsyncKeyState((int)Keys.LButton) & 0x8000) != 0;
+                    var point = _snapshotParkingDepth > 0
+                        ? _currentPoint
+                        : PointToClient(Cursor.Position);
+                    HandleMouseUp(this, new MouseEventArgs(
+                        MouseButtons.Left, 1, point.X, point.Y, 0));
+                    CancelTextEditor(commit: true);
+                    ActiveTool = CaptureAnnotationTool.Operation;
+                    RestoreShortcutForegroundWindow();
+                }
+                else if (_shortcutWasActive && ActiveTool == tool)
+                {
+                    ActiveTool = CaptureAnnotationTool.Operation;
+                    RestoreShortcutForegroundWindow();
+                }
+            }
+            return tracked;
+        }
+        if (tracked)
+        {
+            return true;
+        }
+        if (_snapshotParkingDepth > 0)
+        {
+            return false;
+        }
+        if (_textEditor is not null || _annotationContextMenu.Visible ||
+            ModifierKeys != Keys.None ||
+            (GetAsyncKeyState((int)Keys.LWin) & 0x8000) != 0 ||
+            (GetAsyncKeyState((int)Keys.RWin) & 0x8000) != 0 ||
+            (!Bounds.Contains(Cursor.Position) &&
+             !_toolbarWindow.Bounds.Contains(Cursor.Position)))
+        {
+            return false;
+        }
+
+        if (!_backgroundInputEnabled)
+        {
+            if (IsPointerOverOtherCaptureSession?.Invoke(Cursor.Position) == true)
+            {
+                return false;
+            }
+            EditingActivated?.Invoke(this, EventArgs.Empty);
+            if (!_backgroundInputEnabled)
+            {
+                return false;
+            }
+        }
+
+        if (_toolShortcutState.TryPress(keyCode, Environment.TickCount64))
+        {
+            var foreground = GetForegroundWindow();
+            GetWindowThreadProcessId(foreground, out var foregroundProcessId);
+            if (foregroundProcessId != (uint)Environment.ProcessId)
+            {
+                _shortcutForegroundWindow = foreground;
+            }
+            _shortcutWasActive = ActiveTool == tool;
+            ActiveTool = tool;
+            BringToFrontForEditing();
+        }
+        return _toolShortcutState.IsTracked(keyCode);
+    }
+
+    private void RestoreShortcutForegroundWindow()
+    {
+        var foreground = GetForegroundWindow();
+        if (_shortcutForegroundWindow != nint.Zero &&
+            (foreground == Handle || foreground == _toolbarWindow.Handle))
+        {
+            SetForegroundWindow(_shortcutForegroundWindow);
         }
     }
 
@@ -1815,10 +2060,11 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
             return;
         }
         var style = GetWindowLongPtr(Handle, ExtendedStyleIndex);
+        // Keep element right-clicks available while ordinary clicks pass through.
+        _pointerHook.Start();
         if (ActiveTool == CaptureAnnotationTool.Operation)
         {
             style |= TransparentStyle | NoActivateStyle;
-            _pointerHook.Stop();
             if (_showMouseClickIndicator)
             {
                 _clickPreviewPointerHook.Start();
@@ -1847,6 +2093,7 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
             Keys.D4 or Keys.NumPad4 => CaptureAnnotationTool.Pen,
             Keys.D5 or Keys.NumPad5 => CaptureAnnotationTool.Text,
             Keys.D6 or Keys.NumPad6 => CaptureAnnotationTool.Mosaic,
+            Keys.Oem3 => CaptureAnnotationTool.Select,
             _ => CaptureAnnotationTool.Operation
         };
         return tool != CaptureAnnotationTool.Operation;
@@ -1915,6 +2162,19 @@ internal sealed class LiveAnnotationSessionForm : Form, ICaptureAnnotationToolba
         graphics.Clear(TransparentColor);
         return surface;
     }
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int keyCode);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint window);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr(nint window, int index);
@@ -2014,15 +2274,15 @@ internal static class WindowCaptureProtection
     private const uint CaptureAllowed = 0x00000000;
     private const uint ExcludeFromCapture = 0x00000011;
 
-    public static bool TryExclude(Form form) => TrySet(form, ExcludeFromCapture);
+    public static bool TryExclude(Control control) => TrySet(control, ExcludeFromCapture);
 
     public static bool TryAllow(Form form) => TrySet(form, CaptureAllowed);
 
-    private static bool TrySet(Form form, uint affinity)
+    private static bool TrySet(Control control, uint affinity)
     {
         try
         {
-            return SetWindowDisplayAffinity(form.Handle, affinity);
+            return SetWindowDisplayAffinity(control.Handle, affinity);
         }
         catch (DllNotFoundException)
         {

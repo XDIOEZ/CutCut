@@ -78,11 +78,16 @@ internal sealed class AppShellControl : UserControl
         brand.Controls.AddRange([brandMark, brandName, _versionLabel, brandCaption]);
         sidebar.Controls.Add(brand);
 
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 98, BackColor = AppTheme.Sidebar };
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 148, BackColor = AppTheme.Sidebar };
         var captureButton = AppTheme.CreateButton("立即截图", primary: true);
         captureButton.Dock = DockStyle.Top;
         captureButton.Height = 42;
         captureButton.Click += (_, _) => CaptureRequested?.Invoke(this, EventArgs.Empty);
+        var openFolderButton = AppTheme.CreateButton("打开保存目录");
+        openFolderButton.Dock = DockStyle.Top;
+        openFolderButton.Height = 42;
+        openFolderButton.Click += (_, _) => OpenOutputFolderRequested?.Invoke(this, EventArgs.Empty);
+        var buttonSpacing = new Panel { Dock = DockStyle.Top, Height = 8, BackColor = AppTheme.Sidebar };
         var footerText = new Label
         {
             Text = "关闭窗口后继续在后台运行",
@@ -93,6 +98,8 @@ internal sealed class AppShellControl : UserControl
             ForeColor = Color.FromArgb(100, 116, 139)
         };
         footer.Controls.Add(footerText);
+        footer.Controls.Add(openFolderButton);
+        footer.Controls.Add(buttonSpacing);
         footer.Controls.Add(captureButton);
         sidebar.Controls.Add(footer);
 
@@ -181,6 +188,7 @@ internal sealed class AppShellControl : UserControl
     }
 
     public event EventHandler? CaptureRequested;
+    public event EventHandler? OpenOutputFolderRequested;
     public event EventHandler<string>? PageChanged;
 
     public string? SelectedPageId => _selectedPageId;

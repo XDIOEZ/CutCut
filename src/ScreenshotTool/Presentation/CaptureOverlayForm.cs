@@ -39,6 +39,9 @@ internal sealed class CaptureOverlayForm : Form,
     private readonly CaptureAnnotationEditor _annotationEditor;
     private readonly LiveAnnotationSessionFactory _annotationSessionFactory;
     private readonly LiveAnnotationPointerHook _outsidePointerHook;
+    private readonly List<LiveAnnotationSessionForm> _annotationSessions = [];
+    private bool _backgroundInputEnabled = true;
+    private int _snapshotParkingDepth;
     // The pointer hook updates immediately; this timer reconciles synthetic pointer moves
     // and focus transitions so Ctrl+R is never left registered outside the selection.
     private readonly System.Windows.Forms.Timer _backgroundRefreshHotkeyTimer = new()
@@ -220,6 +223,7 @@ internal sealed class CaptureOverlayForm : Form,
                 CancelTextEditor(commit: true);
             }
         };
+        Activated += (_, _) => SessionActivated?.Invoke(this, EventArgs.Empty);
 
         if (initialEditImage is not null)
         {
@@ -228,6 +232,75 @@ internal sealed class CaptureOverlayForm : Form,
     }
 
     public event EventHandler<string>? ArtifactSaved;
+
+    internal event EventHandler? SessionActivated;
+
+    internal Func<IDisposable>? ParkOtherCaptureSessionsForSnapshot { get; set; }
+
+    internal Func<Point, bool>? IsPointerOverOtherCaptureSession { get; set; }
+
+    internal void SetBackgroundInputEnabled(bool enabled)
+    {
+        _backgroundInputEnabled = enabled;
+        foreach (var session in _annotationSessions.Where(session => !session.IsDisposed))
+        {
+            session.SetBackgroundInputEnabled(enabled);
+        }
+        UpdateBackgroundRefreshHotkeyRegistration();
+    }
+
+    internal bool ContainsInteractiveScreenPoint(Point point)
+    {
+        if (IsDisposed || _snapshotParkingDepth > 0)
+        {
+            return false;
+        }
+        if (_annotationSessions.Any(session =>
+                !session.IsDisposed && session.ContainsInteractiveScreenPoint(point)))
+        {
+            return true;
+        }
+        return Visible && !_liveCaptureOverlayParked &&
+            (!_hasSelection
+                ? Bounds.Contains(point)
+                : CaptureOverlayInteractionLayout.Contains(GetInteractiveAreas(), PointToClient(point)));
+    }
+
+    internal IDisposable ParkForSnapshot()
+    {
+        _snapshotParkingDepth++;
+        _backgroundRefreshHotkey?.SetEnabled(false);
+        var parkedSessions = new List<IDisposable>();
+        try
+        {
+            foreach (var session in _annotationSessions.Where(session => !session.IsDisposed))
+            {
+                parkedSessions.Add(session.ParkForSnapshot());
+            }
+        }
+        catch
+        {
+            foreach (var lease in parkedSessions.AsEnumerable().Reverse())
+            {
+                lease.Dispose();
+            }
+            _snapshotParkingDepth--;
+            UpdateBackgroundRefreshHotkeyRegistration();
+            throw;
+        }
+        return new CaptureWindowParkingLease([this], () =>
+        {
+            foreach (var lease in parkedSessions.AsEnumerable().Reverse())
+            {
+                lease.Dispose();
+            }
+            _snapshotParkingDepth--;
+            if (!IsDisposed)
+            {
+                UpdateBackgroundRefreshHotkeyRegistration();
+            }
+        });
+    }
 
     // Resolves the final folder at artifact creation time so modules share the host's date grouping rule.
     string ICaptureArtifactHost.OutputFolder => ArtifactOutputFolderPolicy.Resolve(
@@ -297,24 +370,39 @@ internal sealed class CaptureOverlayForm : Form,
     }
 
     ICaptureAnnotationSession ICaptureAnnotationHost.CreateAnnotationSession(
-        Rectangle screenBounds) => _annotationSessionFactory.Create(
+        Rectangle screenBounds) => RegisterAnnotationSession(_annotationSessionFactory.Create(
             screenBounds,
             _toolWidthController,
             _color,
-            color => _color = color);
+            color => _color = color));
 
     ICaptureAnnotationSession IConfigurableCaptureAnnotationHost.CreateAnnotationSession(
         Rectangle screenBounds,
-        CaptureAnnotationSessionOptions options) => _annotationSessionFactory.Create(
+        CaptureAnnotationSessionOptions options) => RegisterAnnotationSession(_annotationSessionFactory.Create(
             screenBounds,
             _toolWidthController,
             _color,
             color => _color = color,
-            options);
+            options));
+
+    private ICaptureAnnotationSession RegisterAnnotationSession(ICaptureAnnotationSession session)
+    {
+        if (session is LiveAnnotationSessionForm form)
+        {
+            _annotationSessions.Add(form);
+            form.SetBackgroundInputEnabled(_backgroundInputEnabled);
+            form.EditingActivated += (_, _) => SessionActivated?.Invoke(this, EventArgs.Empty);
+            form.IsPointerOverOtherCaptureSession = point =>
+                IsPointerOverOtherCaptureSession?.Invoke(point) == true;
+            form.FormClosed += (_, _) => _annotationSessions.Remove(form);
+        }
+        return session;
+    }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        WindowCaptureProtection.TryExclude(this);
         _backgroundRefreshHotkey ??= new CaptureBackgroundRefreshHotkeyRegistration(Handle);
         _backgroundRefreshHotkeyTimer.Start();
         _outsidePointerHook.Start();
@@ -332,13 +420,18 @@ internal sealed class CaptureOverlayForm : Form,
 
     internal bool HandleOutsidePointerHookEvent(LiveAnnotationPointerEvent pointerEvent)
     {
-        if (_finished || IsDisposed || !IsHandleCreated || !Visible)
+        if (_finished || IsDisposed || !IsHandleCreated || !Visible ||
+            !_backgroundInputEnabled || _snapshotParkingDepth > 0)
         {
             return false;
         }
 
         var pointer = PointToClient(pointerEvent.ScreenLocation);
         UpdateBackgroundRefreshHotkeyRegistration(pointer);
+        if (IsPointerOverOtherCaptureSession?.Invoke(pointerEvent.ScreenLocation) == true)
+        {
+            return false;
+        }
         var interactiveAreas = GetInteractiveAreas();
         if (!CaptureOverlayInteractionLayout.ShouldStartSelectionRedraw(
                 _hasSelection,
@@ -2744,7 +2837,7 @@ internal sealed class CaptureOverlayForm : Form,
             ? below
             : _selection.Top - preferred.Height - 8;
         y = Math.Clamp(y, 8, Math.Max(8, ClientSize.Height - preferred.Height - 8));
-        _toolbar.Location = new Point(x, y);
+        _toolbar.PositionDragTarget(new Point(x, y));
         _toolbar.BringToFront();
         UpdateInteractionRegion();
     }
@@ -2865,7 +2958,8 @@ internal sealed class CaptureOverlayForm : Form,
         CaptureBackgroundRefreshPolicy.CanRefresh(
             _hasSelection,
             _replacementCaptureImage is null,
-            Visible && IsHandleCreated && !IsDisposed && !_finished && !_liveCaptureOverlayParked,
+            Visible && IsHandleCreated && !IsDisposed && !_finished && !_liveCaptureOverlayParked &&
+            _backgroundInputEnabled && _snapshotParkingDepth == 0,
             IsBackgroundRefreshInteractionIdle(),
             _backgroundRefreshInProgress,
             _selection,
@@ -2906,6 +3000,7 @@ internal sealed class CaptureOverlayForm : Form,
         Exception? failure = null;
         try
         {
+            using var otherSessions = ParkOtherCaptureSessionsForSnapshot?.Invoke();
             overlayParked = true;
             ((ILiveCaptureFeatureHost)this).SetOverlayVisible(false);
             DwmFlush();

@@ -24,6 +24,41 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 
+ArtifactDragDropTests.Run();
+if (args is ["--artifact-dragdrop"])
+{
+    Console.WriteLine("Artifact drag/drop tests passed.");
+    return;
+}
+
+RecordingCompressionTests.Run();
+if (args is ["--recording-compression"])
+{
+    Console.WriteLine("Recording compression tests passed.");
+    return;
+}
+
+AssertEqual(
+    new Point(-1920, -200),
+    CaptureToolbarDragController.ClampLocation(
+        new Point(-2200, -500), new Size(1100, 42), new Rectangle(-1920, -200, 1920, 1080)),
+    "工具栏拖动支持负坐标副屏并限制左上边界");
+AssertEqual(
+    new Point(-1100, 838),
+    CaptureToolbarDragController.ClampLocation(
+        new Point(0, 1000), new Size(1100, 42), new Rectangle(-1920, -200, 1920, 1080)),
+    "工具栏拖动限制右下边界");
+AssertEqual(
+    new Point(0, 40),
+    CaptureToolbarDragController.ClampLocation(
+        new Point(200, 40), new Size(1100, 42), new Rectangle(0, 0, 800, 600)),
+    "工具栏宽于屏幕时仍保留左侧拖动把手");
+if (args is ["--toolbar-drag"])
+{
+    Console.WriteLine("Toolbar drag boundary tests passed.");
+    return;
+}
+
 if (args.Length >= 3 &&
     string.Equals(args[0], "--paddle-ocr-engine-smoke", StringComparison.Ordinal))
 {
@@ -1587,7 +1622,7 @@ var datedRecordingFolder = ArtifactOutputFolderPolicy.Resolve(
     organizeByDate: true,
     createdAt: namingTimestamp);
 AssertEqual(
-    Path.Combine("C:\\截图", "2026-07-21", "录屏_20260721_150607.mp4"),
+    Path.Combine("C:\\截图", "2026-07-21", "20260721_150607_录屏.mp4"),
     ScreenRecordingFeature.CreateOutputPath(datedRecordingFolder, namingTimestamp),
     "录屏文件使用共享日期子目录和录制时间命名");
 AssertEqual(
@@ -2111,7 +2146,7 @@ recordingSettingsHost.SetInteger(
 using (var screenRecordingSettingsPage = new ScreenRecordingSettingsPage(
            recordingSettingsHost))
 {
-    AssertSingleColumnSettings(screenRecordingSettingsPage, 6, "录屏设置页");
+    AssertSingleColumnSettings(screenRecordingSettingsPage, 13, "录屏设置页");
     AssertTrue(!screenRecordingSettingsPage.CaptureSystemAudio, "录屏页显示系统声音设置");
     AssertTrue(screenRecordingSettingsPage.CaptureMicrophone, "录屏页显示麦克风设置");
     AssertTrue(
@@ -3514,7 +3549,7 @@ using (var pinnedImageForm = new PinnedImageForm(
     AssertTrue(!pinnedImageForm.ShowInTaskbar, "贴图悬浮窗不占用任务栏");
     AssertEqual(
         "删除,复制,保存,编辑",
-        string.Join(',', pinnedImageForm.ContextMenuStrip!.Items.Cast<ToolStripItem>().Select(item => item.Text)),
+        string.Join(',', pinnedImageForm.ContextMenuStrip!.Items.Cast<ToolStripItem>().Take(4).Select(item => item.Text)),
         "贴图右键菜单提供删除、复制、保存和编辑");
     pinnedImageForm.ContextMenuStrip.Items["CopyPinnedImageMenuItem"]!.PerformClick();
     pinnedImageForm.ContextMenuStrip.Items["SavePinnedImageMenuItem"]!.PerformClick();
@@ -4449,9 +4484,9 @@ AssertTrue(
         out _),
     "录屏选区不能跨越显示器边界");
 AssertEqual(
-    5,
+    11,
     ScreenRecordingPreferences.SupportedVideoBitrates.Count,
-    "录屏提供五档视频码率");
+    "录屏提供包含超级压缩的十一档视频码率");
 AssertEqual(
     8_000_000,
     ScreenRecordingPreferences.NormalizeVideoBitrate(8_100_000),
@@ -4842,7 +4877,7 @@ var recordingModuleTestDirectory = Path.Combine(
 var incompatibleRecordingModule = new ScreenRecordingModule();
 AssertEqual(new Version(1, 10, 0), ScreenRecordingModule.MinimumHostVersion,
     "模块自带设置页契约的录屏最低主程序版本");
-AssertEqual(new Version(1, 7, 0), incompatibleRecordingModule.Version,
+AssertEqual(new Version(1, 8, 0), incompatibleRecordingModule.Version,
     "录屏模块结束截图会话版本");
 var incompatibleRecordingModuleRejected = false;
 try
@@ -5410,27 +5445,33 @@ internal sealed class TestCaptureFeatureHost(
     int framesPerSecond = ScreenRecordingPreferences.DefaultFramesPerSecond,
     int videoBitrate = ScreenRecordingPreferences.DefaultVideoBitrate,
     CaptureRegionIndicatorStyle regionIndicatorStyle =
-        ScreenRecordingPreferences.DefaultRegionIndicatorStyle) : ICaptureFeatureHost
+        ScreenRecordingPreferences.DefaultRegionIndicatorStyle,
+    IReadOnlyDictionary<string, int>? integerPreferences = null,
+    IReadOnlyDictionary<string, bool>? booleanPreferences = null) : ICaptureFeatureHost
 {
     public bool HasSelection => true;
     public Rectangle Selection => new(0, 0, 40, 40);
     public Point CursorClientPosition => new(20, 20);
     public int Dpi => 96;
-    public bool GetBooleanPreference(string id, bool defaultValue) => id switch
-    {
-        LongCapturePreferences.SafetyChecksId => longCaptureSafetyChecksEnabled,
-        ScreenRecordingPreferences.CaptureSystemAudioId => captureSystemAudio,
-        ScreenRecordingPreferences.CaptureMicrophoneId => captureMicrophone,
-        ScreenRecordingPreferences.ShowMouseClickIndicatorId => showMouseClickIndicator,
-        _ => defaultValue
-    };
-    public int GetIntegerPreference(string id, int defaultValue) => id switch
-    {
-        ScreenRecordingPreferences.FramesPerSecondId => framesPerSecond,
-        ScreenRecordingPreferences.VideoBitrateId => videoBitrate,
-        ScreenRecordingPreferences.RegionIndicatorStyleId => (int)regionIndicatorStyle,
-        _ => defaultValue
-    };
+    public bool GetBooleanPreference(string id, bool defaultValue) =>
+        booleanPreferences is not null && booleanPreferences.TryGetValue(id, out var stored)
+            ? stored : id switch
+            {
+                LongCapturePreferences.SafetyChecksId => longCaptureSafetyChecksEnabled,
+                ScreenRecordingPreferences.CaptureSystemAudioId => captureSystemAudio,
+                ScreenRecordingPreferences.CaptureMicrophoneId => captureMicrophone,
+                ScreenRecordingPreferences.ShowMouseClickIndicatorId => showMouseClickIndicator,
+                _ => defaultValue
+            };
+    public int GetIntegerPreference(string id, int defaultValue) =>
+        integerPreferences is not null && integerPreferences.TryGetValue(id, out var stored)
+            ? stored : id switch
+            {
+                ScreenRecordingPreferences.FramesPerSecondId => framesPerSecond,
+                ScreenRecordingPreferences.VideoBitrateId => videoBitrate,
+                ScreenRecordingPreferences.RegionIndicatorStyleId => (int)regionIndicatorStyle,
+                _ => defaultValue
+            };
     public void InvalidateAll()
     {
     }

@@ -80,6 +80,8 @@ internal sealed class UserPreferences
 
     public bool HideMainWindowDuringCapture { get; set; }
 
+    public int MaximumCaptureSessions { get; set; } = CaptureSessionLimitPolicy.DefaultMaximum;
+
     public DrawingToolCoefficients DrawingToolCoefficients { get; set; } = new();
 
     public ToolWidthRange GetToolWidthRange() =>

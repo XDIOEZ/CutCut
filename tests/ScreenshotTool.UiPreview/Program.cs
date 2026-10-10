@@ -11,12 +11,41 @@ using System.Runtime.InteropServices;
 
 namespace ScreenshotTool.UiPreview;
 
-internal static class Program
+internal static partial class Program
 {
     [STAThread]
     private static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+
+        if (args is ["--pin-clean-preview", var pinPreviewOutput])
+        {
+            RunPinnedImageCleanPreview(pinPreviewOutput);
+            return 0;
+        }
+
+        if (args is ["--artifact-dragdrop-interaction"])
+        {
+            RunArtifactDragDropInteraction();
+            return 0;
+        }
+
+        if (args is ["--recording-compression-interaction", var compressionOutputFolder])
+        {
+            RunRecordingCompressionInteractionTest(compressionOutputFolder);
+            return 0;
+        }
+
+        if (args is ["--toolbar-drag-interaction"])
+        {
+            RunToolbarDragInteractionTest();
+            return 0;
+        }
+        if (args is ["--toolbar-drag-recording", var recordingOutputPath])
+        {
+            RunToolbarDragRecordingTest(recordingOutputPath);
+            return 0;
+        }
 
         if (args is ["--annotation-smoke", var outputPath])
         {
@@ -2703,7 +2732,7 @@ internal static class Program
         }
         if (navigationTexts.Contains("录屏设置", StringComparer.Ordinal) ||
             shell.SelectedPageId != "modules" ||
-            !shell.VersionText.Equals("v1.11.8", StringComparison.Ordinal))
+            !shell.VersionText.Equals("v1.11.9", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"模块配置仍占用主导航，或版本号不正确；当前页面 {shell.SelectedPageId}，版本 {shell.VersionText}。");

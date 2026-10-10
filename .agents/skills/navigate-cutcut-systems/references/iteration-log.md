@@ -2,13 +2,13 @@
 
 按时间从旧到新排列。仅保留最近 10 条，写入第 11 条前删除最旧一条。
 
-- 2026-08-11 | 路由截图按日期子目录保存与设置持久化 | `navigate-saved-artifacts`、`navigate-startup-settings` | 跨系统入口完整，补录日期目录策略
-- 2026-08-11 | 路由日期分类独立父目录绑定 | `navigate-saved-artifacts`、`navigate-startup-settings` | 跨系统入口完整，无新增边界
-- 2026-08-17 | 路由并发布当前测试版 v1.11.7 | `publish-cutcut-release` | 现有发布入口完整，无新增边界
-- 2026-08-31 | 路由截图与录屏共用日期保存目录 | `navigate-saved-artifacts`、`navigate-screen-recording`、`navigate-startup-settings` | 跨系统入口完整，修正录屏存储导航
-- 2026-08-31 | 路由截图保存卡顿与图库刷新性能修复 | `navigate-capture-editor`、`navigate-saved-artifacts` | 补录后台保存、剪贴板重试和可取消图库快照边界
-- 2026-09-01 | 路由收藏夹 Mod 与按模块配置窗口 | `navigate-module-runtime`、`navigate-capture-editor`、`navigate-saved-artifacts` | 跨系统入口完整，补录配置窗口租约和显式目录保存边界
-- 2026-09-01 | 路由拖动时透明裁剪黑屏修复 | `navigate-capture-editor` | 单系统覆盖完整，无新增边界
-- 2026-09-01 | 路由图片保存格式选择 | `navigate-saved-artifacts`、`navigate-startup-settings`、`navigate-capture-editor` | 格式策略覆盖普通截图、贴图与收藏夹，无新增边界
-- 2026-09-14 | 路由贴图内文字选择 | navigate-capture-editor、navigate-module-runtime、navigate-ocr-results、navigate-saved-artifacts | 补录位置识别能力、请求租约与文字选择入口
-- 2026-09-15 | Ctrl+C 复制编辑元素，Ctrl+Shift+C 复制整图 | navigate-capture-editor、navigate-saved-artifacts；AnnotationClipboard、CaptureOverlayForm、IClipboardService | 补录同会话对象快照与通用剪贴板数据入口；未运行测试
+- 2026-10-05 | 路由自定义录屏分辨率与超级压缩 | navigate-screen-recording | 编码策略留在模块与帮助进程，复用通用偏好；补录成片尺寸与实际媒体验证入口
+- 2026-10-05 | 路由本地最新测试包 | Update-LatestTestPackage.ps1 | 补录测试打包与正式发布的独立入口，保持固定测试目录、版本与全部八个模块
+- 2026-10-05 | 路由图库与贴图双向 Windows 拖放 | navigate-saved-artifacts、navigate-capture-editor、navigate-module-runtime | 补录源码链接共用拖放、无修饰键贴图把手、拖入新建与原生 OLE 验证入口
+- 2026-10-05 | 生成当前拖拽功能本地测试包 | Update-LatestTestPackage.ps1、Directory.Build.props | 统一排除旧生成树，修复独立输出路径的重复程序集属性；仍只更新固定测试目录
+- 2026-10-06 | 移除悬浮贴图拖出按钮 | navigate-capture-editor、navigate-saved-artifacts、navigate-module-runtime | 贴图仅接收外部图片，不叠加交互控件；文件拖出留在图库
+- 2026-10-10 | 录屏元素菜单、临时工具与多个独立截图框 | navigate-screen-recording、navigate-capture-editor、navigate-startup-settings | 补录会话协调、输入归属、采集停放与数量上限；按用户要求未运行验证
+- 2026-10-10 | 当前录屏编辑与多框功能测试打包 | Update-LatestTestPackage.ps1 | 固定目录已更新，8模块、94.45 MiB，编译与包内必要文件检查完成；未运行交互验收
+- 2026-10-10 | 录屏文件日期时间在前、类型在后 | navigate-screen-recording、navigate-saved-artifacts | 同步实际占位与路径生成入口；未运行验证、未重新打包
+- 2026-10-10 | 工作台左侧底部打开保存目录 | navigate-startup-settings、navigate-saved-artifacts | 补录侧栏快捷按钮与宿主事件连接入口；按用户要求未运行验证
+- 2026-10-10 | v1.11.9 正式打包与 GitHub 发布 | publish-cutcut-release | 先生成四种整包、八个模块包和校验清单；同步主程序与变更模块版本，未运行独立验证

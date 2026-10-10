@@ -3,10 +3,25 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$HelperDirectory,
     [string]$OutputRoot = "artifacts\screen-recording-smoke",
-    [ValidateSet(30, 60)]
+    [string]$DisplayDeviceName,
+    [ValidateRange(0, 32768)]
+    [int]$X = 0,
+    [ValidateRange(0, 32768)]
+    [int]$Y = 0,
+    [switch]$PauseAndResume,
+    [ValidateSet(1, 5, 10, 15, 24, 30, 60)]
     [int]$FramesPerSecond = 30,
-    [ValidateSet(2000000, 4000000, 8000000, 12000000, 20000000)]
+    [ValidateSet(32000, 64000, 128000, 256000, 512000, 1000000, 2000000, 4000000, 8000000, 12000000, 20000000)]
     [int]$VideoBitrate = 2000000,
+    [ValidateRange(2, 8192)]
+    [int]$OutputWidth = 320,
+    [ValidateRange(2, 8192)]
+    [int]$OutputHeight = 240,
+    [ValidateSet(96000, 128000, 160000, 192000)]
+    [int]$AudioBitrate = 128000,
+    [switch]$MonoAudio,
+    [ValidateRange(2, 30)]
+    [int]$RecordSeconds = 2,
     [switch]$CaptureSystemAudio,
     [switch]$CaptureMicrophone,
     [switch]$ShowMouseClickIndicator
@@ -30,9 +45,13 @@ $outputRootPath = if ([System.IO.Path]::IsPathRooted($OutputRoot)) {
 New-Item -ItemType Directory -Path $outputRootPath -Force | Out-Null
 $outputPath = Join-Path $outputRootPath ("helper-smoke-{0}.mp4" -f [Guid]::NewGuid().ToString("N"))
 
-$display = [System.Windows.Forms.Screen]::PrimaryScreen
-if ($null -eq $display -or $display.Bounds.Width -lt 320 -or $display.Bounds.Height -lt 240) {
-    throw "A primary display of at least 320 x 240 is required for the recorder smoke test."
+$display = if ([string]::IsNullOrWhiteSpace($DisplayDeviceName)) {
+    [System.Windows.Forms.Screen]::PrimaryScreen
+} else {
+    [System.Windows.Forms.Screen]::AllScreens | Where-Object DeviceName -eq $DisplayDeviceName | Select-Object -First 1
+}
+if ($null -eq $display -or $X + 320 -gt $display.Bounds.Width -or $Y + 240 -gt $display.Bounds.Height) {
+    throw "The selected display must contain the requested 320 x 240 region."
 }
 
 $pipeName = "LightShotCN.ScreenRecording.Smoke.{0}" -f [Guid]::NewGuid().ToString("N")
@@ -51,12 +70,16 @@ $arguments = @(
     "--pipe", $pipeName,
     "--output", $outputPath,
     "--display", $display.DeviceName,
-    "--x", "0",
-    "--y", "0",
+    "--x", $X.ToString(),
+    "--y", $Y.ToString(),
     "--width", "320",
     "--height", "240",
+    "--output-width", $OutputWidth.ToString(),
+    "--output-height", $OutputHeight.ToString(),
     "--fps", $FramesPerSecond.ToString(),
     "--bitrate", $VideoBitrate.ToString(),
+    "--audio-bitrate", $AudioBitrate.ToString(),
+    "--mono-audio", $MonoAudio.IsPresent.ToString(),
     "--system-audio", $CaptureSystemAudio.IsPresent.ToString(),
     "--microphone", $CaptureMicrophone.IsPresent.ToString(),
     "--mouse-click-indicator", $ShowMouseClickIndicator.IsPresent.ToString()
@@ -72,7 +95,9 @@ if ($null -eq $process) {
 $reader = $null
 $writer = $null
 try {
-    $pipe.WaitForConnection()
+    if (-not $pipe.WaitForConnectionAsync().Wait(15000)) {
+        throw "Recorder pipe connection timed out."
+    }
     $reader = [System.IO.StreamReader]::new(
         $pipe,
         [System.Text.Encoding]::UTF8,
@@ -86,19 +111,39 @@ try {
         $true)
     $writer.AutoFlush = $true
 
-    $started = $reader.ReadLine()
+    $startedTask = $reader.ReadLineAsync()
+    if (-not $startedTask.Wait(15000)) {
+        throw "Recorder startup timed out."
+    }
+    $started = $startedTask.Result
     if ($started -ne "started") {
         throw "Recorder did not start: $started"
     }
 
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds $RecordSeconds
+    if ($PauseAndResume) {
+        $writer.WriteLine("pause")
+        Start-Sleep -Milliseconds 500
+        $writer.WriteLine("resume")
+        Start-Sleep -Seconds 1
+    }
     $writer.WriteLine("stop")
-    $result = $reader.ReadLine()
+    $resultTask = $reader.ReadLineAsync()
+    if (-not $resultTask.Wait(30000)) {
+        throw "Recorder completion timed out."
+    }
+    $result = $resultTask.Result
     if ($null -eq $result -or -not $result.StartsWith("completed`t")) {
+        if ($null -ne $result -and $result.StartsWith("failed`t")) {
+            $result = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($result.Substring(7)))
+        }
         throw "Recorder did not complete: $result"
     }
     if (-not $process.WaitForExit(10000)) {
         throw "Recorder did not exit after completing the smoke test."
+    }
+    if ($process.ExitCode -ne 0) {
+        throw "Recorder exited with code $($process.ExitCode)."
     }
 
     $file = Get-Item -LiteralPath $outputPath
@@ -106,6 +151,7 @@ try {
         throw "Recorder produced an unexpectedly small MP4 file: $($file.Length) bytes."
     }
     [pscustomobject]@{
+        Display = $display.DeviceName
         ExitCode = $process.ExitCode
         Bytes = $file.Length
         Path = $file.FullName
@@ -119,7 +165,7 @@ try {
     }
     $pipe.Dispose()
     if ($null -ne $process -and -not $process.HasExited) {
-        $process.Kill($true)
+        $process.Kill()
     }
     if ($null -ne $process) {
         $process.Dispose()

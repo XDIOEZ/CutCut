@@ -20,11 +20,16 @@ description: 定位并维护轻截的屏幕录制模块、录制协调器、帮�
 | 录制协调 | `ScreenshotTool.ScreenRecording/RecordingCoordinator.cs` | 控制会话、录制会话、完成回调 |
 | 控制状态机 | `ScreenshotTool.ScreenRecording/RecordingControlSession.cs` | 暂停/继续/停止、控制 UI |
 | 底层录制会话 | `ScreenshotTool.ScreenRecording/ScreenRecorderSession.cs` | 编码、音频、帧率、资源释放 |
-| 选项与偏好 | `ScreenshotTool.ScreenRecording/ScreenRecordingOptions.cs`、`ScreenRecordingPreferences.cs`、`ScreenRecordingSettingsPage.cs` | 设置宿主、兼容默认值 |
+| 选项与偏好 | `ScreenshotTool.ScreenRecording/RecordingOptions.cs`、`ScreenRecordingPreferences.cs`、`ScreenRecordingSettingsPage.cs` | 设置宿主、兼容默认值 |
+| 输出分辨率与压缩 | `ScreenshotTool.ScreenRecording/RecordingOutputResolution.cs`、`RecordingOptions.WithSuperCompression()` | 原选区裁剪与成片缩放分离；`ScreenRecorderSession.cs` 参数传输、帮助进程 H.264/AAC、`ScreenRecordingStorageEstimator.cs` 按实际音频码率估算 |
 | 目标与存储 | `ScreenshotTool.ScreenRecording/RecordingTarget.cs`、`ScreenRecordingFeature.cs` | `ICaptureArtifactHost`、`ArtifactOutputFolderPolicy.cs`、MP4 命名、保存目录、历史与通知 |
 | 捕获保护 | `ScreenshotTool.ScreenRecording/CaptureProtection.cs` | 控制窗、提示窗、录制区域 |
 | 帮助进程 | `ScreenshotTool.ScreenRecording.Recorder/Program.cs` | 进程协议、部署资产、退出清理 |
+| 多屏录制回归 | `scripts/Test-ScreenRecordingHelper.ps1` | `-DisplayDeviceName` 指定真实屏幕、`-X/-Y` 显示器内偏移、`-PauseAndResume`、MP4 解码校验 |
 | 实时标注宿主 | `ScreenshotTool/Presentation/LiveAnnotationSession.cs`、`ScreenshotTool.Contracts/ModuleContracts.cs` | 截图编辑标注、录制帧合成 |
+| 批注右键与临时工具 | `ScreenshotTool/Presentation/LiveAnnotationContextMenu.cs`、`LiveAnnotationKeyboardHook.cs`、`Core/LiveAnnotationToolShortcutState.cs` | `LiveAnnotationSession.cs`；1～6 和 Oem3 短按切换、长按松键提交；`CaptureSessionCoordinator.cs` 多会话后台输入归属 |
+| 并行录制文件名 | `ScreenshotTool.ScreenRecording/RecordingOutputPathReservation.cs` | `ScreenRecordingFeature.cs`；创建帮助进程前独占自动删除占位文件，保留到录制结束 |
+| 共用工具栏拖动 | `ScreenshotTool/Presentation/CaptureEditorToolbar.cs`、`CaptureToolbarDragController.cs` | 独立工具窗、会话位置保留、拖动时 `LiveAnnotationSession.cs` 指针钩子让出输入 |
 | 宿主提示 UI | `ScreenshotTool/Presentation/*Recording*.cs` | 点击穿透、录制排除、窗口生命周期 |
 | 使用文档 | `docs/screen-recording-addon.md` | 依赖、能力与限制 |
 
@@ -35,7 +40,10 @@ description: 定位并维护轻截的屏幕录制模块、录制协调器、帮�
 - 状态转换显式且幂等：开始、暂停、继续、停止、取消、故障和关闭均可安全重复处理。
 - 编码、帧复制、音频读取不阻塞 UI/绘制回调；限制队列背压，优先避免长期内存增长和音画漂移。
 - 帮助进程协议带超时、取消和异常退出处理；宿主退出或模块卸载时不得遗留进程、句柄和临时文件。
+- Windows 10 1903 及以上显式使用 Windows Graphics Capture 捕获目标显示器；旧系统保留 Desktop Duplication。修改该策略必须在主屏与副屏分别验证停止保存，尤其是多显卡和负桌面坐标布局；仅主屏成功不能作为多屏通过证据。
 - 实时标注通过宿主契约获取；保持坐标一致，并确认控制框/提示层是否应排除在录制画面外。
+- 输出分辨率只作用于最终编码画面；选区和实时批注仍用原桌面坐标。自定义尺寸以等比留边呈现，最长边限制不放大。新低码率/低帧率偏好保存在通用键值字典，不能被宿主旧迁移字段的取值范围覆盖。
+- 当前系统 AAC 最低 96 kbps；估算两种音源混合后的一条音轨，不因单声道再减半。低码率/低帧率/小输出使用系统软件 H.264，避免硬件拒绝规格；Windows 8 及以上的低于 1 Mbps 档位采用 CBR，常规档位仍用 VBR。模块和帮助进程同步更新，不增加编码依赖。
 - MP4 写入使用临时/最终文件边界，失败不发布半成品；保存路径与命名复用产物系统策略。
 
 ## 联动照护
@@ -60,6 +68,8 @@ description: 定位并维护轻截的屏幕录制模块、录制协调器、帮�
 - 覆盖开始→停止、暂停→继续、取消、编码异常、音频设备缺失和宿主关闭状态序列。
 - 打开真实 MP4 验证时长、尺寸、帧率、音频/视频可用，并确认无半成品或遗留帮助进程。
 - 验证实时标注、控制 UI 排除、多屏坐标、模块热卸载和重复录制资源释放。
+- 工具栏拖动通过 `ScreenshotTool.UiPreview --toolbar-drag-interaction` 检查真实鼠标输入；`--toolbar-drag-recording <尚不存在的MP4路径>` 覆盖实际录制、拖动、暂停/继续、画笔模式下拖动与停止保存，生成视频需可解码。
+- 输出尺寸/压缩使用 `ScreenshotTool.LogicTests --recording-compression` 验证设置与 JSON 恢复；`ScreenshotTool.UiPreview --recording-compression-interaction <新输出目录>` 实际保存设置并录制普通、自定义、有声/静音压缩及副屏。解码 MP4 核对尺寸、帧率、音轨/声道与大小，不能只检查文件存在。脚本 `Test-ScreenRecordingHelper.ps1` 支持 `-OutputWidth/-OutputHeight/-AudioBitrate/-MonoAudio/-RecordSeconds` 及 1 FPS/32 kbps 最低规格。
 - 按根目录 `AGENTS.md` 完成格式、测试与 Release 构建；未明确要求时不打包。
 
 ## 迭代日志

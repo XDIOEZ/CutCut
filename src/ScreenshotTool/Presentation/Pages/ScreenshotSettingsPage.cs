@@ -8,6 +8,7 @@ internal sealed class ScreenshotSettingsPage : UserControl
     private readonly HotkeyInputBox[] _hotkeyInputs;
     private readonly CheckBox _dismissNotificationBeforeCapture;
     private readonly CheckBox _hideMainWindowDuringCapture;
+    private readonly NumericUpDown _maximumCaptureSessions;
     private readonly Panel _settingsCard;
     private readonly Panel _note;
     private readonly List<Panel> _settingRows = [];
@@ -15,7 +16,8 @@ internal sealed class ScreenshotSettingsPage : UserControl
     public ScreenshotSettingsPage(
         IReadOnlyList<HotkeyDefinition> hotkeys,
         bool dismissSaveNotificationBeforeCapture = true,
-        bool hideMainWindowDuringCapture = false)
+        bool hideMainWindowDuringCapture = false,
+        int maximumCaptureSessions = CaptureSessionLimitPolicy.DefaultMaximum)
     {
         BackColor = AppTheme.Canvas;
         AutoScroll = true;
@@ -23,7 +25,7 @@ internal sealed class ScreenshotSettingsPage : UserControl
         _settingsCard = new Panel
         {
             Location = Point.Empty,
-            Height = 544,
+            Height = 616,
             BackColor = AppTheme.Surface,
             BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(26, 22, 26, 22)
@@ -78,15 +80,31 @@ internal sealed class ScreenshotSettingsPage : UserControl
             _hideMainWindowDuringCapture,
             393);
 
+        _maximumCaptureSessions = new NumericUpDown
+        {
+            Name = "MaximumCaptureSessionsInput",
+            Minimum = CaptureSessionLimitPolicy.Minimum,
+            Maximum = CaptureSessionLimitPolicy.Maximum,
+            Value = CaptureSessionLimitPolicy.Normalize(maximumCaptureSessions),
+            Size = new Size(86, 32),
+            Font = AppTheme.CreateFont(10F),
+            TextAlign = HorizontalAlignment.Center
+        };
+        AddSettingRow(
+            "同时保留的截图框上限",
+            "再次按截图快捷键新建独立截图框；可设置 1～10 个。",
+            _maximumCaptureSessions,
+            465);
+
         var saveButton = AppTheme.CreateButton("保存截图设置", primary: true);
-        saveButton.Location = new Point(28, 483);
+        saveButton.Location = new Point(28, 555);
         saveButton.Size = new Size(142, 38);
         saveButton.Click += (_, _) => SaveRequested?.Invoke(this, EventArgs.Empty);
         _settingsCard.Controls.AddRange([title, description, saveButton]);
 
         _note = new Panel
         {
-            Location = new Point(0, 564),
+            Location = new Point(0, 636),
             Height = 112,
             BackColor = Color.FromArgb(240, 253, 244),
             Padding = new Padding(20, 16, 20, 14)
@@ -175,6 +193,12 @@ internal sealed class ScreenshotSettingsPage : UserControl
     {
         get => _hideMainWindowDuringCapture.Checked;
         set => _hideMainWindowDuringCapture.Checked = value;
+    }
+
+    public int MaximumCaptureSessions
+    {
+        get => (int)_maximumCaptureSessions.Value;
+        set => _maximumCaptureSessions.Value = CaptureSessionLimitPolicy.Normalize(value);
     }
 
     private void AddSettingRow(

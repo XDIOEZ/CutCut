@@ -2,12 +2,11 @@ namespace ScreenshotTool.ScreenRecording;
 
 internal static class ScreenRecordingStorageEstimator
 {
-    private const int AudioBitrate = 128_000;
-
     public static long EstimateBytes(
         int videoBitrate,
         bool includesAudio,
-        TimeSpan duration)
+        TimeSpan duration,
+        int audioBitrate = ScreenRecordingPreferences.DefaultAudioBitrate)
     {
         if (videoBitrate <= 0)
         {
@@ -17,8 +16,12 @@ internal static class ScreenRecordingStorageEstimator
         {
             throw new ArgumentOutOfRangeException(nameof(duration));
         }
+        if (audioBitrate <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(audioBitrate));
+        }
 
-        var totalBitrate = (long)videoBitrate + (includesAudio ? AudioBitrate : 0L);
+        var totalBitrate = (long)videoBitrate + (includesAudio ? audioBitrate : 0L);
         return checked((long)Math.Ceiling(totalBitrate * duration.TotalSeconds / 8D));
     }
 

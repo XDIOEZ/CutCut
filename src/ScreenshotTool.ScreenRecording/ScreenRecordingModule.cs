@@ -12,7 +12,7 @@ public sealed class ScreenRecordingModule : ScreenshotToolModuleBase, IModuleSet
 
     public override string DisplayName => "录屏与实时批注";
 
-    public override Version Version => new(1, 7, 0);
+    public override Version Version => new(1, 8, 0);
 
     public override void Initialize(IModuleContext context)
     {

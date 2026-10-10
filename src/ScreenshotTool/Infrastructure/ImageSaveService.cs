@@ -7,6 +7,7 @@ namespace ScreenshotTool.Infrastructure;
 internal sealed class ImageSaveService : IImageSaveService
 {
     private const long JpegQuality = 92L;
+    private readonly object _saveLock = new();
 
     // Saves an image using the shared artifact folder, naming, and format policies.
     public string SaveImage(
@@ -29,21 +30,26 @@ internal sealed class ImageSaveService : IImageSaveService
             organizeByDate,
             DateTime.Now);
         Directory.CreateDirectory(outputFolder);
-        var existingImageNames = Directory
-            .EnumerateFiles(outputFolder, "*", SearchOption.TopDirectoryOnly)
-            .Select(Path.GetFileName)
-            .Where(ScreenshotImageFormatPolicy.IsSupportedFileName)
-            .OfType<string>();
-        var fileName = ScreenshotFileNamePolicy.CreateFileName(
-            fileNameMode,
-            DateTime.Now,
-            existingImageNames,
-            imageTexts,
-            imageFormat);
-        var path = Path.Combine(outputFolder, fileName);
+        // Independent screenshot sessions can finish together. Allocate and write
+        // under the same service lock so their naming scans cannot overwrite each other.
+        lock (_saveLock)
+        {
+            var existingImageNames = Directory
+                .EnumerateFiles(outputFolder, "*", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Where(ScreenshotImageFormatPolicy.IsSupportedFileName)
+                .OfType<string>();
+            var fileName = ScreenshotFileNamePolicy.CreateFileName(
+                fileNameMode,
+                DateTime.Now,
+                existingImageNames,
+                imageTexts,
+                imageFormat);
+            var path = Path.Combine(outputFolder, fileName);
 
-        SaveEncodedImage(image, path, imageFormat);
-        return path;
+            SaveEncodedImage(image, path, imageFormat);
+            return path;
+        }
     }
 
     // Runs image encoding and file IO on a worker while the caller retains bitmap ownership.

@@ -4,17 +4,17 @@
 
 ## 当前快照
 
-- 快照日期：2026-09-02。
-- 主程序版本：`1.11.8`。
+- 快照日期：2026-10-10。
+- 主程序版本：`1.11.9`。
 - 长截图模块版本：`1.1.0`。
-- 录屏模块版本：`1.7.0`，最低要求主程序 `1.10.0`。
+- 录屏模块版本：`1.8.0`，最低要求主程序 `1.10.0`。
 - 本地 OCR 模块版本：`1.3.0`，最低要求主程序 `1.11.7`。
 - PP-OCR Tiny 与 PP-OCR Small 模块版本：均为 `1.2.0`，最低要求主程序 `1.11.7`。
 - 二维码扫描模块版本：`1.0.0`，最低要求主程序 `1.11.0`。
-- 贴图悬浮窗模块版本：`1.0.0`，最低要求主程序 `1.11.5`。
+- 贴图悬浮窗模块版本：`1.0.1`，最低要求主程序 `1.11.5`。
 - 截图收藏夹模块版本：`1.0.0`，最低要求主程序 `1.11.8`；从 `v1.11.8` 起随完整包提供，也保留独立恢复包。
 - GitHub 仓库：`XDIOEZ/CutCut`，默认分支 `main`。
-- 当前 Release：`v1.11.8`。
+- 发布前核对的线上 Release：`v1.11.8`（2026-10-10）；本次正式包与发布目标：`v1.11.9`。
 - 发布首页：<https://xdioez.github.io/CutCut/>。
 - 模块下载页：<https://xdioez.github.io/CutCut/modules.html>。
 
@@ -22,6 +22,7 @@
 
 ### 启动与设置工作台
 
+- 工作台左侧底部固定纵向排列“立即截图”和“打开保存目录”，下方保留后台运行提示；打开目录复用 `MainForm.OpenOutputFolder`，启用日期分类时打开分类父目录。界面入口位于 `Presentation/Shell/AppShellControl.cs`，按钮通过事件交由主窗体处理。
 - 设置工作台新增宿主级“通用设置”分页，使用纵向单列布局，统一承载“开机自动启动”和“手动启动后最小化”。“截图设置”只保留全局截图快捷键、截图前关闭保存提示和截图时隐藏主界面，不再重复展示启动选项。全局截图快捷键固定提供三个纵向槽位，用户可绑定零至三组组合键；每个槽位右侧提供“删除”按钮，任一已绑定组合键都触发同一截图动作。旧版单快捷键配置自动迁移为第一组。
 - 首次运行，或配置中的 `lastLaunchedVersion` 与当前主程序版本不一致时，主动打开设置工作台并选中“截图设置”。这是帮助新用户完成必要配置、让升级用户检查新选项的固定行为。
 - 首次/更新检查优先级高于“手动启动后最小化”和 `--background`；同一版本完成标记后，后续启动才恢复用户选择的安静启动行为。
@@ -31,10 +32,15 @@
 
 ### 查看截图与再次编辑
 
+- 多次按截图快捷键创建多个独立截图框，每个框单独持有底图、工具栏、标注与模块会话，可分别复制、保存、录屏或关闭。“截图设置”的 `MaximumCaptureSessions` 默认 3，范围 1～10；旧配置缺字段或非法值回退 3，降低上限不关闭已有框。`Presentation/CaptureSessionCoordinator.cs` 统一准备采集、窗口集合与活动输入归属，准备阶段的重复请求暂忽略。新截图及 `Ctrl+R` 刷新通过 `CaptureWindowParkingLease.cs` 临时停放其他截图框及其录制批注窗口，采集结束原位恢复；退出释放全部会话。图片命名与写入在共用 `ImageSaveService` 中串行，录屏用 `RecordingOutputPathReservation.cs` 的自动删除占位文件保留 MP4 文件名，避免并发覆盖。
+- 录屏实时批注可在绘图、选择或鼠标穿透状态下右键命中的已完成元素，菜单固定为“编辑”“删除”。编辑进入选择模式并仅选中目标；在选择模式下再次点编辑恢复鼠标穿透；删除仅移除右键目标。菜单与选框不进入录制画面。数字键 1～6（含数字小键盘）对应矩形、椭圆、箭头、画笔、文字、马赛克；1 左侧的物理 `~` 键（`Keys.Oem3`，无需 Shift）切换选择。短按切换工具，长按至少 350 ms 或按住期间开始鼠标编辑后，松键提交当前绘图/文字并恢复穿透，已完成元素保留；“自动保存”指提交标注，不停止录屏。仅在鼠标位于本录制区域或工具栏且不输入文字/组合键时处理快捷键；重复按下和冲突键不重复切换，多个框的后台输入归属当前活动会话。
+
+- 截图和录屏共用的编辑工具栏左侧提供拖动把手，也可拖动工具栏空白、分隔线和录屏计时文字；按钮仍只执行原动作。本次会话中手动移动的位置优先于自动选区跟随，暂停/继续、工具切换、吸附和重新布局不重置位置，新会话恢复默认布局。拖动受当前显示器工作区限制，支持负桌面坐标；截图工具栏的新位置同步进入覆盖层交互区域，旧位置恢复穿透；录屏拖动期间低层指针钩子让出输入，不产生批注。拖动状态与定位由 `Presentation/CaptureToolbarDragController.cs` 统一管理，`CaptureEditorToolbar.cs` 同时支持截图内嵌控件和录屏独立工具窗。
 - “保存路径”页提供截图与录屏共用的保存目录、截图图片格式与命名规则，以及“按日期自动创建子文件夹”开关。图片格式支持无损 PNG（默认）和 92 质量 JPEG；JPEG 使用 `.jpg` 扩展名并把透明区域合成为白色。该格式同时用于普通截图、贴图保存和截图收藏夹，录屏仍按录制时间命名 MP4。日期开关默认关闭以兼容旧配置；启用后显示独立的“日期分类父文件夹”路径框和浏览按钮，由用户手动绑定父目录；截图真正保存或录屏开始写入时按本地日期解析 `yyyy-MM-dd` 子目录，同一天复用已有目录，跨天自动创建新目录。配置中的旧字段名 `organizeScreenshotsByDate` 与 `screenshotDateParentFolder` 为兼容已有 JSON 保持不变，但语义已覆盖截图和录屏。相关入口：`Core/ScreenshotImageFormat.cs`、`Core/ArtifactOutputFolderPolicy.cs`、`Infrastructure/ImageSaveService.cs`、`Presentation/CaptureOverlayForm.cs`、`Presentation/Pages/SavePathSettingsPage.cs`、`ScreenshotTool.ScreenRecording/ScreenRecordingFeature.cs`、`Presentation/MainForm.cs`。
 - 截图按 `Ctrl+S` 保存时，覆盖层先在 UI 线程完成一次最终导出渲染，再把所选格式的图片编码、文件写入和系统剪贴板占用重试交给后台执行；保存期间禁止重复提交，并由截图会话持有最终位图直到文件与剪贴板操作结束。文件保存成功但剪贴板失败时仍按既有规则上报已保存路径并提示复制失败。
 - “查看截图”页递归展示保存目录及普通子文件夹中的受支持图片与录屏 MP4，并跳过重解析点；双击时交给系统默认图片查看器或视频播放器打开。图片右键依次提供“编辑”“复制”和“删除”，其中“复制”把原始截图像素写入系统剪贴板且不锁定源文件；视频没有编辑能力，也不提供图片像素复制，因此右键只显示“删除”。
 - “查看截图”的目录递归扫描、元数据读取和最多 60 个缩略图生成在可取消的后台刷新中完成；快速搜索、排序或重复刷新时只允许最新请求替换界面，过期请求释放自己的缩略图，避免保存完成事件同步重建图库而卡住截图窗口。
+- “查看截图”支持双向 Windows OLE 拖放：图片和 MP4 可直接左键拖到外部软件，始终提供复制效果，保留原文件；外部 PNG/JPEG/BMP/GIF、MP4 或位图拖到页面（含空列表）时交给系统默认查看器打开，不自动复制进保存目录。贴图只展示原图，不提供“拖出”按钮或把手；内部拖动仍移动，边角仍缩放，OCR 选字仍使用原操作。外部图片拖到现有贴图时新建贴图，原贴图不替换。贴图不再作为文件拖出源；图库收到外部位图时使用临时 PNG 交给系统查看器，临时 PNG 留在系统临时目录的 `CutCut/DragDrop`，以兼容接收软件延迟读取，后续生成时最多检查 64 个旧文件并清理超过七天的文件。公共实现位于 `src/Shared/WindowsArtifactDragDrop.cs`，通过源码链接分别编译进宿主和贴图模块，不扩展公共模块契约；贴图交互由 `PinnedImageDragController.cs` 组合。
 - “查看截图”页顶部提供文件名实时搜索框和排序菜单；排序固定支持保存时间最新优先、保存时间最早优先、名称 A→Z、名称 Z→A 四种模式，按钮文字应显示当前模式。搜索忽略大小写并先筛选再排序，`Esc` 可清空当前搜索词。
 - “编辑”把选中的已保存图片载入现有截图覆盖层，显示整张原图并复用矩形、椭圆、箭头、画笔、文字、马赛克、撤销、粗细和颜色等编辑能力。保存时沿用当前图片格式和命名规则生成新文件，不覆盖或删除原文件。
 - 进入已有图片或贴图的重新编辑模式时，编辑覆盖层仍使用虚拟桌面坐标，但初始图片只在进入编辑瞬间鼠标所在的显示器范围内缩放并居中，不能以整个虚拟桌面居中而跨在多显示器接缝上。
@@ -70,6 +76,15 @@
 - 截图收藏夹使用稳定模块 ID `screenshot-tool.favorites`、功能 ID `screenshot-tool.favorites.feature` 和命令 ID `screenshot-tool.favorites.save`，位于 `Modules\Favorites`。用户在模块配置窗口选择独立收藏文件夹；截图完成框选与批注后点击“收藏”，模块通过宿主最终导出取得成图与可见文字元数据，并由 `IModuleImageStorageHost` 按宿主当前 PNG/JPEG 格式异步保存、报告保存通知后结束截图会话。收藏目录不跟随普通截图/录屏保存目录，也不套用按日期分组，但完整沿用当前图片格式及日期、序号或图片内文字命名方式；默认目录为用户图片文件夹下的 `轻截收藏夹`。
 - OCR 翻译由宿主的 `Abstractions/ITextTranslationService.cs`、`Infrastructure/MyMemoryTextTranslationService.cs` 和 `Presentation/CaptureTextResultForm.cs` 实现；模块只通过 `ITranslatableCaptureTextResultHost` 请求可翻译结果，不引用宿主实现，也不携带翻译依赖。
 - 相关入口：`Infrastructure/Modules/ModuleHost.cs`、`Infrastructure/Modules/ModuleLoadContext.cs`、`Infrastructure/Modules/ModuleImageHostProxy.cs`、`Presentation/Pages/ModuleManagementPage.cs`、`Presentation/ModuleConfigurationForm.cs`、`Presentation/CaptureTextResultForm.cs`、`ScreenshotTool.Favorites`、`ScreenshotTool.PinnedImage`、`ScreenshotTool.Ocr`、`ScreenshotTool.PaddleOcr*`、`ScreenshotTool.Contracts/ModuleContracts.cs`。
+
+### 录屏多显示器捕获
+
+- 录屏按本地开始时间命名为 `yyyyMMdd_HHmmss_录屏.mp4`，例如 `20261010_113340_录屏.mp4`；重名时在末尾追加 `_2`、`_3` 等编号。实际输出占位与 `ScreenRecordingFeature.CreateOutputPath` 使用相同顺序，已有旧命名文件保留原名。
+
+- 录屏输出分辨率与录制选区分离：`RecordingOutputResolution.cs` 提供原尺寸、自定义宽高（等比留黑边）和最长边等比缩小；最后取偶数尺寸，原有选区、显示器相对坐标和实时标注坐标不缩放。“超级压缩”预设位于 `RecordingOptions.WithSuperCompression()`，默认最长边 320、5 FPS、视频 64 kbps、AAC 96 kbps 单声道，保留用户选择的声音来源；可手动降至 1 FPS/32 kbps，或关闭两种声音进一步减小。系统 AAC 最低为 96 kbps，单声道不额外减半目标码率。视频/音频/分辨率通过模块通用键值偏好保存，宿主旧字段仅用于迁移，不能让旧的 30/60 FPS 与 2 Mbps 下限覆盖新偏好。已有用户未选择压缩时保持原行为。
+- `ScreenRecorderSession.cs` 把解析后的输出宽高、音频码率与单声道选项传给帮助进程；`Recorder/Program.cs` 保留源显示器裁剪，再等比缩放最终画面。低于 1 Mbps、低于 15 FPS 或任一输出边小于 128 像素时用系统软件 H.264 编码器，常规规格保留硬件编码；1 FPS/64×48 的硬件编码曾实际报错，软件路径已能正常保存。Windows 8 及以上的低于 1 Mbps 档位用 CBR 控制码率，常规档位保持原 VBR。估算读取所选音频码率，两种音源混成一轨；码率是目标平均值，不能承诺文件大小上限。模块与帮助进程必须一起更新。
+- `ScreenshotTool.ScreenRecording.Recorder/Program.cs` 在 Windows 10 1903（18362）及以上显式使用 Windows Graphics Capture，旧系统保留 Desktop Duplication；避免默认 Desktop Duplication 在部分副屏/多显卡布局下导致原生录制进程崩溃、无法完成 MP4 保存。显示器仍按设备名选择，裁剪仍使用显示器内部相对像素坐标。
+- `scripts/Test-ScreenRecordingHelper.ps1` 支持通过 `-DisplayDeviceName`、`-X/-Y` 指定真实显示器与裁剪偏移，使用 `-PauseAndResume` 检查暂停后保存。录制后端变更需同时验证主屏与副屏，以及真实 MP4 解码与画面位置；不能只依赖主屏冒烟。
 
 ### 软件内更新
 
@@ -127,12 +142,14 @@
 - 录屏独立模块约 `0.45 MiB`。
 - `v1.11.5` 的轻量版和重量版预装贴图悬浮窗、长截图、本地 OCR、二维码扫描与录屏；轻量完全版和完全版分别在轻量版、重量版基础上再预装 PP-OCR Tiny/Small，因此包含全部七个模块。独立模块包保持程序旁 `Modules/<模块目录>/...` 的目录结构，解压到程序目录即可安装。
 - `v1.11.8` 起四种完整包都新增截图收藏夹：轻量版和重量版包含六个常规模块，轻量完全版和完全版包含全部八个模块。
+- 2026-10-10 已生成 `v1.11.9` 正式资产：轻量版 ZIP 1.32 MiB、内置运行库版 ZIP 59.12 MiB、轻量完全版 ZIP 54.54 MiB（目录 94.45 MiB）、完全版 ZIP 112.34 MiB（目录 157.18 MiB），并提供八个独立模块 ZIP 与校验清单。正式打包脚本成功，未执行独立测试与界面交互验收。
 
 发布脚本 `scripts/Publish-Release.ps1` 当前会生成四种完整包、八个独立模块包、免解压运行目录和 `SHA256SUMS.txt`，并检查轻量版小于 `5 MiB`、重量版小于 `90 MiB`、轻量完全版未压缩目录小于 `110 MiB` 且 ZIP 小于 `80 MiB`、完全版未压缩目录小于 `180 MiB` 且 ZIP 小于 `130 MiB`。项目级 Skill `.agents/skills/publish-cutcut-release` 使用快速直发流程：用户明确要求打包或发布后，更新版本并直接提交到 `main`，只生成一次正式资产并上传，不再单独运行格式、测试、UI、候选包、`ValidateOnly`、PR/CI 或发布后复核步骤。收藏夹、贴图、本地 OCR 与二维码扫描的独立恢复资产名分别固定为 `favorites-addon-win-x64.zip`、`pinned-image-addon-win-x64.zip`、`ocr-addon-win-x64.zip` 和 `qr-code-addon-win-x64.zip`；PP-OCR 通过 `scripts/Get-PaddleOcrModels.ps1` 下载固定版本并核对 SHA-256，再由 `scripts/Publish-PaddleOcrModule.ps1` 分别组装 Tiny/Small。
 
 ## 本地最新测试包
 
 - 固定测试打包根目录为 `测试打包`，其中只保留一个可直接运行的 `轻截-最新测试版` 文件夹；不在该目录积累历史版本、ZIP、日志或更新脚本。
+- 根目录 `Directory.Build.props` 为全部项目排除旧的 `artifacts`、`bin`、`obj` 生成树；切换到独立 `--artifacts-path` 后也不得把既有生成的 C# 文件重新当作源代码编译，避免重复程序集属性。
 - 在仓库根目录运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Update-LatestTestPackage.ps1`，会从当前工作树使用 `LightweightWinX64` 配置重新构建，并在验证成功后替换上述唯一目录。构建期间使用 `artifacts` 下的独立中间目录，不要求关闭正在运行的轻截。
 - 该测试包依赖系统已安装 .NET 8 Desktop Runtime；当前脚本会携带 `Favorites`、`PinnedImage`、`LongCapture`、`Ocr`、`PaddleOcrTiny`、`PaddleOcrSmall`、`QrCode`、`ScreenRecording` 八个模块及两套 PP-OCR 模型，并检查模块集合、关键文件、禁用标记、目录唯一性和 `110 MiB` 未压缩体积上限。2026-09-01 已用当前工作树覆盖固定测试包，具体生成信息以包内 `测试包信息.txt` 为准。
 - 测试包内的 `测试包信息.txt` 记录版本、生成时间、源码提交和是否包含未提交改动。它只用于本地验收，不创建正式版本、不更新 `Relase`、不上传 GitHub Release。

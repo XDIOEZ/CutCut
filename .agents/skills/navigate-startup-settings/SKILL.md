@@ -18,7 +18,9 @@ description: 定位并维护轻截的启动、偏好设置、全局快捷键、�
 | --- | --- | --- |
 | 设置模型与默认值 | `ScreenshotTool/Core/AppSettings.cs`、`UserPreferences.cs`、`UserSettingsDocument.cs` | `Infrastructure/JsonSettingsStore.cs`、设置页、兼容迁移测试 |
 | 截图快捷键 | `ScreenshotTool/Core/HotkeyDefinition.cs`、`HotkeyBindings.cs` | `Presentation/HotkeyInputBox.cs`、`Infrastructure/GlobalHotkeyService.cs`、`Presentation/MainForm.cs` |
+| 独立截图框数量上限 | `ScreenshotTool/Core/CaptureSessionLimitPolicy.cs`、`UserPreferences.MaximumCaptureSessions` | `ScreenshotSettingsPage.cs`、`JsonSettingsStore.cs`、`Presentation/CaptureSessionCoordinator.cs`；默认 3、范围 1～10，降低上限不关闭已有会话 |
 | 设置页布局 | `ScreenshotTool/Presentation/Pages/*SettingsPage.cs` | `Application/CompositionRoot.cs`、`MainForm.cs`、UI 预览测试 |
+| 工作台侧栏与底部快捷按钮 | `ScreenshotTool/Presentation/Shell/AppShellControl.cs` | `Presentation/MainForm.cs`；按钮只发布事件，“打开保存目录”复用宿主目录处理 |
 | 启动到主界面/托盘 | `ScreenshotTool/Core/StartupWorkspacePolicy.cs`、`Application/StartupWorkspaceService.cs` | `Program.cs`、`MainForm.cs`、托盘与截图入口 |
 | 开机启动 | `Application/StartupRegistrationService.cs`、`StartupRegistrationPreferenceService.cs` | `Infrastructure/WindowsRunStartupEntryStore.cs`、通用设置页 |
 | 软件内更新 | `Abstractions/IApplicationUpdateService.cs`、`Infrastructure/GitHubReleaseApplicationUpdateService.cs`、`Presentation/Pages/ApplicationUpdatePage.cs` | `CompositionRoot.cs`、发布资产契约、更新页 UI 预览 |

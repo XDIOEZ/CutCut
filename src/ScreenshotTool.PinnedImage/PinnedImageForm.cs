@@ -20,13 +20,13 @@ internal interface IPinnedImageWindowFactory
         IModuleImageHost imageHost);
 }
 
-internal sealed class PinnedImageWindowFactory : IPinnedImageWindowFactory
+internal sealed class PinnedImageWindowFactory(Action<Bitmap, Rectangle> showImage) : IPinnedImageWindowFactory
 {
     public IPinnedImageWindow Create(
         Bitmap image,
         Rectangle suggestedBounds,
         IModuleImageHost imageHost) =>
-        new PinnedImageForm(image, suggestedBounds, imageHost);
+        new PinnedImageForm(image, suggestedBounds, imageHost, showImage);
 }
 
 internal sealed class PinnedImageForm : Form, IPinnedImageWindow
@@ -35,6 +35,7 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
     private readonly IModuleImageHost _imageHost;
     private readonly ContextMenuStrip _menu;
     private readonly PinnedImageTextController _textController;
+    private readonly PinnedImageDragController _dragController;
     private PinnedImageResizeEdges _resizeEdges;
     private Point _pointerOrigin;
     private Rectangle _boundsOrigin;
@@ -45,7 +46,8 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
     public PinnedImageForm(
         Bitmap image,
         Rectangle suggestedBounds,
-        IModuleImageHost imageHost)
+        IModuleImageHost imageHost,
+        Action<Bitmap, Rectangle>? showImage = null)
     {
         ArgumentNullException.ThrowIfNull(image);
         ArgumentNullException.ThrowIfNull(imageHost);
@@ -89,6 +91,7 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
         edit.Name = "EditPinnedImageMenuItem";
         ContextMenuStrip = _menu;
         _textController = new PinnedImageTextController(this, _image, _imageHost, _menu);
+        _dragController = new PinnedImageDragController(this, showImage);
     }
 
     public event EventHandler? WindowClosed;
@@ -210,6 +213,7 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
     // Cancels text work before notifying the module that its pin has closed.
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _dragController.Dispose();
         _textController.Dispose();
         base.OnFormClosed(e);
         WindowClosed?.Invoke(this, EventArgs.Empty);
@@ -221,6 +225,7 @@ internal sealed class PinnedImageForm : Form, IPinnedImageWindow
         if (disposing && !_resourcesDisposed)
         {
             _resourcesDisposed = true;
+            _dragController.Dispose();
             _textController.Dispose();
             _menu.Dispose();
             _image.Dispose();

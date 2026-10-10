@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ScreenshotTool\ScreenshotTool.csproj" />
+    <ProjectReference Include="..\..\src\ScreenshotTool.PinnedImage\ScreenshotTool.PinnedImage.csproj" />
     <ProjectReference Include="..\..\src\ScreenshotTool.ScreenRecording\ScreenshotTool.ScreenRecording.csproj" />
   </ItemGroup>
 </Project>

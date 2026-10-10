@@ -18,6 +18,7 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
     private readonly ISettingsStore _settingsStore;
     private readonly IGlobalHotkeyService _hotkeyService;
     private readonly IScreenCaptureService _captureService;
+    private readonly CaptureSessionCoordinator _captureSessions;
     private readonly IImageSaveService _imageSaveService;
     private readonly IClipboardService _clipboardService;
     private readonly ITextTranslationService? _textTranslationService;
@@ -44,7 +45,6 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
     private readonly ApplicationUpdateApplyResult? _pendingUpdateResult;
     private string? _pendingStartupRegistrationError;
     private AppSettings _settings;
-    private bool _isCapturing;
     private bool _isExiting;
     private bool _initialMinimizeHandled;
     private string? _pendingHotkeyError;
@@ -87,6 +87,11 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
         _pendingUpdateResult = pendingUpdateResult;
         _pendingStartupRegistrationError = startupRegistrationError;
         _settings = initialSettings ?? settingsStore.Load();
+        _captureSessions = new CaptureSessionCoordinator(
+            this,
+            () => _settings.Preferences.MaximumCaptureSessions,
+            () => _settings.Preferences.HideMainWindowDuringCapture,
+            () => _isExiting);
         _startupWorkspaceReason = startupWorkspaceReason;
 
         Text = "轻截 - 截图工作台";
@@ -118,7 +123,8 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
         _screenshotSettingsPage = new ScreenshotSettingsPage(
             _settings.GetHotkeys(),
             _settings.Preferences.DismissSaveNotificationBeforeCapture,
-            _settings.Preferences.HideMainWindowDuringCapture);
+            _settings.Preferences.HideMainWindowDuringCapture,
+            _settings.Preferences.MaximumCaptureSessions);
         _savePathPage = new SavePathSettingsPage(
             _settings.OutputFolder,
             _settings.Preferences.ScreenshotFileNameMode,
@@ -227,6 +233,7 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
     private void WirePageEvents()
     {
         _shell.CaptureRequested += (_, _) => BeginCapture();
+        _shell.OpenOutputFolderRequested += OpenOutputFolder;
         _shell.PageChanged += (_, pageId) =>
         {
             if (pageId == GalleryPageId)
@@ -246,10 +253,7 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
         _screenshotSettingsPage.HotkeyInputEntered += (_, _) => _hotkeyService.Unregister();
         _screenshotSettingsPage.HotkeyInputLeft += (_, _) =>
         {
-            if (!_isCapturing)
-            {
-                _hotkeyService.TryRegister(_settings.GetHotkeys(), out _);
-            }
+            _hotkeyService.TryRegister(_settings.GetHotkeys(), out _);
         };
         _savePathPage.SaveRequested += SaveSettings;
         _savePathPage.BrowseRequested += BrowseFolder;
@@ -365,6 +369,8 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
                         _screenshotSettingsPage.DismissSaveNotificationBeforeCapture,
                     HideMainWindowDuringCapture =
                         _screenshotSettingsPage.HideMainWindowDuringCapture,
+                    MaximumCaptureSessions =
+                        _screenshotSettingsPage.MaximumCaptureSessions,
                     DrawingToolCoefficients = _drawingCoefficientsPage.Coefficients
                 }
             };
@@ -678,37 +684,28 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
         Bitmap? suppliedEditImage = null,
         string? operationName = null)
     {
-        if (_isCapturing || IsDisposed)
+        if (IsDisposed || _isExiting)
         {
             suppliedEditImage?.Dispose();
             return;
         }
 
-        ApplySavedArtifactNotificationCaptureStartPolicy();
-        _isCapturing = true;
-        var mainWindowWasVisible = Visible && WindowState != FormWindowState.Minimized;
-        var hideMainWindow = MainWindowCaptureVisibilityPolicy.ShouldHide(
-            _settings.Preferences.HideMainWindowDuringCapture,
-            Visible,
-            WindowState);
-        var originalOpacity = Opacity;
-        var originalWindowState = WindowState;
-        var captureProtectionApplied = false;
         Bitmap? initialEditImage = suppliedEditImage;
-        if (hideMainWindow)
-        {
-            captureProtectionApplied = WindowCaptureProtection.TryExclude(this);
-            DwmFlush();
-            Opacity = 0D;
-            DwmFlush();
-            captureProtectionApplied =
-                WindowCaptureProtection.TryExclude(this) || captureProtectionApplied;
-            Hide();
-            DwmFlush();
-        }
-
         try
         {
+            using var preparation = _captureSessions.TryBeginPreparation();
+            if (preparation is null)
+            {
+                if (_captureSessions.Count >= _captureSessions.MaximumSessions)
+                {
+                    _shell.ShowStatus(
+                        $"已达到 {_captureSessions.MaximumSessions} 个截图框上限；可关闭一个截图框，或在截图设置中调整。",
+                        AppTheme.MutedText);
+                }
+                return;
+            }
+
+            ApplySavedArtifactNotificationCaptureStartPolicy();
             if (savedScreenshotPath is not null && initialEditImage is null)
             {
                 initialEditImage = _savedScreenshotService.LoadForEditing(
@@ -716,10 +713,19 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
                     savedScreenshotPath);
             }
 
-            await Task.Yield();
-            DwmFlush();
-            await Task.Delay(90);
-            using var snapshot = _captureService.CaptureDesktop();
+            DesktopSnapshot captured;
+            using (var parked = _captureSessions.ParkForSnapshot())
+            {
+                await Task.Yield();
+                DwmFlush();
+                await Task.Delay(90);
+                if (IsDisposed || _isExiting)
+                {
+                    return;
+                }
+                captured = _captureService.CaptureDesktop();
+            }
+            using var snapshot = captured;
             var toolWidthController = new ToolWidthController(
                 _settings.GetToolWidthRange(),
                 _settings.Preferences.GetLastToolWidth());
@@ -759,8 +765,14 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
                 _settings.Preferences.ModuleStringPreferences,
                 _settings.Preferences.ScreenshotImageFormat);
             overlay.ArtifactSaved += (_, path) => HandleArtifactSaved(path);
-            await CaptureOverlayPresenter.ShowAsync(overlay);
-            SaveLastToolWidth(toolWidthController.Current);
+            _captureSessions.Register(overlay);
+            var completion = CaptureOverlayPresenter.ShowAsync(overlay);
+            preparation.Dispose();
+            await completion;
+            if (!IsDisposed && !_isExiting)
+            {
+                SaveLastToolWidth(toolWidthController.Current);
+            }
         }
         catch (Exception exception)
         {
@@ -772,18 +784,6 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
         finally
         {
             initialEditImage?.Dispose();
-            _isCapturing = false;
-            Opacity = originalOpacity;
-            if (hideMainWindow && mainWindowWasVisible && !_isExiting)
-            {
-                Show();
-                WindowState = originalWindowState;
-                Activate();
-            }
-            if (captureProtectionApplied)
-            {
-                WindowCaptureProtection.TryAllow(this);
-            }
         }
     }
 
@@ -996,6 +996,7 @@ internal sealed class MainForm : Form, IModuleImageStorageHost
     {
         if (disposing)
         {
+            _captureSessions.Dispose();
             _moduleRefreshTimer.Stop();
             _moduleRefreshTimer.Dispose();
             _savedArtifactNotification?.Close();

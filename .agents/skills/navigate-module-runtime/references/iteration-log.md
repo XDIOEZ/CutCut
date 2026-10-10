@@ -6,3 +6,5 @@
 - 2026-08-05 | 核对插件启停状态写入用户偏好 | `ModuleHost.cs`、`UserPreferenceModuleActivationStore.cs`、模块逻辑测试 | 激活偏好入口准确，无导航缺口
 - 2026-09-01 | 新增截图收藏夹模块与按模块包配置窗口 | `ScreenshotTool.Favorites`、`ModuleManagementPage.cs`、`ModuleConfigurationForm.cs`、`ModuleContracts.cs` | 补录自定义目录图片宿主、配置页按需租约与独立窗口释放入口
 - 2026-09-14 | OCR 可选能力与请求租约 | ImageTextRecognition.cs、ModuleHost.cs、ModuleImageHostProxy.cs | 补录跨模块位置识别与存活期边界
+- 2026-10-05 | 贴图拖入复用模块窗口登记 | PinnedImageModule、PinnedImageWindowFactory、PinnedImageDragController | 工厂回调复用登记与关闭，无新增公共契约或程序集依赖
+- 2026-10-06 | 精简贴图拖放控制器资源 | PinnedImageDragController | 不再创建把手/提示或导出任务，关闭仅解绑拖入事件

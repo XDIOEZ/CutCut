@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Alternate output paths must not make prior generated C# files become source inputs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;bin\**;obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

@@ -26,6 +26,7 @@ description: 定位并维护轻截的模块契约、发现加载、热更新、�
 | 会话租约 | `ScreenshotTool/Presentation/CaptureFeatureSession.cs` | `CaptureOverlayForm.cs`、功能 Dispose、延迟卸载 |
 | 模块管理与配置 UI | `ScreenshotTool/Presentation/Pages/ModuleManagementPage.cs`、`Presentation/ModuleConfigurationForm.cs` | 按模块包创建设置页租约、启停、错误展示、窗口释放 |
 | 截图收藏夹模块 | `ScreenshotTool.Favorites/FavoritesModule.cs`、`FavoritesSettingsPage.cs` | 公共字符串偏好、最终位图、自定义目录异步保存、独立恢复包 |
+| 贴图窗口与拖放生命周期 | `ScreenshotTool.PinnedImage/PinnedImageModule.cs`、`PinnedImageForm.cs`、`PinnedImageDragController.cs` | 工厂回调把拖入图片交回模块登记；关闭取消待续拖入，不创建把手或提示控件，不扩展公共契约 |
 | 组合入口 | `ScreenshotTool/Application/CompositionRoot.cs` | 启动/关闭顺序、服务释放 |
 
 ## 修改规则

@@ -174,6 +174,8 @@ internal sealed class JsonSettingsStore : ISettingsStore
             : settings.LastLaunchedVersion.Trim();
 
         settings.Preferences ??= new UserPreferences();
+        settings.Preferences.MaximumCaptureSessions = CaptureSessionLimitPolicy.Normalize(
+            settings.Preferences.MaximumCaptureSessions);
         settings.Preferences.ScreenshotDateParentFolder =
             Environment.ExpandEnvironmentVariables(
                 settings.Preferences.ScreenshotDateParentFolder?.Trim() ?? string.Empty);

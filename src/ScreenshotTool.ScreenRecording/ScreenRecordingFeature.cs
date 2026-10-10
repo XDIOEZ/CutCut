@@ -141,7 +141,8 @@ internal sealed class ScreenRecordingFeature :
         var recordingStartedAt = DateTime.Now;
         var outputFolder = artifactHost.OutputFolder;
         Directory.CreateDirectory(outputFolder);
-        var outputPath = CreateOutputPath(outputFolder, recordingStartedAt);
+        using var outputReservation = RecordingOutputPathReservation.Create(outputFolder, recordingStartedAt);
+        var outputPath = outputReservation.Path;
         var recordingOptions = RecordingOptions.FromHost(Host);
         RecordingControlResult? result = null;
         Exception? failure = null;
@@ -229,7 +230,7 @@ internal sealed class ScreenRecordingFeature :
 
     internal static string CreateOutputPath(string outputFolder, DateTime timestamp)
     {
-        var baseName = $"录屏_{timestamp:yyyyMMdd_HHmmss}";
+        var baseName = $"{timestamp:yyyyMMdd_HHmmss}_录屏";
         var path = Path.Combine(outputFolder, baseName + ".mp4");
         for (var suffix = 2; File.Exists(path); suffix++)
         {

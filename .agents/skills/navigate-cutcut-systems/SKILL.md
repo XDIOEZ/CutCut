@@ -19,11 +19,13 @@ description: 路由轻截的系统修改任务，并持续维护各系统导航 
 | --- | --- | --- |
 | 启动、设置、快捷键、软件更新页 | `$navigate-startup-settings` | 模块设置页、主窗体、持久化、发布资产 |
 | 截图、选区、标注、贴图重新编辑、导出 | `$navigate-capture-editor` | 保存、OCR、长截图、录屏、模块运行时 |
+| 多个独立截图框与数量限制 | `$navigate-capture-editor`、`$navigate-startup-settings` | 活动输入归属、采集停放、并行保存命名、各框独立录屏 |
 | 保存、命名、路径、剪贴板、历史、通知 | `$navigate-saved-artifacts` | 截图导出、录屏产物、模块图片宿主 |
 | 模块契约、发现、启停、替换、删除、热卸载 | `$navigate-module-runtime` | 所有模块、设置导航、发布包 |
 | OCR、PaddleOCR、二维码、结果窗、翻译 | `$navigate-ocr-results` | 截图源、模块运行时、模型资源 |
 | 长截图、采样、匹配、拼接、预览 | `$navigate-long-capture` | 截图编辑、模块生命周期、导出 |
 | 屏幕录制、音视频、帮助进程、实时标注 | `$navigate-screen-recording` | 截图坐标、保存历史、模块生命周期 |
+| 本地测试打包、更新最新测试版 | `scripts/Update-LatestTestPackage.ps1`、`Directory.Build.props` | 固定 `测试打包/轻截-最新测试版`；轻量配置携带八个模块，不递增版本、不提交或上传 Release；独立输出路径仍排除旧生成代码 |
 | 打包或发布正式版本 | `$publish-cutcut-release`，仅在用户当前需求明确要求时 | 版本、模块资产、网站、GitHub Release |
 
 贴图悬浮窗属于复合系统：功能/重新编辑使用 `$navigate-capture-editor`，模块生命周期使用 `$navigate-module-runtime`，保存/复制使用 `$navigate-saved-artifacts`。无法由单个系统覆盖时不要强行单选。

@@ -17,16 +17,18 @@ description: 定位并维护轻截的区域截图、选区交互、标注编辑�
 | 修改目标 | 首要入口 | 常见联动 |
 | --- | --- | --- |
 | 截图浮层与输入 | `ScreenshotTool/Presentation/CaptureOverlayForm.cs`、`CaptureOverlayPresenter.cs`、`CaptureOverlayInteractionLayout.cs`、`CaptureBackgroundRefreshPolicy.cs` | `CaptureBackgroundRefreshHotkeyRegistration.cs`、`LiveAnnotationPointerHook.cs`、`CaptureFeatureSession.cs`、选区/工具栏辅助类、模块功能 |
-| 编辑工具栏 | `ScreenshotTool/Presentation/CaptureEditorToolbar.cs` | `Editing/CaptureAnnotationEditor.cs`、设置模型 |
+| 多个独立截图框 | `ScreenshotTool/Presentation/CaptureSessionCoordinator.cs`、`CaptureWindowParkingLease.cs` | `MainForm.cs`、`Core/CaptureSessionLimitPolicy.cs`、截图设置；活动会话独占后台输入，采集临时停放其他框及批注窗口 |
+| 编辑工具栏与拖动 | `ScreenshotTool/Presentation/CaptureEditorToolbar.cs`、`CaptureToolbarDragController.cs` | `CaptureOverlayForm.cs` 交互区域、`LiveAnnotationSession.cs` 指针钩子；内嵌/独立窗口共用拖动与会话位置 |
 | 标注模型 | `ScreenshotTool/Editing/AnnotationDocument.cs`、`Annotations.cs` | 命中测试、几何、缩放、旋转、对齐策略 |
 | 编辑元素复制粘贴 | `ScreenshotTool/Editing/AnnotationClipboard.cs`、`CaptureAnnotationEditor.cs` | `Annotations.cs` 独立副本、`CaptureOverlayForm.cs` 快捷键、通用剪贴板自定义数据；同会话保留对象，外部使用位图 |
 | 文本编辑 | `ScreenshotTool/Presentation/TransparentTextEditorControl.cs` | 文本标注、导出渲染、字体资源释放 |
-| 实时标注 | `ScreenshotTool/Presentation/LiveAnnotationSession.cs` | 屏幕录制、`ScreenshotTool.Contracts/ModuleContracts.cs` |
+| 实时标注 | `ScreenshotTool/Presentation/LiveAnnotationSession.cs`、`LiveAnnotationContextMenu.cs` | `LiveAnnotationKeyboardHook.cs`、`Core/LiveAnnotationToolShortcutState.cs`、屏幕录制、`ScreenshotTool.Contracts/ModuleContracts.cs`；右键元素菜单与短按/长按工具 |
 | 屏幕采集 | `ScreenshotTool/Infrastructure/ScreenCaptureService.cs`、`Core/DesktopSnapshot.cs`、`Presentation/CaptureBackgroundLayer.cs` | 虚拟桌面坐标、DPI、多屏、覆盖层停放与实时选区采集 |
 | 模块截图能力 | `ScreenshotTool/Presentation/CaptureFeatureSession.cs` | `ScreenshotTool.Contracts/ModuleContracts.cs`、模块运行时 |
 | 收藏最终截图 | `ScreenshotTool.Favorites/FavoritesModule.cs` | `CaptureOverlayForm.cs` 的 Export 渲染、可见文字命名元数据、字符串偏好快照、保存产物系统 |
 | 编辑策略与系数 | `ScreenshotTool/Core/AnnotationLayoutOptions.cs`、`DrawingToolCoefficients.cs` | 编辑设置页、用户偏好 |
 | 贴图创建与重新编辑 | `ScreenshotTool.PinnedImage/PinnedImageModule.cs`、`PinnedImageForm.cs`、`PinnedImageWindowLayout.cs` | 模块运行时、剪贴板/保存、`ExistingImageEditLayout.cs` |
+| 贴图接收外部图片 | `ScreenshotTool.PinnedImage/PinnedImageDragController.cs`、`src/Shared/WindowsArtifactDragDrop.cs` | `PinnedImageWindowFactory` 回调创建新贴图；不添加覆盖控件，文件拖出留在图库 |
 | 贴图原图文字选择 | `ScreenshotTool.PinnedImage/PinnedImageTextController.cs`、`ImageTextSelection.cs` | OCR 位置契约、蓝色预览高亮、阅读顺序选择、Alt 移动/缩放、文字剪贴板 |
 
 ## 修改规则
@@ -63,6 +65,8 @@ description: 定位并维护轻截的区域截图、选区交互、标注编辑�
 - 运行几何、命中、撤销/重做、输入和渲染相关逻辑测试。
 - 对输出变化做确定性像素或位图断言，并覆盖 Preview/Export 差异。
 - 涉及交互时运行截图 UI 预览，覆盖多屏、负坐标、取消和资源释放。
+- 贴图无遮挡显示运行 `ScreenshotTool.UiPreview --pin-clean-preview <PNG路径>`，检查窗口不创建覆盖控件及原拖出按钮区域仍显示原图；该检查不替代完整 OLE 拖拽交互验证。
+- 工具栏拖动使用 `ScreenshotTool.UiPreview --toolbar-drag-interaction` 验证真实鼠标输入、按钮、位置保留、交互区域与捕获丢失；负坐标与边界使用 `ScreenshotTool.LogicTests --toolbar-drag`。录屏联动另跑 `--toolbar-drag-recording <MP4路径>` 验证实际开始、拖动、暂停/继续、绘图模式拖动和停止保存，路径必须尚不存在。
 - 非模态截图浮层生命周期变更运行 `ScreenshotTool.UiPreview --capture-dispose-smoke`，覆盖窗口关闭后外层作用域再次释放。
 - 遵循根目录 `AGENTS.md` 的格式、测试与 Release 构建要求；未明确要求时不打包。
 
